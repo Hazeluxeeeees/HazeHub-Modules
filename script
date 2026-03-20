@@ -6,7 +6,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 -- === CONFIG & DATA ===
 local folderName = "Gemini_Configs"
 local lastConfigFile = "Gemini_LastConfig.txt"
-local Config = { WebhookURL = "", ToggleKey = "RightShift", AutoLoad = false }
+local Config = { 
+    WebhookURL = "", 
+    ToggleKey = "RightShift", 
+    AutoLoad = false,
+    AntiAFK = false -- Neuer Toggle-Wert
+}
 local SessionTotals = {} 
 local roundCount = 0
 local selectedConfig = "Default"
@@ -67,7 +72,7 @@ local function SendWebhook(rewardTable)
                     title = "🏆 Hazeluxe Bericht: " .. Player.Name,
                     color = 0x00FFAA,
                     fields = fields,
-                    footer = {text = " V6.8 • " .. os.date("%X")}
+                    footer = {text = " V6.9 • " .. os.date("%X")}
                 }}
             })
         })
@@ -82,7 +87,7 @@ Main.Position = UDim2.new(0.5, -250, 0.5, -160)
 Main.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 Instance.new("UICorner", Main)
 
--- Mobile Button
+-- Mobile Button (Verschiebbar)
 local MiniBtn = Instance.new("TextButton", ScreenGui)
 MiniBtn.Size = UDim2.new(0, 45, 0, 45)
 MiniBtn.Position = UDim2.new(0.1, 0, 0.1, 0)
@@ -90,7 +95,37 @@ MiniBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
 MiniBtn.Text = "G"
 MiniBtn.TextColor3 = Color3.new(1,1,1)
 Instance.new("UICorner", MiniBtn).CornerRadius = UDim.new(1, 0)
+
+-- Drag Logic für Mobile Button
+local dragging, dragInput, dragStart, startPos
+MiniBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MiniBtn.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+MiniBtn.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MiniBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
 MiniBtn.MouseButton1Click:Connect(function() Main.Visible = not Main.Visible end)
+
+-- PC Toggle (RightShift)
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if not gpe and input.KeyCode == Enum.KeyCode.RightShift then
+        Main.Visible = not Main.Visible
+    end
+end)
 
 -- Sidebar & Content
 local Sidebar = Instance.new("Frame", Main)
@@ -138,7 +173,7 @@ local SessionPage = CreateTab("Session")
 local ConfPage = CreateTab("Configs")
 local SettPage = CreateTab("Settings")
 
--- Webhook
+-- Webhook UI
 local WebInp = Instance.new("TextBox", WebPage)
 WebInp.Size = UDim2.new(1, -10, 0, 40)
 WebInp.PlaceholderText = "Discord Webhook URL..."
@@ -147,7 +182,30 @@ WebInp.TextColor3 = Color3.new(1,1,1)
 Instance.new("UICorner", WebInp)
 WebInp.FocusLost:Connect(function() Config.WebhookURL = WebInp.Text SaveConfig() end)
 
--- Config Dropdown & Creation
+-- Settings: Anti-AFK Toggle
+local AntiAFKBtn = Instance.new("TextButton", SettPage)
+AntiAFKBtn.Size = UDim2.new(1, -10, 0, 40)
+AntiAFKBtn.Text = "Anti-AFK: " .. (Config.AntiAFK and "AN" or "AUS")
+AntiAFKBtn.BackgroundColor3 = Config.AntiAFK and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(80, 80, 80)
+AntiAFKBtn.TextColor3 = Color3.new(1,1,1)
+Instance.new("UICorner", AntiAFKBtn)
+
+AntiAFKBtn.MouseButton1Click:Connect(function()
+    Config.AntiAFK = not Config.AntiAFK
+    AntiAFKBtn.Text = "Anti-AFK: " .. (Config.AntiAFK and "AN" or "AUS")
+    AntiAFKBtn.BackgroundColor3 = Config.AntiAFK and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(80, 80, 80)
+    SaveConfig()
+end)
+
+local Unload = Instance.new("TextButton", SettPage)
+Unload.Size = UDim2.new(1, -10, 0, 40)
+Unload.Text = "GUI ENTLADEN"
+Unload.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+Unload.TextColor3 = Color3.new(1,1,1)
+Instance.new("UICorner", Unload)
+Unload.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+
+-- === CONFIG LOGIK (Dropdown) ===
 local NewConf = Instance.new("TextBox", ConfPage)
 NewConf.Size = UDim2.new(1, -10, 0, 30)
 NewConf.PlaceholderText = "Name für neue Config..."
@@ -202,16 +260,13 @@ LoadB.Text = "AUSGEWÄHLTE LADEN"
 LoadB.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
 LoadB.TextColor3 = Color3.new(1,1,1)
 Instance.new("UICorner", LoadB)
-LoadB.MouseButton1Click:Connect(function() if LoadConfig(selectedConfig) then WebInp.Text = Config.WebhookURL end end)
-
--- Settings
-local Unload = Instance.new("TextButton", SettPage)
-Unload.Size = UDim2.new(1, -10, 0, 40)
-Unload.Text = "GUI ENTLADEN"
-Unload.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-Unload.TextColor3 = Color3.new(1,1,1)
-Instance.new("UICorner", Unload)
-Unload.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+LoadB.MouseButton1Click:Connect(function() 
+    if LoadConfig(selectedConfig) then 
+        WebInp.Text = Config.WebhookURL 
+        AntiAFKBtn.Text = "Anti-AFK: " .. (Config.AntiAFK and "AN" or "AUS")
+        AntiAFKBtn.BackgroundColor3 = Config.AntiAFK and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(80, 80, 80)
+    end 
+end)
 
 -- === SESSION LOGIK ===
 local function UpdateSession()
@@ -223,7 +278,6 @@ local function UpdateSession()
     end
 end
 
--- Reward Listener
 Remote.OnClientEvent:Connect(function(cat, data)
     if cat == "Rewards - Items" then 
         roundCount = roundCount + 1
@@ -243,7 +297,28 @@ end)
 -- Startup
 if isfile(lastConfigFile) then
     local last = readfile(lastConfigFile)
-    if LoadConfig(last) then WebInp.Text = Config.WebhookURL end
+    if LoadConfig(last) then 
+        WebInp.Text = Config.WebhookURL 
+        AntiAFKBtn.Text = "Anti-AFK: " .. (Config.AntiAFK and "AN" or "AUS")
+        AntiAFKBtn.BackgroundColor3 = Config.AntiAFK and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(80, 80, 80)
+    end
 end
 WebPage.Visible = true activePage = WebPage
 UpdateSession()
+
+-- === ANTI-AFK ENGINE ===
+task.spawn(function()
+    while task.wait(300) do
+        if Config.AntiAFK then
+            local Character = Player.Character
+            if Character then
+                local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+                if Humanoid then
+                    Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                    task.wait(0.2)
+                    Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+            end
+        end
+    end
+end)
