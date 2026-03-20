@@ -20,7 +20,9 @@ if makefolder then pcall(function() makefolder(folderName) end) end
 -- === SPEICHER FUNKTION ===
 local function SaveConfig()
     if writefile then
-        writefile(saveFile, HttpService:JSONEncode(Config))
+        pcall(function()
+            writefile(saveFile, HttpService:JSONEncode(Config))
+        end)
     end
 end
 
@@ -76,7 +78,7 @@ local function SendWebhook(rewardTable)
                         title = "🏆 Hazeluxe Bericht: " .. Player.Name,
                         color = 65535,
                         fields = fields,
-                        footer = {text = "V10 • " .. os.date("%X")}
+                        footer = {text = "V11 • " .. os.date("%X")}
                     }}
                 })
             })
@@ -90,7 +92,7 @@ local Main = Instance.new("Frame", ScreenGui); Main.BackgroundColor3 = Color3.fr
 local Sidebar = Instance.new("Frame", Main); Sidebar.BackgroundColor3 = Color3.fromRGB(10, 10, 10); Sidebar.BackgroundTransparency = 0.1; Instance.new("UICorner", Sidebar)
 local Content = Instance.new("Frame", Main); Content.BackgroundTransparency = 1
 
-local MiniBtn = Instance.new("TextButton", ScreenGui); MiniBtn.Size = UDim2.new(0, 50, 0, 50); MiniBtn.Position = UDim2.new(0, 10, 0.5, 0); MiniBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 255); MiniBtn.Text = "G"; MiniBtn.TextColor3 = Color3.new(1,1,1); Instance.new("UICorner", MiniBtn).CornerRadius = UDim.new(1, 0)
+local MiniBtn = Instance.new("TextButton", ScreenGui); MiniBtn.Size = UDim2.new(0, 45, 0, 45); MiniBtn.Position = UDim2.new(0, 10, 0.5, 0); MiniBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 255); MiniBtn.Text = "G"; MiniBtn.TextColor3 = Color3.new(1,1,1); Instance.new("UICorner", MiniBtn).CornerRadius = UDim.new(1, 0)
 
 MakeDraggable(Main, Main); MakeDraggable(MiniBtn, MiniBtn)
 
@@ -98,8 +100,8 @@ local TabHolder = Instance.new("Frame", Sidebar); TabHolder.Position = UDim2.new
 
 local activePage = nil
 local function CreateTab(name)
-    local B = Instance.new("TextButton", TabHolder); B.Size = UDim2.new(1, 0, 0, 35); B.Text = name; B.BackgroundColor3 = Color3.fromRGB(35, 35, 35); B.TextColor3 = Color3.new(1,1,1); B.TextScaled = true; Instance.new("UICorner", B)
-    local P = Instance.new("ScrollingFrame", Content); P.Size = UDim2.new(1, 0, 1, 0); P.Visible = false; P.BackgroundTransparency = 1; P.ScrollBarThickness = 2; P.AutomaticCanvasSize = Enum.AutomaticSize.Y; Instance.new("UIListLayout", P).Padding = UDim.new(0, 10)
+    local B = Instance.new("TextButton", TabHolder); B.Size = UDim2.new(1, 0, 0, 32); B.Text = name; B.BackgroundColor3 = Color3.fromRGB(35, 35, 35); B.TextColor3 = Color3.new(1,1,1); B.TextScaled = true; Instance.new("UICorner", B)
+    local P = Instance.new("ScrollingFrame", Content); P.Size = UDim2.new(1, 0, 1, 0); P.Visible = false; P.BackgroundTransparency = 1; P.ScrollBarThickness = 2; P.AutomaticCanvasSize = Enum.AutomaticSize.Y; Instance.new("UIListLayout", P).Padding = UDim.new(0, 8)
     B.MouseButton1Click:Connect(function() if activePage then activePage.Visible = false end P.Visible = true; activePage = P end)
     return P
 end
@@ -109,26 +111,26 @@ local SessionPage = CreateTab("Session")
 local SettPage = CreateTab("Settings")
 
 local function AddButton(parent, text, color, func)
-    local b = Instance.new("TextButton", parent); b.Size = UDim2.new(1, -10, 0, 40); b.Text = text; b.BackgroundColor3 = color; b.TextColor3 = Color3.new(1,1,1); b.TextScaled = true; Instance.new("UICorner", b)
+    local b = Instance.new("TextButton", parent); b.Size = UDim2.new(1, -10, 0, 38); b.Text = text; b.BackgroundColor3 = color; b.TextColor3 = Color3.new(1,1,1); b.TextScaled = true; Instance.new("UICorner", b)
     b.MouseButton1Click:Connect(func); return b
 end
 
 -- === SESSION TAB ===
-local SessionHeader = Instance.new("TextLabel", SessionPage); SessionHeader.Size = UDim2.new(1, 0, 0, 40); SessionHeader.BackgroundTransparency = 1; SessionHeader.TextColor3 = Color3.new(0, 1, 0.7); SessionHeader.TextScaled = true; SessionHeader.Text = "Runden: 0"
-local SessionList = Instance.new("Frame", SessionPage); SessionList.Size = UDim2.new(1, -10, 0, 0); SessionList.AutomaticSize = Enum.AutomaticSize.Y; SessionList.BackgroundTransparency = 1; Instance.new("UIListLayout", SessionList).Padding = UDim.new(0, 8)
+local SessionHeader = Instance.new("TextLabel", SessionPage); SessionHeader.Size = UDim2.new(1, 0, 0, 35); SessionHeader.BackgroundTransparency = 1; SessionHeader.TextColor3 = Color3.new(0, 1, 0.7); SessionHeader.TextScaled = true; SessionHeader.Text = "Runden: 0"
+local SessionList = Instance.new("Frame", SessionPage); SessionList.Size = UDim2.new(1, -10, 0, 0); SessionList.AutomaticSize = Enum.AutomaticSize.Y; SessionList.BackgroundTransparency = 1; Instance.new("UIListLayout", SessionList).Padding = UDim.new(0, 6)
 
 local function UpdateSessionUI()
     SessionHeader.Text = "Runden gespielt: " .. roundCount
     for _, v in pairs(SessionList:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
     for name, amt in pairs(SessionTotals) do
-        local frame = Instance.new("Frame", SessionList); frame.Size = UDim2.new(1, 0, 0, 45); frame.BackgroundColor3 = Color3.fromRGB(30, 35, 40); Instance.new("UICorner", frame)
+        local frame = Instance.new("Frame", SessionList); frame.Size = UDim2.new(1, 0, 0, 40); frame.BackgroundColor3 = Color3.fromRGB(30, 35, 40); Instance.new("UICorner", frame)
         local l = Instance.new("TextLabel", frame); l.Size = UDim2.new(1, -20, 1, 0); l.Position = UDim2.new(0, 10, 0, 0); l.BackgroundTransparency = 1; l.TextColor3 = Color3.new(1, 1, 1); l.TextScaled = true; l.Text = name .. ": " .. amt; l.TextXAlignment = Enum.TextXAlignment.Left
     end
 end
 AddButton(SessionPage, "RESET SESSION", Color3.fromRGB(130, 20, 20), function() SessionTotals = {}; roundCount = 0; UpdateSessionUI() end)
 
 -- === WEBHOOK TAB ===
-local WebInp = Instance.new("TextBox", WebPage); WebInp.Size = UDim2.new(1,-10,0,45); WebInp.PlaceholderText = "Webhook URL..."; WebInp.BackgroundColor3 = Color3.fromRGB(50,50,50); WebInp.TextColor3 = Color3.new(1,1,1); WebInp.TextScaled = true; Instance.new("UICorner", WebInp)
+local WebInp = Instance.new("TextBox", WebPage); WebInp.Size = UDim2.new(1,-10,0,40); WebInp.PlaceholderText = "Webhook URL..."; WebInp.BackgroundColor3 = Color3.fromRGB(50,50,50); WebInp.TextColor3 = Color3.new(1,1,1); WebInp.TextScaled = true; Instance.new("UICorner", WebInp)
 WebInp.FocusLost:Connect(function() 
     Config.WebhookURL = WebInp.Text 
     SaveConfig()
@@ -138,7 +140,8 @@ AddButton(WebPage, "TEST SENDEN", Color3.fromRGB(60, 60, 60), function() SendWeb
 -- === SETTINGS ===
 local function SetGUISize(mode)
     if mode == "Mobile" then
-        Main.Size = UDim2.new(0, 420, 0, 280); Sidebar.Size = UDim2.new(0, 120, 1, 0); Content.Position = UDim2.new(0, 130, 0, 10); Content.Size = UDim2.new(1, -140, 1, -20)
+        -- 15% Verkleinerung gegenüber vorher (420 -> 357, 280 -> 238)
+        Main.Size = UDim2.new(0, 357, 0, 238); Sidebar.Size = UDim2.new(0, 105, 1, 0); Content.Position = UDim2.new(0, 115, 0, 8); Content.Size = UDim2.new(1, -125, 1, -16)
     else
         Main.Size = UDim2.new(0, 520, 0, 340); Sidebar.Size = UDim2.new(0, 140, 1, 0); Content.Position = UDim2.new(0, 150, 0, 10); Content.Size = UDim2.new(1, -160, 1, -20)
     end
