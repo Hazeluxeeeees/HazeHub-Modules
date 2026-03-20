@@ -4,8 +4,8 @@ local Player = game:GetService("Players").LocalPlayer
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- === CONFIG & DATA ===
-local folderName = "Gemini_Configs"
-local lastConfigFile = "Gemini_LastConfig.txt"
+local folderName = "Configs"
+local lastConfigFile = "LastConfig.txt"
 local Config = { 
     WebhookURL = "", 
     ToggleKey = "RightShift", 
