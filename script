@@ -3,25 +3,33 @@
 --  Struktur : local Haze = {}  → kein 200-Locals-Limit möglich
 --  Autofarm : extern via GitHub loadstring
 --  _G.HazeShared = Brücke zum externen Modul
+--
+--  CHANGELOG V19.1:
+--    + Scan-Bestätigung (grüne Meldung nach DB-Update)
+--    + "Start Auto-Farm" Button im Game-Tab
+--      (erst klickbar nach DB geladen / Scan beendet)
+--    + Auto-Execute Toggle im Settings-Tab
+--      (speichert in HazeHUB_Settings.json)
+--    + Auto-Execute Reload nach Teleport
+--    + Verlangsamter Scan mit 2s Delay (Anti-Fail)
+--    + Location-Check via workspace:FindFirstChild("Lobby")
 -- ╚══════════════════════════════════════════════════════════╝
 
 -- ============================================================
 --  EINZIGE TOP-LEVEL-VARIABLE  (alle Daten + UI)
 -- ============================================================
 local Haze = {
-    -- Sub-Tabellen
     UI  = { Fr={}, Lbl={}, Btn={}, Inp={} },
     Svc = {},
     Tabs= {}, TBtns= {},
-    -- Config (persistiert in JSON)
     Config = {
-        WebhookURL = "",
-        UISize     = "PC",
-        ToggleKey  = "F4",
-        AutoRetry  = false,
-        SavedGoals = {},
+        WebhookURL   = "",
+        UISize       = "PC",
+        ToggleKey    = "F4",
+        AutoRetry    = false,
+        SavedGoals   = {},
+        AutoExecute  = false,   -- NEU: Auto-Execute Toggle
     },
-    -- Laufzeit-State
     S = {
         Goals         = {},
         GoalsNotified = {},
@@ -43,22 +51,24 @@ local Haze = {
         ScanDone      = false,
         ChapFolderRef = nil,
         ChildConn     = nil,
+        DBReady       = false,  -- NEU: DB geladen/Scan fertig
     },
-    -- Konstanten
     K = {
         INFO = { Exp=true, Gems=true, Gold=true },
         RARE = { ["Legendary Stone"]=true, ["Mythic Egg"]=true },
-        FOLDER    = "HazeHUB",
-        SAVE_FILE = "HazeHUB/HazeHUB_AutoSave.json",
-        AF_URL    = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/autofarm.lua",
+        FOLDER       = "HazeHUB",
+        SAVE_FILE    = "HazeHUB/HazeHUB_AutoSave.json",
+        SETTINGS_FILE= "HazeHUB/HazeHUB_Settings.json",  -- NEU
+        AF_URL       = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/autofarm.lua",
+        AUTOEXEC_URL = "https://raw.githubusercontent.com/Hazeluxeeeees/Tap-Sim/refs/heads/main/script", -- NEU
     },
 }
 
 -- ============================================================
---  SHARED ENVIRONMENT  (Brücke zum externen Modul)
+--  SHARED ENVIRONMENT
 -- ============================================================
 _G.HazeShared = {
-    Container = nil,          -- wird nach UI-Build gesetzt
+    Container = nil,
     Status    = "Wird geladen...",
     Version   = "1.0.0",
 }
@@ -73,7 +83,7 @@ Haze.Svc.Player = game:GetService("Players").LocalPlayer
 Haze.Svc.RS     = game:GetService("ReplicatedStorage")
 Haze.Svc.Tween  = game:GetService("TweenService")
 
-local H   = Haze           -- kurzer Alias
+local H   = Haze
 local S   = Haze.S
 local K   = Haze.K
 local Svc = Haze.Svc
@@ -91,7 +101,7 @@ end)
 if makefolder then pcall(function() makefolder(K.FOLDER) end) end
 
 -- ============================================================
---  SAVE / LOAD
+--  SAVE / LOAD (AutoSave Config)
 -- ============================================================
 local function SaveConfig()
     H.Config.SavedGoals = {}
@@ -112,10 +122,11 @@ local function LoadConfig()
     end)
     if not ok or not data then return end
     local C = H.Config
-    if data.WebhookURL ~= nil then C.WebhookURL = data.WebhookURL end
-    if data.UISize     ~= nil then C.UISize     = data.UISize     end
-    if data.ToggleKey  ~= nil then C.ToggleKey  = data.ToggleKey  end
-    if data.AutoRetry  ~= nil then C.AutoRetry  = data.AutoRetry  end
+    if data.WebhookURL  ~= nil then C.WebhookURL  = data.WebhookURL  end
+    if data.UISize      ~= nil then C.UISize      = data.UISize      end
+    if data.ToggleKey   ~= nil then C.ToggleKey   = data.ToggleKey   end
+    if data.AutoRetry   ~= nil then C.AutoRetry   = data.AutoRetry   end
+    if data.AutoExecute ~= nil then C.AutoExecute = data.AutoExecute end
     if data.SavedGoals and type(data.SavedGoals)=="table" then
         for _,g in ipairs(data.SavedGoals) do
             if g.item and tonumber(g.amount) then
@@ -125,6 +136,27 @@ local function LoadConfig()
             end
         end
     end
+end
+
+-- ============================================================
+--  SETTINGS FILE (Auto-Execute)
+-- ============================================================
+local function SaveSettings()
+    if not writefile then return end
+    pcall(function()
+        writefile(K.SETTINGS_FILE, Svc.Http:JSONEncode({
+            AutoExecute = H.Config.AutoExecute,
+        }))
+    end)
+end
+
+local function LoadSettings()
+    if not (isfile and isfile(K.SETTINGS_FILE)) then return end
+    local ok,data = pcall(function()
+        return Svc.Http:JSONDecode(readfile(K.SETTINGS_FILE))
+    end)
+    if not ok or not data then return end
+    if data.AutoExecute ~= nil then H.Config.AutoExecute = data.AutoExecute end
 end
 
 -- ============================================================
@@ -176,7 +208,7 @@ local function FireCreateAndStart(worldId, mode, chapId)
 end
 
 -- ============================================================
---  HELPER-FUNKTIONEN
+--  HELPER
 -- ============================================================
 local function FmtDur(sec)
     local h=math.floor(sec/3600); local m=math.floor((sec%3600)/60); local s=sec%60
@@ -198,8 +230,7 @@ local function GetInvAmt(itemName)
 end
 
 local function IsInLobby()
-    local pr = Svc.Player.PlayerGui:FindFirstChild("PlayRoom")
-    return not pr or not pr.Enabled
+    return game:GetService("Workspace"):FindFirstChild("Lobby") ~= nil
 end
 
 local function ClickBackToLobby()
@@ -210,6 +241,60 @@ local function ClickBackToLobby()
             :WaitForChild("ScrollingFrame",3):WaitForChild("Back To Lobby",3)
         if btn then btn.MouseButton1Click:Fire() end
     end)
+end
+
+-- ============================================================
+--  AUTO-EXECUTE LOGIC (NEU)
+--  Führt das externe Script nach Teleport aus
+-- ============================================================
+local _lastLobbyState = nil
+local _autoExecConn   = nil
+
+local function DoAutoExecute()
+    if not H.Config.AutoExecute then return end
+    print("[HazeHUB] Auto-Execute: Starte Script neu...")
+    task.spawn(function()
+        local ok, err = pcall(function()
+            loadstring(game:HttpGet(K.AUTOEXEC_URL))()
+        end)
+        if not ok then
+            warn("[HazeHUB] Auto-Execute Fehler:", err)
+        else
+            print("[HazeHUB] Auto-Execute: Script erfolgreich geladen.")
+        end
+    end)
+end
+
+local function StartAutoExecWatcher()
+    if _autoExecConn then
+        pcall(function() _autoExecConn:Disconnect() end)
+        _autoExecConn = nil
+    end
+    if not H.Config.AutoExecute then return end
+
+    _lastLobbyState = IsInLobby()
+
+    _autoExecConn = game:GetService("RunService").Heartbeat:Connect(function()
+        if not H.Config.AutoExecute then
+            _autoExecConn:Disconnect(); _autoExecConn=nil; return
+        end
+        local curLobby = IsInLobby()
+        if _lastLobbyState ~= nil and curLobby ~= _lastLobbyState then
+            _lastLobbyState = curLobby
+            task.wait(3) -- Stabilisierungspause nach Teleport
+            DoAutoExecute()
+        end
+        _lastLobbyState = curLobby
+    end)
+    print("[HazeHUB] Auto-Execute Watcher aktiv.")
+end
+
+local function StopAutoExecWatcher()
+    if _autoExecConn then
+        pcall(function() _autoExecConn:Disconnect() end)
+        _autoExecConn = nil
+    end
+    print("[HazeHUB] Auto-Execute Watcher gestoppt.")
 end
 
 -- ============================================================
@@ -887,12 +972,11 @@ refreshBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
--- ── MODUL-STATUS + INJECTION-CONTAINER ───────────────────────
--- Trennlinie
+-- ── TRENNLINIE ────────────────────────────────────────────────
 local sepLine=Instance.new("Frame",GamePage)
 sepLine.Size=UDim2.new(1,0,0,1); sepLine.BackgroundColor3=D.BorderCyan; sepLine.BackgroundTransparency=0.4; sepLine.BorderSizePixel=0
 
--- ModulStatus Label (startet ROT)
+-- ── MODUL-STATUS ─────────────────────────────────────────────
 local modulStatusCard=Card(GamePage,34); Pad(modulStatusCard,4,12,4,12)
 H.UI.Lbl.ModulStatus=Instance.new("TextLabel",modulStatusCard)
 H.UI.Lbl.ModulStatus.Size=UDim2.new(1,0,1,0); H.UI.Lbl.ModulStatus.BackgroundTransparency=1
@@ -901,7 +985,117 @@ H.UI.Lbl.ModulStatus.TextColor3=D.Red
 H.UI.Lbl.ModulStatus.TextSize=11; H.UI.Lbl.ModulStatus.Font=Enum.Font.GothamBold
 H.UI.Lbl.ModulStatus.TextXAlignment=Enum.TextXAlignment.Left
 
--- Leerer Container → wird von autofarm.lua befüllt
+-- ── SCAN-BESTÄTIGUNG (NEU) ───────────────────────────────────
+-- Diese Karte erscheint nach erfolgreichem DB-Scan/Load
+local dbConfirmCard=Card(GamePage,34); Pad(dbConfirmCard,4,12,4,12)
+dbConfirmCard.Visible=false
+H.UI.Lbl.DBConfirm=Instance.new("TextLabel",dbConfirmCard)
+H.UI.Lbl.DBConfirm.Size=UDim2.new(1,0,1,0); H.UI.Lbl.DBConfirm.BackgroundTransparency=1
+H.UI.Lbl.DBConfirm.Text="✅  Datenbank erfolgreich aktualisiert!"
+H.UI.Lbl.DBConfirm.TextColor3=D.GreenBright
+H.UI.Lbl.DBConfirm.TextSize=11; H.UI.Lbl.DBConfirm.Font=Enum.Font.GothamBold
+H.UI.Lbl.DBConfirm.TextXAlignment=Enum.TextXAlignment.Left
+Stroke(dbConfirmCard,D.GreenBright,1.5,0.1)
+
+-- Funktion zum Anzeigen der DB-Bestätigung
+local function ShowDBConfirm(msg)
+    pcall(function()
+        dbConfirmCard.Visible=true
+        H.UI.Lbl.DBConfirm.Text="✅  "..(msg or "Datenbank erfolgreich aktualisiert!")
+        H.UI.Lbl.DBConfirm.TextColor3=D.GreenBright
+        -- Grüner Puls-Effekt
+        task.spawn(function()
+            for _=1,3 do
+                Tw(dbConfirmCard,{BackgroundColor3=Color3.fromRGB(0,55,28)},TM)
+                task.wait(0.5)
+                Tw(dbConfirmCard,{BackgroundColor3=D.Card},TM)
+                task.wait(0.5)
+            end
+        end)
+    end)
+    -- Aktualisiere DBReady State → Start-Button freischalten
+    S.DBReady=true
+    pcall(function()
+        if H.UI.Btn.StartAutoFarm then
+            H.UI.Btn.StartAutoFarm.TextColor3=D.GreenBright
+            Stroke(H.UI.Btn.StartAutoFarm,D.GreenBright,2,0)
+            H.UI.Btn.StartAutoFarm.Text="▶  Start Auto-Farm"
+        end
+    end)
+end
+
+-- ── START AUTO-FARM BUTTON (NEU) ─────────────────────────────
+-- Separater Button – erst aktiv wenn DB bereit
+local afStartCard=Card(GamePage); Pad(afStartCard,8,10,8,10); VList(afStartCard,6)
+SecLbl(afStartCard,"AUTO-FARM STEUERUNG")
+
+H.UI.Lbl.AFDBHint=Instance.new("TextLabel",afStartCard)
+H.UI.Lbl.AFDBHint.Size=UDim2.new(1,0,0,16); H.UI.Lbl.AFDBHint.BackgroundTransparency=1
+H.UI.Lbl.AFDBHint.Text="⚠  DB muss geladen sein (Autofarm-Tab)"; H.UI.Lbl.AFDBHint.TextColor3=D.Yellow
+H.UI.Lbl.AFDBHint.TextSize=10; H.UI.Lbl.AFDBHint.Font=Enum.Font.GothamSemibold
+H.UI.Lbl.AFDBHint.TextXAlignment=Enum.TextXAlignment.Left
+
+H.UI.Btn.StartAutoFarm=Instance.new("TextButton",afStartCard)
+H.UI.Btn.StartAutoFarm.Size=UDim2.new(1,0,0,40)
+H.UI.Btn.StartAutoFarm.BackgroundColor3=Color3.fromRGB(14,18,34)  -- Ausgegraut bis DB bereit
+H.UI.Btn.StartAutoFarm.Text="🔒  Start Auto-Farm (DB benötigt)"
+H.UI.Btn.StartAutoFarm.TextColor3=D.TextLow
+H.UI.Btn.StartAutoFarm.TextSize=13; H.UI.Btn.StartAutoFarm.Font=Enum.Font.GothamBold
+H.UI.Btn.StartAutoFarm.AutoButtonColor=false; H.UI.Btn.StartAutoFarm.BorderSizePixel=0
+Corner(H.UI.Btn.StartAutoFarm,9); Stroke(H.UI.Btn.StartAutoFarm,D.TextLow,1,0.5)
+
+H.UI.Btn.StartAutoFarm.MouseButton1Click:Connect(function()
+    if not S.DBReady then
+        -- Schütteln/Flash wenn nicht bereit
+        H.UI.Lbl.AFDBHint.Text="❌  Bitte zuerst DB scannen/laden!"
+        H.UI.Lbl.AFDBHint.TextColor3=D.Red
+        task.delay(3, function()
+            pcall(function()
+                H.UI.Lbl.AFDBHint.Text="⚠  DB muss geladen sein (Autofarm-Tab)"
+                H.UI.Lbl.AFDBHint.TextColor3=D.Yellow
+            end)
+        end)
+        return
+    end
+    -- DB bereit → Signal an autofarm.lua senden
+    if _G.HazeShared and _G.HazeShared.StartFarmFromMain then
+        _G.HazeShared.StartFarmFromMain()
+    else
+        -- Fallback: Starte über shared State
+        if _G.HazeShared then
+            _G.HazeShared.Status = "Start angefordert..."
+        end
+    end
+    H.UI.Btn.StartAutoFarm.Text="⏳  Starte..."
+    H.UI.Lbl.AFDBHint.Text="✅  Farm wird gestartet..."
+    H.UI.Lbl.AFDBHint.TextColor3=D.Green
+    task.delay(3, function()
+        pcall(function()
+            H.UI.Btn.StartAutoFarm.Text="▶  Start Auto-Farm"
+        end)
+    end)
+end)
+
+-- Watcher: DB-Status regelmäßig prüfen und Button aktualisieren
+task.spawn(function()
+    while S.Running do
+        task.wait(2)
+        pcall(function()
+            if S.DBReady and H.UI.Btn.StartAutoFarm then
+                if H.UI.Btn.StartAutoFarm.TextColor3 ~= D.GreenBright then
+                    H.UI.Btn.StartAutoFarm.TextColor3=D.GreenBright
+                    H.UI.Btn.StartAutoFarm.BackgroundColor3=Color3.fromRGB(0,40,20)
+                    Stroke(H.UI.Btn.StartAutoFarm,D.GreenBright,2,0)
+                    H.UI.Btn.StartAutoFarm.Text="▶  Start Auto-Farm"
+                    H.UI.Lbl.AFDBHint.Text="✅  DB geladen – bereit zum Starten"
+                    H.UI.Lbl.AFDBHint.TextColor3=D.Green
+                end
+            end
+        end)
+    end
+end)
+
+-- ── INJECTION CONTAINER ───────────────────────────────────────
 H.UI.Fr.AutofarmInjection=Instance.new("Frame",GamePage)
 H.UI.Fr.AutofarmInjection.Name="AutofarmInjection"
 H.UI.Fr.AutofarmInjection.Size=UDim2.new(1,0,0,0)
@@ -909,7 +1103,6 @@ H.UI.Fr.AutofarmInjection.AutomaticSize=Enum.AutomaticSize.Y
 H.UI.Fr.AutofarmInjection.BackgroundTransparency=1
 H.UI.Fr.AutofarmInjection.BorderSizePixel=0
 
--- _G.HazeShared.Container setzen
 _G.HazeShared.Container = H.UI.Fr.AutofarmInjection
 
 -- ============================================================
@@ -949,7 +1142,6 @@ H.UI.Lbl.SessionTimer.Text="⏱  0m 00s"; H.UI.Lbl.SessionTimer.TextColor3=D.Tex
 H.UI.Lbl.SessionTimer.TextSize=11; H.UI.Lbl.SessionTimer.Font=Enum.Font.Gotham
 H.UI.Lbl.SessionTimer.TextXAlignment=Enum.TextXAlignment.Left
 
--- Info-Items (Exp/Gems/Gold)
 local infoCard=Card(SessPage); Pad(infoCard,8,10,8,10); VList(infoCard,5); SecLbl(infoCard,"ℹ  INFO-ITEMS")
 local infoRow=Instance.new("Frame",infoCard); infoRow.Size=UDim2.new(1,0,0,0); infoRow.AutomaticSize=Enum.AutomaticSize.Y; infoRow.BackgroundTransparency=1; HList(infoRow,8)
 H.UI.Lbl.InfoVals={}
@@ -960,7 +1152,6 @@ for _,iname in ipairs({"Exp","Gems","Gold"}) do
     H.UI.Lbl.InfoVals[iname]=iV
 end
 
--- Multi-Targeting
 local goalsCard=Card(SessPage); Pad(goalsCard,10,10,10,10); VList(goalsCard,8); SecLbl(goalsCard,"🎯  ZIELE  (AutoSave)")
 local gInputRow=Instance.new("Frame",goalsCard); gInputRow.Size=UDim2.new(1,0,0,30); gInputRow.BackgroundTransparency=1; HList(gInputRow,5)
 local gItemOuter,gItemBox=MkInput(gInputRow,"Item-Name..."); gItemOuter.Size=UDim2.new(0.50,0,0,30)
@@ -1091,7 +1282,6 @@ local function RebuildInventory()
         H.UI.Lbl.InvEmpty.TextColor3=D.TextLow; return
     end
     H.UI.Lbl.InvEmpty.Visible=false
-    -- ► Alphabetisch A → Z
     table.sort(children,function(a,b) return a.Name:lower()<b.Name:lower() end)
     for _,item in ipairs(children) do
         local iname,ival="",""
@@ -1110,7 +1300,6 @@ local function RebuildInventory()
             clickBtn.Size=UDim2.new(1,0,1,0); clickBtn.BackgroundTransparency=1
             clickBtn.Text=""; clickBtn.BorderSizePixel=0
             local cap=iname
-            -- ► Klick = Ziel in Session-Tab setzen
             clickBtn.MouseButton1Click:Connect(function()
                 SetGoalFromInventory(cap)
                 Tw(row,{BackgroundColor3=Color3.fromRGB(35,20,65)})
@@ -1187,6 +1376,50 @@ H.UI.Btn.KeyBtn.MouseButton1Click:Connect(function()
 end)
 MkLbl(kbCard,"Klicke, dann drücke die gewünschte Taste.",10,D.TextLow).Size=UDim2.new(1,0,0,14)
 
+-- ── AUTO-EXECUTE TOGGLE (NEU) ─────────────────────────────────
+local aeCard=Card(SettPage); Pad(aeCard,10,12,10,12); VList(aeCard,8)
+SecLbl(aeCard,"AUTO-EXECUTE")
+
+local aeInfoLbl=MkLbl(aeCard,"Nach jedem Teleport (Lobby ↔ Runde) wird das Script automatisch neu geladen.",10,D.TextLow)
+aeInfoLbl.Size=UDim2.new(1,0,0,28); aeInfoLbl.TextWrapped=true
+
+local aeRow=Instance.new("Frame",aeCard); aeRow.Size=UDim2.new(1,0,0,36); aeRow.BackgroundTransparency=1; HList(aeRow,10)
+
+H.UI.Lbl.AEStatus=Instance.new("TextLabel",aeRow)
+H.UI.Lbl.AEStatus.Size=UDim2.new(0.58,0,1,0); H.UI.Lbl.AEStatus.BackgroundTransparency=1
+H.UI.Lbl.AEStatus.Text="Auto-Execute: AUS"; H.UI.Lbl.AEStatus.TextColor3=D.TextMid
+H.UI.Lbl.AEStatus.TextSize=12; H.UI.Lbl.AEStatus.Font=Enum.Font.GothamBold
+H.UI.Lbl.AEStatus.TextXAlignment=Enum.TextXAlignment.Left
+
+H.UI.Btn.AEToggle=Instance.new("TextButton",aeRow)
+H.UI.Btn.AEToggle.Size=UDim2.new(0.40,0,0,32); H.UI.Btn.AEToggle.BackgroundColor3=D.CardHover
+H.UI.Btn.AEToggle.Text="⬜ AUS"; H.UI.Btn.AEToggle.TextColor3=D.TextLow
+H.UI.Btn.AEToggle.TextSize=12; H.UI.Btn.AEToggle.Font=Enum.Font.GothamBold
+H.UI.Btn.AEToggle.AutoButtonColor=false; H.UI.Btn.AEToggle.BorderSizePixel=0
+Corner(H.UI.Btn.AEToggle,8); Stroke(H.UI.Btn.AEToggle,D.TextLow,1,0.4)
+
+local function UpdateAEUI()
+    if H.Config.AutoExecute then
+        H.UI.Btn.AEToggle.Text="✅ AN"; H.UI.Btn.AEToggle.TextColor3=D.Green
+        H.UI.Lbl.AEStatus.Text="Auto-Execute: AN"; H.UI.Lbl.AEStatus.TextColor3=D.Green
+        Stroke(H.UI.Btn.AEToggle,D.Green,1.5,0); Tw(H.UI.Btn.AEToggle,{BackgroundColor3=D.GreenDark})
+        StartAutoExecWatcher()
+    else
+        H.UI.Btn.AEToggle.Text="⬜ AUS"; H.UI.Btn.AEToggle.TextColor3=D.TextLow
+        H.UI.Lbl.AEStatus.Text="Auto-Execute: AUS"; H.UI.Lbl.AEStatus.TextColor3=D.TextMid
+        Stroke(H.UI.Btn.AEToggle,D.TextLow,1,0.4); Tw(H.UI.Btn.AEToggle,{BackgroundColor3=D.CardHover})
+        StopAutoExecWatcher()
+    end
+end
+
+H.UI.Btn.AEToggle.MouseButton1Click:Connect(function()
+    H.Config.AutoExecute=not H.Config.AutoExecute
+    SaveConfig(); SaveSettings(); UpdateAEUI()
+end)
+
+local aeUrlLbl=MkLbl(aeCard,"Script-URL: "..K.AUTOEXEC_URL:sub(1,42).."...",9,D.TextLow)
+aeUrlLbl.Size=UDim2.new(1,0,0,14); aeUrlLbl.TextTruncate=Enum.TextTruncate.AtEnd
+
 -- Webhook
 local whCard=Card(SettPage); Pad(whCard,12,12,12,12); VList(whCard,8); SecLbl(whCard,"DISCORD WEBHOOK")
 local whOuter,whBox=MkInput(whCard,"https://discord.com/api/webhooks/..."); whOuter.Size=UDim2.new(1,0,0,36)
@@ -1201,6 +1434,7 @@ wTestBtn.MouseButton1Click:Connect(function() SendWebhook({},nil,nil) end)
 local unloadBtn=NeonBtn(SettPage,"⏏  GUI vollständig entladen",D.Red,34)
 unloadBtn.MouseButton1Click:Connect(function()
     S.Running=false; S.WhEnabled=false
+    StopAutoExecWatcher()
     if S.ChildConn then pcall(function() S.ChildConn:Disconnect() end) end
     if _G.HazeShared and _G.HazeShared.StopFarm then pcall(_G.HazeShared.StopFarm) end
     pcall(function() ScreenGui:Destroy() end)
@@ -1208,7 +1442,7 @@ unloadBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
---  MOBILE BUTTON  (Position: links-mitte 0,10,0.5,-25)
+--  MOBILE BUTTON
 -- ============================================================
 H.UI.Fr.MiniBtn=Instance.new("TextButton",ScreenGui)
 H.UI.Fr.MiniBtn.Name="MiniBtn"
@@ -1273,7 +1507,6 @@ end)
 
 -- ============================================================
 --  _G.HazeShared vollständig befüllen
---  (Externes Modul greift hier drauf zu)
 -- ============================================================
 _G.HazeShared.Config             = H.Config
 _G.HazeShared.State              = S
@@ -1284,6 +1517,7 @@ _G.HazeShared.GetInvAmt          = GetInvAmt
 _G.HazeShared.IsInLobby          = IsInLobby
 _G.HazeShared.ClickBackToLobby   = ClickBackToLobby
 _G.HazeShared.SaveConfig         = SaveConfig
+_G.HazeShared.SaveSettings       = SaveSettings     -- NEU
 _G.HazeShared.SendWebhook        = SendWebhook
 _G.HazeShared.UpdateSessionUI    = function() if UpdateSessionUI then pcall(UpdateSessionUI) end end
 _G.HazeShared.UpdateGoalsUI      = function() if UpdateGoalsUI   then pcall(UpdateGoalsUI)   end end
@@ -1298,9 +1532,20 @@ _G.HazeShared.MkLbl              = MkLbl;   _G.HazeShared.SecLbl=SecLbl
 _G.HazeShared.MkInput            = MkInput; _G.HazeShared.VList=VList
 _G.HazeShared.HList              = HList;   _G.HazeShared.Pad=Pad
 _G.HazeShared.Corner             = Corner;  _G.HazeShared.Stroke=Stroke
-_G.HazeShared.StopFarm           = nil    -- externes Modul setzt seine Stop-Fn ein
+_G.HazeShared.StopFarm           = nil
+_G.HazeShared.StartFarmFromMain  = nil  -- wird von autofarm.lua gesetzt
 
--- ModulStatus Callback (wird von autofarm.lua aufgerufen)
+-- NEU: DB-Bestätigungs-Callback (autofarm.lua ruft dies auf)
+_G.HazeShared.OnDBReady = function(chapCount, msg)
+    pcall(function()
+        S.DBReady = true
+        dbConfirmCard.Visible = true
+        local confirmMsg = msg or string.format("Datenbank erfolgreich aktualisiert! (%d Chapters)", chapCount or 0)
+        ShowDBConfirm(confirmMsg)
+        print("[HazeHUB] DB-Ready Callback: " .. confirmMsg)
+    end)
+end
+
 _G.HazeShared.SetModuleLoaded = function(version)
     pcall(function()
         _G.HazeShared.Version = version or "1.0.0"
@@ -1314,15 +1559,19 @@ end
 --  STARTUP
 -- ============================================================
 LoadConfig()
+LoadSettings()  -- NEU: Settings separat laden
+
 if not H.Config.ToggleKey  then H.Config.ToggleKey="F4"   end
 if H.Config.AutoRetry==nil then H.Config.AutoRetry=false   end
 if not H.Config.WebhookURL then H.Config.WebhookURL=""     end
 if not H.Config.UISize     then H.Config.UISize="PC"       end
+if H.Config.AutoExecute==nil then H.Config.AutoExecute=false end
 
 SetKeyDisplay(H.Config.ToggleKey)
 UpdateAutoRetryUI()
 SetGUISize(H.Config.UISize)
 H.UI.Inp.Webhook.Text=H.Config.WebhookURL
+UpdateAEUI()   -- NEU: Auto-Execute UI-State wiederherstellen
 
 SelectTab("Game")
 UpdateSessionUI()
@@ -1359,14 +1608,12 @@ task.spawn(function()
 end)
 
 -- ============================================================
---  EXTERNES MODUL LADEN  (sicherer Loader mit Status-Update)
+--  EXTERNES MODUL LADEN
 -- ============================================================
 task.spawn(function()
-    task.wait(1)  -- sicherstellen dass _G.HazeShared vollständig gesetzt ist
+    task.wait(1)
     local ok, err = pcall(function()
-        loadstring(game:HttpGet(
-            "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/autofarm.lua"
-        ))()
+        loadstring(game:HttpGet(K.AF_URL))()
     end)
     if not ok then
         pcall(function()
