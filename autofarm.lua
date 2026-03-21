@@ -1,11 +1,11 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – autofarm.lua  v1.9.0
+--  HazeHUB – autofarm.lua  v2.0.0
 --  GitHub: Hazeluxeeeees/HazeHub-Modules
---  ULTIMATIV: workspace:FindFirstChild("Lobby") Location-Check
---  Stabiler als jeder GUI-Pfad, sofort verfügbar
+--  FIX: UIGridLayout-Fehler, Kapitel-Auswahl 0.5s Delay,
+--       Item-Tracker mit Debug-Print, Queue-Cleanup, getconnections
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "1.9.0"
+local VERSION = "2.0.0"
 
 -- ============================================================
 --  WARTEN BIS SHARED-TABLE BEREIT  (max. 10s)
@@ -47,7 +47,7 @@ local VIM         = game:GetService("VirtualInputManager")
 local VirtualUser = game:GetService("VirtualUser")
 local LP          = game:GetService("Players").LocalPlayer
 local RS          = game:GetService("ReplicatedStorage")
-local WS          = workspace   -- direkte Referenz
+local WS          = game:GetService("Workspace")
 
 -- ============================================================
 --  ANTI-AFK
@@ -61,7 +61,6 @@ pcall(function()
         print("[HazeHub] Anti-AFK: Idle abgefangen.")
     end)
 end)
-
 task.spawn(function()
     while true do
         task.wait(480)
@@ -132,75 +131,26 @@ _G.AutoFarmRunning = false
 _G.InGameServer    = false
 
 -- ============================================================
---  ★ ULTIMATIVER WORKSPACE-LOCATION-CHECK
---
---  workspace:FindFirstChild("Lobby") existiert  → Lobby
---  workspace:FindFirstChild("Lobby") == nil     → In einer Runde
---
---  Dieser Check ist sofort verfügbar und ändert sich nie,
---  unabhängig davon wie schnell oder langsam das GUI lädt.
+--  WORKSPACE-LOCATION CHECK
 -- ============================================================
-local function IsLobby()
+local function CheckIsLobby()
     return WS:FindFirstChild("Lobby") ~= nil
 end
 
-local function IsInRound()
-    return WS:FindFirstChild("Lobby") == nil
-end
-
--- Aktualisiert _G.InGameServer anhand von Workspace
 local function UpdateLocationState()
-    if IsLobby() then
-        _G.InGameServer = false
-    else
-        _G.InGameServer = true
-    end
+    _G.InGameServer = not CheckIsLobby()
 end
 
--- Blockierendes Warten bis Lobby erkannt wird (max. maxSec Sekunden)
-local function WaitUntilLobby(maxSec)
-    maxSec = maxSec or 30
-    local deadline = os.clock() + maxSec
-    while os.clock() < deadline do
-        if IsLobby() then return true end
-        task.wait(1)
-    end
-    return IsLobby()  -- finaler Status
-end
-
--- Blockierendes Warten bis Runde erkannt wird (max. maxSec Sekunden)
-local function WaitUntilInRound(maxSec)
-    maxSec = maxSec or 30
-    local deadline = os.clock() + maxSec
-    while os.clock() < deadline do
-        if IsInRound() then return true end
-        task.wait(1)
-    end
-    return IsInRound()
-end
-
--- ★ Haupt-Location-Update-Loop (alle 2 Sekunden)
+-- Hintergrund-Loop alle 2s
 task.spawn(function()
     while true do
         task.wait(2)
-        UpdateLocationState()
-        -- Live-Indikator im GUI
-        pcall(function()
-            if AF.UI.Lbl.LocStatus then
-                if _G.InGameServer then
-                    AF.UI.Lbl.LocStatus.Text      = "Ort: IN RUNDE  (Lobby fehlt im Workspace)"
-                    AF.UI.Lbl.LocStatus.TextColor3 = D.Orange
-                else
-                    AF.UI.Lbl.LocStatus.Text      = "Ort: LOBBY  (workspace.Lobby gefunden)"
-                    AF.UI.Lbl.LocStatus.TextColor3 = D.Green
-                end
-            end
-        end)
+        pcall(UpdateLocationState)
     end
 end)
 
 -- ============================================================
---  INVENTAR  (Live aus ReplicatedStorage)
+--  INVENTAR (Live aus ReplicatedStorage)
 -- ============================================================
 local function GetLiveInvAmt(itemName)
     local n = 0
@@ -211,7 +161,8 @@ local function GetLiveInvAmt(itemName)
         local item = f:FindFirstChild(itemName)
         if not item then return end
         local vc = item:FindFirstChild("Value") or item:FindFirstChild("Amount")
-        if vc then n = tonumber(vc.Value) or 0
+        if vc then
+            n = tonumber(vc.Value) or 0
         elseif item:IsA("IntValue") or item:IsA("NumberValue") then
             n = tonumber(item.Value) or 0
         end
@@ -220,22 +171,12 @@ local function GetLiveInvAmt(itemName)
 end
 
 -- ============================================================
---  ★ FORCE BACK TO LOBBY (getconnections)
---  Exakter Pfad: PlayerGui.Settings.Main.Base.Space.
---                ScrollingFrame["Back To Lobby"]
---  Wird NUR ausgeführt wenn IsInRound() == true
+--  FORCE BACK TO LOBBY via getconnections
 -- ============================================================
 local function ForceBackToLobby()
-    -- Sicherheitsprüfung: nur aus einer Runde heraus
-    if not IsInRound() then
-        warn("[HazeHub] ForceBackToLobby: Wir sind bereits in der Lobby – abgebrochen.")
-        return false
-    end
-
-    print("[HazeHub] ForceBackToLobby: Führe Lobby-Exit aus...")
+    print("[HazeHub] ForceBackToLobby: Starte via getconnections...")
     local clicked = false
 
-    -- ★ Methode 1: getconnections auf exaktem Pfad
     pcall(function()
         local btn = LP.PlayerGui
             :WaitForChild("Settings",       4)
@@ -244,41 +185,31 @@ local function ForceBackToLobby()
             :WaitForChild("Space",          4)
             :WaitForChild("ScrollingFrame", 4)
             :WaitForChild("Back To Lobby",  4)
-
         if not btn then return end
 
-        -- getconnections (Exploit-API)
         local conns
         pcall(function() conns = getconnections(btn.MouseButton1Click) end)
-
         if conns and #conns > 0 then
             for _, conn in ipairs(conns) do
                 pcall(function() conn:Fire() end)
             end
             clicked = true
-            print(string.format("[HazeHub] ForceBackToLobby: getconnections OK (%d Connections).", #conns))
+            print(string.format("[HazeHub] ForceBackToLobby: getconnections OK (%d Conn).", #conns))
         else
-            -- Fallback: direktes Fire
             btn.MouseButton1Click:Fire()
             clicked = true
             print("[HazeHub] ForceBackToLobby: MouseButton1Click:Fire() Fallback.")
         end
     end)
 
-    -- Methode 2: Shared ClickBackToLobby
     if not clicked then
         pcall(function()
-            if HS.ClickBackToLobby then
-                HS.ClickBackToLobby()
-                clicked = true
-                print("[HazeHub] ForceBackToLobby: HS.ClickBackToLobby() Fallback.")
-            end
+            if HS.ClickBackToLobby then HS.ClickBackToLobby(); clicked = true end
         end)
+        if clicked then print("[HazeHub] ForceBackToLobby: HS.ClickBackToLobby() Backup.") end
     end
 
-    if not clicked then
-        warn("[HazeHub] ForceBackToLobby: Alle Methoden fehlgeschlagen.")
-    end
+    if not clicked then warn("[HazeHub] ForceBackToLobby: Alle Methoden fehlgeschlagen.") end
     return clicked
 end
 
@@ -294,7 +225,7 @@ local function SaveState()
             ts      = os.time(),
         }))
     end)
-    print("[HazeHub] State gespeichert: AutoFarmRunning=" .. tostring(_G.AutoFarmRunning))
+    print("[HazeHub] State: AutoFarmRunning=" .. tostring(_G.AutoFarmRunning))
 end
 
 local function LoadState()
@@ -345,7 +276,7 @@ local function RemoveFromQueue(itemName)
         if AF.Queue[i].item == itemName then table.remove(AF.Queue, i) end
     end
     SaveQueueFile()
-    print(string.format("[HazeHub] '%s' aus Queue entfernt.", itemName))
+    print(string.format("[HazeHub] '%s' aus Queue entfernt + Queue.json gespeichert.", itemName))
 end
 
 local function SyncInventoryWithQueue()
@@ -400,47 +331,41 @@ local function ClearDB()
 end
 
 -- ============================================================
---  GAME-TAB RE-INIT (mit Retry alle 2s)
+--  GAME-TAB RE-INIT
 -- ============================================================
-local function WaitForChapterFolderWithRetry(maxWaitSec)
-    maxWaitSec = maxWaitSec or 60
-    local deadline = os.clock() + maxWaitSec
+local function WaitForChapterFolderWithRetry(maxSec)
+    maxSec = maxSec or 40
+    local deadline = os.clock() + maxSec
     while os.clock() < deadline do
         local f = nil
         pcall(function()
             f = LP.PlayerGui
-                :WaitForChild("PlayRoom",  2)
-                :WaitForChild("Main",      2)
-                :WaitForChild("GameStage", 2)
-                :WaitForChild("Main",      2)
-                :WaitForChild("Base",      2)
-                :WaitForChild("Chapter",   2)
+                :WaitForChild("PlayRoom",  2):WaitForChild("Main",     2)
+                :WaitForChild("GameStage", 2):WaitForChild("Main",     2)
+                :WaitForChild("Base",      2):WaitForChild("Chapter",  2)
         end)
         if f and f.Parent then
-            print("[HazeHub] Chapter-Ordner gefunden: " .. f:GetFullName())
+            print("[HazeHub] Chapter-Ordner: " .. f:GetFullName())
             return f
         end
-        print("[HazeHub] Chapter-Ordner nicht da – Retry in 2s...")
+        print("[HazeHub] Chapter-Ordner noch nicht da – Retry in 2s...")
         task.wait(2)
     end
-    warn("[HazeHub] Chapter-Ordner nicht gefunden nach " .. maxWaitSec .. "s.")
+    warn("[HazeHub] Chapter-Ordner nicht gefunden.")
     return nil
 end
 
 local function ReinitGameTab()
-    print("[HazeHub] Game-Tab Re-Init gestartet...")
-    pcall(function()
-        if ST then ST.ChapFolderRef = nil end
-    end)
-    local chapFolder = WaitForChapterFolderWithRetry(30)
-    if chapFolder then
+    print("[HazeHub] Game-Tab Re-Init...")
+    pcall(function() if ST then ST.ChapFolderRef = nil end end)
+    local f = WaitForChapterFolderWithRetry(30)
+    if f then
         pcall(function()
-            if ST then ST.ChapFolderRef = chapFolder; ST.ScanDone = true end
+            if ST then ST.ChapFolderRef = f; ST.ScanDone = true end
         end)
-        print("[HazeHub] Game-Tab Re-Init abgeschlossen.")
-        return chapFolder
+        print("[HazeHub] Game-Tab Re-Init OK.")
     end
-    return nil
+    return f
 end
 
 -- ============================================================
@@ -475,6 +400,62 @@ local function SetScanProgress(current, total, label)
 end
 
 -- ============================================================
+--  ★ PARSE ITEMS – NUR Frame-Objekte, niemals Layouts
+-- ============================================================
+--  Garantiert kein UIGridLayout/UIListLayout Fehler:
+--  Einzige Bedingung: child:IsA("Frame")
+local function ParseItems(itemsList)
+    local items = {}
+    if not itemsList then return items end
+
+    for _, child in pairs(itemsList:GetChildren()) do
+        -- ★ NUR Frame-Instanzen verarbeiten
+        if not child:IsA("Frame") then continue end
+
+        pcall(function()
+            local iname, rate, amt = "", 0, 1
+
+            -- Versuche Info-Unterordner
+            local inf = child:FindFirstChild("Info")
+            if inf then
+                local nameV = inf:FindFirstChild("ItemNames")
+                local rateV = inf:FindFirstChild("DropRate")
+                local amtV  = inf:FindFirstChild("DropAmount")
+                iname = nameV and tostring(nameV.Value) or ""
+                rate  = rateV and tonumber(rateV.Value) or 0
+                amt   = amtV  and tonumber(amtV.Value)  or 1
+            else
+                -- Direkte Kinder des Frame
+                local nameV = child:FindFirstChild("ItemNames")
+                local rateV = child:FindFirstChild("DropRate")
+                local amtV  = child:FindFirstChild("DropAmount")
+                if nameV then
+                    iname = tostring(nameV.Value)
+                    rate  = rateV and tonumber(rateV.Value) or 0
+                    amt   = amtV  and tonumber(amtV.Value)  or 1
+                end
+            end
+
+            if iname ~= "" then
+                items[iname] = {dropRate = rate, dropAmount = amt}
+                print(string.format("[HazeHub] Scan Item: %s (Rate: %.1f%%)", iname, rate))
+            end
+        end)
+    end
+    return items
+end
+
+-- ★ ClearItemsList: nur Frame-Kinder entfernen
+local function ClearItemsList(itemsList)
+    if not itemsList then return end
+    pcall(function()
+        for _, child in pairs(itemsList:GetChildren()) do
+            if child:IsA("Frame") then child:Destroy() end
+        end
+    end)
+end
+
+-- ============================================================
 --  SCAN-HELFER
 -- ============================================================
 local function GetItemsList(timeoutSec)
@@ -483,12 +464,9 @@ local function GetItemsList(timeoutSec)
     while os.clock() < deadline do
         pcall(function()
             result = LP.PlayerGui
-                :WaitForChild("PlayRoom",  1)
-                :WaitForChild("Main",      1)
-                :WaitForChild("GameStage", 1)
-                :WaitForChild("Main",      1)
-                :WaitForChild("Base",      1)
-                :WaitForChild("Rewards",   1)
+                :WaitForChild("PlayRoom",  1):WaitForChild("Main",      1)
+                :WaitForChild("GameStage", 1):WaitForChild("Main",      1)
+                :WaitForChild("Base",      1):WaitForChild("Rewards",   1)
                 :WaitForChild("ItemsList", 1)
         end)
         if result and result.Parent then break end
@@ -497,73 +475,29 @@ local function GetItemsList(timeoutSec)
     return result
 end
 
-local function WaitForItemsFill(itemsList, timeoutSec)
+local function WaitForItems(itemsList, timeoutSec)
     if not itemsList then return false end
     timeoutSec = timeoutSec or 3
-    if #itemsList:GetChildren() > 0 then return true end
+    -- Zähle nur Frame-Kinder (nicht Layouts!)
+    local function frameCount()
+        local c = 0
+        for _, child in pairs(itemsList:GetChildren()) do
+            if child:IsA("Frame") then c = c + 1 end
+        end
+        return c
+    end
+    if frameCount() > 0 then return true end
     local filled = false
-    local conn = itemsList.ChildAdded:Connect(function() filled = true end)
+    local conn = itemsList.ChildAdded:Connect(function(child)
+        if child:IsA("Frame") then filled = true end
+    end)
     local deadline = os.clock() + timeoutSec
     while os.clock() < deadline and not filled do
-        if #itemsList:GetChildren() > 0 then filled = true; break end
+        if frameCount() > 0 then filled = true; break end
         task.wait(0.15)
     end
     pcall(function() conn:Disconnect() end)
     return filled
-end
-
--- ★ SCANNER-FIX: nur Frame-Objekte scannen, Layouts/UIObjects überspringen
-local function ParseItems(itemsList)
-    local items = {}
-    if not itemsList then return items end
-    for _, child in ipairs(itemsList:GetChildren()) do
-        -- ★ Nur echte GuiObject-Frames verarbeiten, UI-Layouts etc. überspringen
-        if not child:IsA("Frame") then continue end
-
-        pcall(function()
-            -- Primär: Info-Unterordner
-            local inf = child:FindFirstChild("Info")
-            if inf then
-                local nameV = inf:FindFirstChild("ItemNames")
-                local rateV = inf:FindFirstChild("DropRate")
-                local amtV  = inf:FindFirstChild("DropAmount")
-                local iname = nameV and tostring(nameV.Value) or ""
-                local rate  = rateV and tonumber(rateV.Value) or 0
-                local amt   = amtV  and tonumber(amtV.Value)  or 1
-                if iname ~= "" then
-                    items[iname] = {dropRate=rate, dropAmount=amt}
-                    print(string.format("[HazeHub] Item: %s (Rate: %.1f%%, Menge: %d)",
-                        iname, rate, amt))
-                end
-                return
-            end
-
-            -- Fallback: direkte Wert-Objekte im Frame
-            local nameV = child:FindFirstChild("ItemNames")
-            local rateV = child:FindFirstChild("DropRate")
-            local amtV  = child:FindFirstChild("DropAmount")
-            if nameV then
-                local iname = tostring(nameV.Value)
-                local rate  = rateV and tonumber(rateV.Value) or 0
-                local amt   = amtV  and tonumber(amtV.Value)  or 1
-                if iname ~= "" then
-                    items[iname] = {dropRate=rate, dropAmount=amt}
-                    print(string.format("[HazeHub] Item (direkt): %s (Rate: %.1f%%)", iname, rate))
-                end
-            end
-        end)
-    end
-    return items
-end
-
--- Nur Frame-Kinder leeren (keine Layouts zerstören)
-local function ClearFrameChildren(itemsList)
-    if not itemsList then return end
-    pcall(function()
-        for _, child in ipairs(itemsList:GetChildren()) do
-            if child:IsA("Frame") then child:Destroy() end
-        end
-    end)
 end
 
 local function ClickChapterButton(chapBase, worldId, chapId)
@@ -589,16 +523,8 @@ end
 -- ============================================================
 local function ScanAllRewards(onProgress)
     if AF.Scanning then return false end
-
-    -- Scan nur in der Lobby starten
-    if IsInRound() then
-        pcall(function() onProgress("X Scan nur in der Lobby möglich.") end)
-        warn("[HazeHub] Scan abgebrochen: Wir sind in einer Runde.")
-        return false
-    end
-
     if not HS.IsScanDone() then
-        pcall(function() onProgress("X Weltdaten fehlen – Game-Tab erst laden.") end)
+        pcall(function() onProgress("X Weltdaten fehlen.") end)
         return false
     end
 
@@ -619,15 +545,8 @@ local function ScanAllRewards(onProgress)
         end
     end
 
-    local total   = #tasks
-    local scanned = 0
-    local failed  = 0
-
-    if total == 0 then
-        warn("[HazeHub] Keine Chapters für Scan gefunden.")
-        AF.Scanning = false
-        return false
-    end
+    local total = #tasks; local scanned = 0; local failed = 0
+    if total == 0 then AF.Scanning=false; return false end
 
     local chapBase = nil
     pcall(function()
@@ -637,25 +556,19 @@ local function ScanAllRewards(onProgress)
             :WaitForChild("Base",      5):WaitForChild("Chapter",  5)
     end)
 
+    -- ★ PlayRoom Remote feuern um Menü zu initialisieren
     Fire("Create"); task.wait(0.8)
     local itemsList = GetItemsList(5)
 
     for _, t in ipairs(tasks) do
         if not AF.Scanning then break end
-
-        -- ★ Scan-Schleife abbrecen wenn wir plötzlich in einer Runde landen
-        if IsInRound() then
-            warn("[HazeHub] Scan unterbrochen: Runde erkannt!")
-            break
-        end
-
         scanned = scanned + 1
+
         SetScanProgress(scanned, total, string.format("Scanne: %s %s", t.worldId, t.chapId))
         pcall(function()
             onProgress(string.format("Scanne %d/%d: %s %s", scanned, total, t.worldId, t.chapId))
         end)
-        print(string.format("[HazeHub] Scanne Welt: %s  (Chapter: %s,  %d/%d)",
-            t.worldId, t.chapId, scanned, total))
+        print(string.format("[HazeHub] Scanne: %s > %s (%d/%d)", t.worldId, t.chapId, scanned, total))
 
         if not itemsList or not itemsList.Parent then
             Fire("Create"); task.wait(0.8)
@@ -663,35 +576,37 @@ local function ScanAllRewards(onProgress)
         end
 
         -- ★ Nur Frame-Kinder leeren
-        ClearFrameChildren(itemsList)
+        ClearItemsList(itemsList)
         task.wait(0.1)
 
+        -- ★ Welt/Modus setzen
         pcall(function()
             if     t.mode=="Story"    then Fire("Change-World", {World=t.worldId})
             elseif t.mode=="Ranger"   then Fire("Change-Mode",  {KeepWorld=t.worldId, Mode="Ranger Stage"})
             elseif t.mode=="Calamity" then Fire("Change-Mode",  {Mode="Calamity"}) end
         end)
-        task.wait(0.25)
-        Fire("Change-Chapter", {Chapter=t.chapId})
-        task.wait(0.25)
 
+        -- ★ 0.5s Delay zwischen Welten-Wechsel und Kapitel-Auswahl
+        task.wait(0.5)
+
+        -- ★ Kapitel per Remote + GUI-Klick
+        Fire("Change-Chapter", {Chapter=t.chapId})
+        task.wait(0.3)
         if chapBase then ClickChapterButton(chapBase, t.worldId, t.chapId) end
 
-        if not itemsList or not itemsList.Parent then
-            itemsList = GetItemsList(3)
-        end
+        if not itemsList or not itemsList.Parent then itemsList = GetItemsList(3) end
 
-        local got = WaitForItemsFill(itemsList, 3)
+        -- Warten auf Frame-Kinder
+        local got = WaitForItems(itemsList, 3)
         if got and itemsList then
-            -- ★ Nur Frames scannen
-            local items = ParseItems(itemsList)
+            local items = ParseItems(itemsList)    -- ★ nur Frame-Objekte
             local cnt = 0; for _ in pairs(items) do cnt = cnt + 1 end
             if cnt > 0 then
                 AF.RewardDatabase[t.chapId] = {world=t.worldId, mode=t.mode, items=items}
-                print(string.format("[HazeHub] OK: %s – %d Items.", t.chapId, cnt))
+                print(string.format("[HazeHub] OK: %s – %d Items gespeichert.", t.chapId, cnt))
             else
                 failed = failed + 1
-                warn(string.format("[HazeHub] LEER: %s.", t.chapId))
+                warn(string.format("[HazeHub] LEER: %s (keine Frame-Items).", t.chapId))
             end
         else
             failed = failed + 1
@@ -699,6 +614,7 @@ local function ScanAllRewards(onProgress)
             pcall(function() onProgress("TIMEOUT: " .. t.chapId) end)
         end
 
+        -- Reset für nächstes Chapter
         pcall(function()
             Fire("Submit"); task.wait(0.15)
             Fire("Create"); task.wait(0.3)
@@ -709,24 +625,20 @@ local function ScanAllRewards(onProgress)
     if DBCount() > 0 then SaveDB() end
     AF.Scanning = false
 
-    local c   = DBCount()
-    local ok  = c > 0
-    local msg = string.format("%s Scan: %d/%d  (%d Fehler)",
-        ok and "OK" or "X", c, total, failed)
+    local c  = DBCount()
+    local ok = c > 0
+    local msg = string.format("%s Scan: %d/%d (%d Fehler)", ok and "OK" or "X", c, total, failed)
     print("[HazeHub] " .. msg)
     pcall(function() onProgress(msg) end)
     pcall(function()
         local col = ok and D.Green or D.Orange
-        AF.UI.Lbl.ScanProgress.Text       = msg
-        AF.UI.Lbl.ScanProgress.TextColor3 = col
-        Tw(AF.UI.Fr.ScanBarFill, {
-            Size             = UDim2.new(ok and 1 or 0, 0, 1, 0),
-            BackgroundColor3 = col,
-        }, TM)
-        AF.UI.Lbl.DBStatus.Text           = msg
-        AF.UI.Lbl.DBStatus.TextColor3     = col
-        AF.UI.Btn.ForceRescan.Text        = "DATENBANK NEU SCANNEN"
-        AF.UI.Btn.ForceRescan.TextColor3  = Color3.new(1,1,1)
+        AF.UI.Lbl.ScanProgress.Text        = msg
+        AF.UI.Lbl.ScanProgress.TextColor3  = col
+        Tw(AF.UI.Fr.ScanBarFill, {Size=UDim2.new(ok and 1 or 0,0,1,0), BackgroundColor3=col}, TM)
+        AF.UI.Lbl.DBStatus.Text            = msg
+        AF.UI.Lbl.DBStatus.TextColor3      = col
+        AF.UI.Btn.ForceRescan.Text         = "DATENBANK NEU SCANNEN"
+        AF.UI.Btn.ForceRescan.TextColor3   = Color3.new(1,1,1)
     end)
     return ok
 end
@@ -745,8 +657,7 @@ local function FindBestChapter(itemName)
         end
     end
     if best then
-        print(string.format("[HazeHub] Ziel-Item: %s  Welt: %s  Chapter: %s  (%.1f%%)",
-            itemName, bestWorld, best, bestRate))
+        print(string.format("[HazeHub] Best: %s in %s [%s] (%.1f%%)", best, bestWorld, bestMode, bestRate))
     else
         warn("[HazeHub] '" .. itemName .. "' nicht in DB.")
     end
@@ -754,29 +665,34 @@ local function FindBestChapter(itemName)
 end
 
 -- ============================================================
---  RAUM STARTEN  (BLOCKIERT wenn in Runde!)
+--  RAUM STARTEN (★ nur wenn workspace.Lobby existiert!)
 -- ============================================================
 local function FireRoomSequence(worldId, mode, chapId)
-    -- ★ Workspace-Check: NIEMALS in einer Runde feuern
-    if IsInRound() then
-        warn("[HazeHub] FireRoomSequence BLOCKIERT – workspace.Lobby fehlt (Runde läuft)!")
-        return false
+    if not CheckIsLobby() then
+        warn("[HazeHub] FireRoomSequence BLOCKIERT – kein workspace.Lobby!")
+        return
     end
     print(string.format("[HazeHub] Erstelle Raum: %s | %s | %s", worldId, mode, chapId))
     task.spawn(function()
         pcall(function()
-            Fire("Create");                                         task.wait(0.35)
+            -- ★ Menü initialisieren
+            Fire("Create");                                          task.wait(0.35)
+
+            -- ★ Welt/Modus setzen
             if     mode=="Story"    then Fire("Change-World", {World=worldId})
             elseif mode=="Ranger"   then Fire("Change-Mode",  {KeepWorld=worldId, Mode="Ranger Stage"})
             elseif mode=="Calamity" then Fire("Change-Mode",  {Mode="Calamity"}) end
-                                                                    task.wait(0.35)
-            Fire("Change-Chapter", {Chapter=chapId});               task.wait(0.35)
-            Fire("Submit");                                         task.wait(0.5)
+
+            -- ★ 0.5s Delay damit Server hinterherkommt
+            task.wait(0.5)
+
+            -- ★ Kapitel-ID senden
+            Fire("Change-Chapter", {Chapter=chapId});                task.wait(0.35)
+            Fire("Submit");                                          task.wait(0.5)
             Fire("Start")
-            print("[HazeHub] Raum gestartet.")
+            print("[HazeHub] Raum gestartet: " .. chapId)
         end)
     end)
-    return true
 end
 
 -- ============================================================
@@ -863,108 +779,110 @@ UpdateQueueUI = function()
 end
 
 -- ============================================================
---  ★ HAUPT-FARM-LOGIK  (Workspace-basiert getrennt)
+--  ★ RUNDEN-MONITOR (kein workspace.Lobby = Runde)
+--  Nur Inventar prüfen, KEINE Create/Start Remotes
 -- ============================================================
-
-local function GetNextItem()
-    for _, q in ipairs(AF.Queue) do if not q.done then return q end end
-    return nil
-end
-
--- ★ RUNDEN-MODUS: Nur Inventar prüfen, KEINE Remotes
 local function RoundMonitorLoop(q)
-    print("[HazeHub] workspace.Lobby fehlt – IN RUNDE. Ueberwache: " .. q.item)
-    SetStatus(string.format("RUNDE – Ueberwache: %s", q.item), D.TextMid)
+    print("[HazeHub] Runde erkannt (kein workspace.Lobby). Tracker aktiv: " .. q.item)
+    SetStatus(string.format("RUNDE – Tracker: %s", q.item), D.TextMid)
 
-    local deadline = os.time() + 600  -- 10 Minuten max
+    local deadline = os.time() + 600
     while AF.Running and os.time() < deadline do
-        -- ★ Runde beendet wenn Lobby zurück im Workspace
-        if IsLobby() then
-            print("[HazeHub] workspace.Lobby erschienen – Runde beendet, kehre zu Lobby-Logik.")
-            UpdateLocationState()
+        -- Wenn workspace.Lobby erscheint → raus
+        if CheckIsLobby() then
+            print("[HazeHub] workspace.Lobby erschienen – verlasse Runden-Monitor.")
             break
         end
 
         task.wait(5)
         local cur = GetLiveInvAmt(q.item)
+
+        -- ★ Debug-Print für Item-Tracker
+        print(string.format("[HazeHub] Tracker: Item gefunden! Fortschritt: %d/%d",
+            cur, q.amount))
+
         SetStatus(string.format("RUNDE: %s  %d/%d  (%.0f%%)",
             q.item, cur, q.amount,
             math.min(100, cur / math.max(1, q.amount) * 100)), D.Cyan)
         pcall(UpdateQueueUI)
         pcall(function() HS.UpdateGoalsUI() end)
 
-        -- ★ Ziel erreicht → ForceBackToLobby
+        -- ★ Ziel erreicht: Queue-Cleanup + sofortiger ForceBackToLobby
         if cur >= q.amount then
-            print(string.format("[HazeHub] Ziel erreicht: %s (%d/%d)", q.item, cur, q.amount))
+            print(string.format("[HazeHub] Tracker: Ziel erreicht! %s (%d/%d) – Starte Lobby-Exit.",
+                q.item, cur, q.amount))
             task.spawn(function() pcall(function() SendWebhook({}, q.item, cur) end) end)
 
+            -- ★ 1. Item sofort aus Queue.json entfernen
             RemoveFromQueue(q.item)
             pcall(UpdateQueueUI)
+
             SetStatus(string.format("Ziel erreicht! %s – Lobby-Exit...", q.item), D.Green)
 
-            -- ★ ForceBackToLobby nur aus Runde heraus
-            ForceBackToLobby()
+            -- ★ 2. 3 Sekunden warten
+            task.wait(3)
 
-            -- Warten bis workspace.Lobby wieder erscheint
+            -- ★ 3. ForceBackToLobby (getconnections) nur wenn noch in Runde
+            if not CheckIsLobby() then
+                ForceBackToLobby()
+            end
+
+            -- Warten bis workspace.Lobby erscheint
             local lw = 0
-            while AF.Running and IsInRound() and lw < 25 do
+            while AF.Running and not CheckIsLobby() and lw < 20 do
                 task.wait(1); lw = lw + 1
             end
-            UpdateLocationState()
-            return true  -- Ziel erfolgreich
+            return true
         end
     end
-
-    UpdateLocationState()
     return false
 end
 
--- ★ LOBBY-MODUS: Queue prüfen, 5s warten, Raum erstellen
-local function LobbyActionLoop()
-    print("[HazeHub] workspace.Lobby gefunden – IN LOBBY. Pruefe Queue...")
-    SetStatus("LOBBY: Pruefe Queue...", D.Yellow)
-    UpdateLocationState()
+-- ============================================================
+--  LOBBY-AKTION (workspace.Lobby vorhanden = Lobby)
+-- ============================================================
+local function LobbyActionLoop(delaySeconds)
+    delaySeconds = delaySeconds or 5
+    print("[HazeHub] Lobby erkannt (workspace.Lobby). Sync in " .. delaySeconds .. "s...")
+    SetStatus(string.format("LOBBY: Sync in %ds...", delaySeconds), D.Yellow)
 
-    -- Game-Tab Re-Init (falls Welten leer)
-    if not HS.IsScanDone() then
-        print("[HazeHub] Lobby: Game-Tab nicht initialisiert – starte Re-Init...")
-        task.spawn(function() ReinitGameTab() end)
-        task.wait(3)  -- kurze Pause für Re-Init
-    end
+    task.wait(delaySeconds)
 
-    -- Inventar-Sync: bereits erreichte Items entfernen
-    local changed = SyncInventoryWithQueue()
-    if changed then pcall(UpdateQueueUI) end
-
-    local q = GetNextItem()
-    if not q then
-        SetStatus("Queue leer – Farm beendet.", D.Green)
-        print("[HazeHub] Queue leer – Farm gestoppt.")
-        AF.Active = false; _G.AutoFarmRunning = false; SaveState()
-        return false
-    end
-
-    -- ★ 5 Sekunden Delay (UI-Sync + Server-Stabilisierung)
-    SetStatus(string.format("LOBBY: Naechste Runde in 5s – %s", q.item), D.Yellow)
-    print("[HazeHub] Lobby: Warte 5 Sekunden vor Raum-Start...")
-    task.wait(5)
-
-    -- Nochmal prüfen ob wir noch in Lobby sind
-    if IsInRound() then
-        print("[HazeHub] LobbyActionLoop: Runde gestartet während Delay – warte.")
+    -- Nochmal prüfen
+    if not CheckIsLobby() then
+        print("[HazeHub] LobbyAction: workspace.Lobby verschwunden – abgebrochen.")
         return true
     end
 
-    -- Bestes Chapter suchen
+    -- ★ PlayRoom Remote initialisieren (Menü öffnen)
+    Fire("Create")
+    task.wait(0.5)
+
+    -- Inventar-Sync
+    local changed = SyncInventoryWithQueue()
+    if changed then pcall(UpdateQueueUI) end
+
+    local function NextItem()
+        for _, q in ipairs(AF.Queue) do if not q.done then return q end end
+        return nil
+    end
+
+    local q = NextItem()
+    if not q then
+        SetStatus("Queue leer – Farm beendet.", D.Green)
+        print("[HazeHub] Queue leer.")
+        AF.Active=false; _G.AutoFarmRunning=false; SaveState()
+        return false
+    end
+
+    -- Bestes Chapter
     local chapId, worldId, mode, rate = FindBestChapter(q.item)
     if not chapId then
-        -- Fallback: erstes Chapter in DB
         for cid,data in pairs(AF.RewardDatabase) do
             chapId=cid; worldId=data.world; mode=data.mode; rate=0; break
         end
     end
     if not chapId then
-        -- Letzter Fallback: WorldIds aus Hauptskript
         local ids = HS.GetWorldIds()
         if #ids > 0 then
             local wd = HS.GetWorldData()[ids[1]] or {}
@@ -973,53 +891,57 @@ local function LobbyActionLoop()
             end
         end
     end
-
     if not chapId then
         SetStatus("Kein Level fuer '" .. q.item .. "'", D.Orange)
-        warn("[HazeHub] Kein Chapter – Item aus Queue entfernt.")
-        RemoveFromQueue(q.item); pcall(UpdateQueueUI)
-        return true  -- weiter mit nächstem Item
+        RemoveFromQueue(q.item); pcall(UpdateQueueUI); return true
     end
 
-    -- Raum starten (Workspace-Check ist in FireRoomSequence eingebaut)
-    SetStatus(string.format("LOBBY: Starte %s -> %s  (%.1f%%)",
-        q.item, chapId, rate or 0), D.Cyan)
-    local started = FireRoomSequence(worldId, mode, chapId)
+    -- ★ Raum starten (intern mit 0.5s Delay zwischen Welt + Kapitel)
+    SetStatus(string.format("LOBBY: %s -> %s (%.1f%%)", q.item, chapId, rate or 0), D.Cyan)
+    FireRoomSequence(worldId, mode, chapId)
 
-    if started then
-        -- Warten bis workspace.Lobby verschwindet (= Runde gestartet), max 30s
-        WaitUntilInRound(30)
+    -- Warten bis workspace.Lobby verschwindet (= Runde gestartet)
+    local ws = os.clock()
+    while AF.Running and CheckIsLobby() and os.clock()-ws < 30 do
         task.wait(1)
     end
+    task.wait(1)
     return true
 end
 
 -- HAUPT-LOOP
+local function GetNextItem()
+    for _, q in ipairs(AF.Queue) do if not q.done then return q end end
+    return nil
+end
+
 local function FarmLoop()
     AF.Active          = true
     _G.AutoFarmRunning = true
     SaveState()
-    UpdateLocationState()
-    print("[HazeHub] === FARM LOOP GESTARTET  (Workspace-Check) ===")
+    print("[HazeHub] === FARM LOOP GESTARTET ===")
+
+    local firstLobby = true
 
     while AF.Running do
         UpdateLocationState()
+        local isLobby = CheckIsLobby()
 
-        if _G.InGameServer then
-            -- ★ IN RUNDE: nur Inventar überwachen
+        if not isLobby then
+            firstLobby = true
             local q = GetNextItem()
             if not q then
-                -- Queue leer in Runde → Lobby-Return
                 print("[HazeHub] Queue leer in Runde – ForceBackToLobby.")
-                ForceBackToLobby()
-                WaitUntilLobby(20)
-                break
+                task.wait(3)
+                if not CheckIsLobby() then ForceBackToLobby() end
+                task.wait(8); break
             end
             RoundMonitorLoop(q)
             task.wait(2)
         else
-            -- ★ IN LOBBY: Queue prüfen und Raum erstellen
-            local continue_ = LobbyActionLoop()
+            local delay = firstLobby and 5 or 2
+            firstLobby = false
+            local continue_ = LobbyActionLoop(delay)
             if not continue_ then break end
             task.wait(2)
         end
@@ -1027,7 +949,7 @@ local function FarmLoop()
 
     AF.Active = false
     if not AF.Running then
-        _G.AutoFarmRunning = false; SaveState()
+        _G.AutoFarmRunning=false; SaveState()
     end
     print("[HazeHub] Farm-Loop beendet.")
 end
@@ -1041,9 +963,9 @@ local function StopFarm()
     AF.Scanning        = false
     _G.AutoFarmRunning = false
     _G.InGameServer    = false
-    SaveState()  -- ★ AUS sofort persistieren
+    SaveState()
     SetStatus("Gestoppt.", D.TextMid)
-    print("[HazeHub] Farm gestoppt. State=AUS gespeichert.")
+    print("[HazeHub] Farm gestoppt.")
 end
 HS.StopFarm = StopFarm
 
@@ -1084,61 +1006,50 @@ local function RunScanTask(forceDelete, thenStartFarm)
 end
 
 -- ============================================================
---  ★ AUTO-RESUME  (nach Server-Wechsel / Teleport)
+--  AUTO-RESUME
 -- ============================================================
 local function TryAutoResume()
-    task.wait(3)  -- Workspace und Services laden lassen
+    task.wait(3)
 
-    -- Sofort Workspace-Check
-    UpdateLocationState()
-
-    if _G.InGameServer then
-        print("[HazeHub] Auto-Resume: workspace.Lobby fehlt – IN RUNDE.")
-    else
-        print("[HazeHub] Auto-Resume: workspace.Lobby gefunden – IN LOBBY.")
-        -- Game-Tab initialisieren
-        task.spawn(function()
-            task.wait(1)
-            ReinitGameTab()
-        end)
-    end
-
-    -- Persistenz laden
     local hasQueue = LoadQueueFile()
     LoadState()
+    UpdateLocationState()
+    local isLobby = CheckIsLobby()
 
-    -- Inventar-Sync
+    if isLobby then
+        print("[HazeHub] Auto-Resume Ort: LOBBY (workspace.Lobby vorhanden).")
+        task.spawn(function() task.wait(1); ReinitGameTab() end)
+    else
+        print("[HazeHub] Auto-Resume Ort: RUNDE (kein workspace.Lobby).")
+    end
+
     if hasQueue then
-        task.wait(2)  -- kurz warten damit RS geladen ist
         SyncInventoryWithQueue()
         pcall(UpdateQueueUI)
     end
 
-    -- AutoFarmRunning=false → Farm bleibt AUS
     if not _G.AutoFarmRunning then
-        print("[HazeHub] Auto-Resume: AutoFarmRunning=false – Farm bleibt gestoppt.")
+        print("[HazeHub] Auto-Resume: AutoFarmRunning=false – Farm bleibt AUS.")
         SetStatus(hasQueue
-            and string.format("Queue: %d Items  (Farm AUS)", #AF.Queue)
+            and string.format("Queue: %d Items (Farm AUS)", #AF.Queue)
             or  "Farm gestoppt.", D.TextMid)
         pcall(UpdateQueueUI)
         return
     end
 
-    -- Queue leer → nicht starten
     if not hasQueue or not GetNextItem() then
-        print("[HazeHub] Auto-Resume: Queue leer – Farm bleibt gestoppt.")
-        _G.AutoFarmRunning = false; SaveState()
+        print("[HazeHub] Auto-Resume: Queue leer.")
+        _G.AutoFarmRunning=false; SaveState()
         pcall(UpdateQueueUI)
         return
     end
 
-    -- DB laden
     if DBCount() == 0 then LoadDB() end
 
-    -- ★ Auto-Resume starten
-    SetStatus("Auto-Resume: Farm startet in 5s...", D.Yellow)
-    print("[HazeHub] Auto-Resume: Starte in 5 Sekunden...")
-    task.wait(5)
+    local delay = isLobby and 5 or 2
+    SetStatus(string.format("Auto-Resume: Start in %ds...", delay), D.Yellow)
+    print(string.format("[HazeHub] Auto-Resume: Start in %ds...", delay))
+    task.wait(delay)
 
     if GetNextItem() then
         AF.Running = true
@@ -1176,14 +1087,27 @@ AF.UI.Lbl.Status.TextSize           = 11
 AF.UI.Lbl.Status.Font               = Enum.Font.GothamSemibold
 AF.UI.Lbl.Status.TextXAlignment     = Enum.TextXAlignment.Left
 
--- ★ WORKSPACE LOCATION-INDIKATOR
+-- LOCATION-INDIKATOR
 local locCard = Card(Container, 22); Pad(locCard, 2, 10, 2, 10)
 local locLbl  = Instance.new("TextLabel", locCard)
 locLbl.Size=UDim2.new(1,0,1,0); locLbl.BackgroundTransparency=1
 locLbl.Text="Ort: wird erkannt..."; locLbl.TextColor3=D.TextLow
 locLbl.TextSize=10; locLbl.Font=Enum.Font.Gotham
 locLbl.TextXAlignment=Enum.TextXAlignment.Left
-AF.UI.Lbl.LocStatus = locLbl  -- wird vom 2s-Loop oben aktualisiert
+task.spawn(function()
+    while true do
+        task.wait(2)
+        pcall(function()
+            if CheckIsLobby() then
+                locLbl.Text      = "Ort: LOBBY  (workspace.Lobby exists)"
+                locLbl.TextColor3 = D.Green
+            else
+                locLbl.Text      = "Ort: RUNDE  (no workspace.Lobby)"
+                locLbl.TextColor3 = D.Orange
+            end
+        end)
+    end
+end)
 
 -- DB-KARTE
 local dbCard = Card(Container); Pad(dbCard,10,10,10,10); VList(dbCard,7)
@@ -1218,7 +1142,7 @@ loadDbBtn.MouseEnter:Connect(function() Tw(loadDbBtn,{BackgroundColor3=Color3.fr
 loadDbBtn.MouseLeave:Connect(function() Tw(loadDbBtn,{BackgroundColor3=D.CardHover}) end)
 loadDbBtn.MouseButton1Click:Connect(function()
     if LoadDB() then
-        AF.UI.Lbl.DBStatus.Text=string.format("OK DB: %d Chapters", DBCount())
+        AF.UI.Lbl.DBStatus.Text=string.format("OK DB: %d Chapters",DBCount())
         AF.UI.Lbl.DBStatus.TextColor3=D.Green
     else
         AF.UI.Lbl.DBStatus.Text="Keine gueltige DB."
@@ -1311,20 +1235,19 @@ startBtn.MouseButton1Click:Connect(function()
     if #AF.Queue==0 then SetStatus("Queue leer!", D.Orange); return end
     AF.Running         = true
     _G.AutoFarmRunning = true
-    SaveState()  -- ★ AN sofort persistieren
+    SaveState()
     if DBCount()==0 then
         SetStatus("DB leer – starte Scan...", D.Yellow)
         pcall(function() startBtn.Text="Scannt..."; startBtn.TextColor3=D.Yellow end)
         RunScanTask(false, true)
     else
-        print(string.format("[HazeHub] Queue Start: %d Items, DB: %d Chapters.",
-            #AF.Queue, DBCount()))
+        print(string.format("[HazeHub] Start: %d Items, DB: %d Chapters.", #AF.Queue, DBCount()))
         task.spawn(FarmLoop)
     end
 end)
 
 stopBtn.MouseButton1Click:Connect(function()
-    StopFarm()  -- ★ schreibt AUS sofort in Datei
+    StopFarm()
     startBtn.Text="Start Queue"; startBtn.TextColor3=Color3.new(1,1,1)
 end)
 
@@ -1364,7 +1287,7 @@ if isfile and isfile(DB_FILE) then
         AF.UI.Lbl.DBStatus.Text="DB korrupt – Neu-Scan!"
         AF.UI.Lbl.DBStatus.TextColor3=D.Orange
     elseif LoadDB() then
-        AF.UI.Lbl.DBStatus.Text=string.format("OK DB: %d Chapters", DBCount())
+        AF.UI.Lbl.DBStatus.Text=string.format("OK DB: %d Chapters",DBCount())
         AF.UI.Lbl.DBStatus.TextColor3=D.Green
     end
 else
@@ -1372,12 +1295,7 @@ else
     AF.UI.Lbl.DBStatus.TextColor3=D.TextLow
 end
 
--- ★ Sofortiger Workspace-Check beim Start
-UpdateLocationState()
-
--- ★ Auto-Resume starten
 task.spawn(TryAutoResume)
 
 _G.HazeShared.SetModuleLoaded(VERSION)
-print("[HazeHub] autofarm.lua v"..VERSION.." geladen  |  DB: "..DBCount()
-    .." Chapters  |  workspace.Lobby: "..tostring(WS:FindFirstChild("Lobby") ~= nil))
+print("[HazeHub] autofarm.lua v"..VERSION.." geladen  |  DB: "..DBCount().." Chapters")
