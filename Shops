@@ -465,12 +465,22 @@ BuildShop({
     accent       = D.Teal,
     timerType    = "daily415",
     folderGetter = function()
-        local f=nil
+        local f = nil
+        -- Versuch 1
         pcall(function()
-            f = RS:WaitForChild("Player_Data",3)
-                 :WaitForChild(LP.Name,3)
+            f = RS:WaitForChild("Player_Data",10)
+                 :WaitForChild(LP.Name,5)
                  :WaitForChild("GhoulHunt",3)
         end)
+        -- Retry nach 2s falls nil
+        if not f then
+            task.wait(2)
+            pcall(function()
+                f = RS:WaitForChild("Player_Data",5)
+                     :WaitForChild(LP.Name,5)
+                     :WaitForChild("GhoulHunt",3)
+            end)
+        end
         return f
     end,
     shopDef = {
@@ -492,12 +502,20 @@ BuildShop({
     accent       = D.Gold,
     timerType    = "hourly15",
     folderGetter = function()
-        local f=nil
+        local f = nil
         pcall(function()
-            f = RS:WaitForChild("Player_Data",3)
-                 :WaitForChild(LP.Name,3)
+            f = RS:WaitForChild("Player_Data",10)
+                 :WaitForChild(LP.Name,5)
                  :WaitForChild("Merchant",3)
         end)
+        if not f then
+            task.wait(2)
+            pcall(function()
+                f = RS:WaitForChild("Player_Data",5)
+                     :WaitForChild(LP.Name,5)
+                     :WaitForChild("Merchant",3)
+            end)
+        end
         return f
     end,
     shopDef = {
@@ -508,7 +526,7 @@ BuildShop({
 
 -- ============================================================
 --  SHOP 3 – CALAMITY (FireForce + JJK)
---  Pfad  : RS.Calamity_Shop.FireForce  /  .JJK
+--  ★ Pfad : RS.Player_Data.[Name].Calamity_Shop.FireForce / .JJK
 --  Remote: Calamity_Shop(ShopType, ItemName, Menge)
 --  Währung: Sol Token | Cursed Essence
 -- ============================================================
@@ -523,16 +541,32 @@ do
 
     BuildResetTimer(calCard,"daily415")
 
-    -- FireForce (Sol Token)
-    Instance.new("Frame",calCard).Size = UDim2.new(1,0,0,1)  -- thin separator
+    -- Helper: Calamity-Ordner mit Retry
+    local function GetCalamitySubfolder(subName)
+        local f = nil
+        pcall(function()
+            f = RS:WaitForChild("Player_Data",10)
+                 :WaitForChild(LP.Name,5)
+                 :WaitForChild("Calamity_Shop",3)
+                 :WaitForChild(subName,3)
+        end)
+        if not f then
+            task.wait(2)
+            pcall(function()
+                f = RS:WaitForChild("Player_Data",5)
+                     :WaitForChild(LP.Name,5)
+                     :WaitForChild("Calamity_Shop",3)
+                     :WaitForChild(subName,3)
+            end)
+        end
+        return f
+    end
 
+    -- FireForce (Sol Token)
+    Instance.new("Frame",calCard).Size = UDim2.new(1,0,0,1)
     BuildShopHeader(calCard,"🔥  FireForce","Sol Token",D.Orange)
     local _,rebFF = BuildItemList(calCard,
-        function()
-            local f=nil; pcall(function()
-                f=RS:WaitForChild("Calamity_Shop",3):WaitForChild("FireForce",3)
-            end); return f
-        end,
+        function() return GetCalamitySubfolder("FireForce") end,
         { remoteName="Calamity_Shop",
           extraArgs=function(n,q) return {"FireForce",n,q} end },
         D.Orange)
@@ -546,14 +580,9 @@ do
 
     -- JJK (Cursed Essence)
     Instance.new("Frame",calCard).Size = UDim2.new(1,0,0,1)
-
     BuildShopHeader(calCard,"🌀  JJK","Cursed Essence",D.Purple)
     local _,rebJJK = BuildItemList(calCard,
-        function()
-            local f=nil; pcall(function()
-                f=RS:WaitForChild("Calamity_Shop",3):WaitForChild("JJK",3)
-            end); return f
-        end,
+        function() return GetCalamitySubfolder("JJK") end,
         { remoteName="Calamity_Shop",
           extraArgs=function(n,q) return {"JJK",n,q} end },
         D.Purple)
@@ -568,7 +597,7 @@ end
 
 -- ============================================================
 --  SHOP 4 – RAID SHOP (Esper + JJK)
---  Pfad  : RS.JJK_Raid_Shop.Esper  /  .JJK
+--  ★ Pfad : RS.Player_Data.[Name].JJK_Raid_Shop.Esper / .JJK
 --  Remote: JJK_RaidShop(ShopType, ItemName, Menge)
 --  Währung: Esper Token | Cursed Scrolls
 -- ============================================================
@@ -583,16 +612,32 @@ do
 
     BuildResetTimer(raidCard,"daily415")
 
+    -- Helper: Raid-Ordner mit Retry
+    local function GetRaidSubfolder(subName)
+        local f = nil
+        pcall(function()
+            f = RS:WaitForChild("Player_Data",10)
+                 :WaitForChild(LP.Name,5)
+                 :WaitForChild("JJK_Raid_Shop",3)
+                 :WaitForChild(subName,3)
+        end)
+        if not f then
+            task.wait(2)
+            pcall(function()
+                f = RS:WaitForChild("Player_Data",5)
+                     :WaitForChild(LP.Name,5)
+                     :WaitForChild("JJK_Raid_Shop",3)
+                     :WaitForChild(subName,3)
+            end)
+        end
+        return f
+    end
+
     -- Esper (Esper Token)
     Instance.new("Frame",raidCard).Size = UDim2.new(1,0,0,1)
-
     BuildShopHeader(raidCard,"🔮  Esper","Esper Token",D.Purple)
     local _,rebEsp = BuildItemList(raidCard,
-        function()
-            local f=nil; pcall(function()
-                f=RS:WaitForChild("JJK_Raid_Shop",3):WaitForChild("Esper",3)
-            end); return f
-        end,
+        function() return GetRaidSubfolder("Esper") end,
         { remoteName="JJK_RaidShop",
           extraArgs=function(n,q) return {"Esper",n,q} end },
         D.Purple)
@@ -606,14 +651,9 @@ do
 
     -- JJK (Cursed Scrolls)
     Instance.new("Frame",raidCard).Size = UDim2.new(1,0,0,1)
-
     BuildShopHeader(raidCard,"📜  JJK (Raid)","Cursed Scrolls",D.Lavender)
     local _,rebJJK2 = BuildItemList(raidCard,
-        function()
-            local f=nil; pcall(function()
-                f=RS:WaitForChild("JJK_Raid_Shop",3):WaitForChild("JJK",3)
-            end); return f
-        end,
+        function() return GetRaidSubfolder("JJK") end,
         { remoteName="JJK_RaidShop",
           extraArgs=function(n,q) return {"JJK",n,q} end },
         D.Lavender)
