@@ -2657,3 +2657,62 @@ task.spawn(function()
         end)
     end
 end)
+-- ============================================================
+--  ★ HAUPTSKRIPT-ERGÄNZUNG: Craft-Modul laden
+--
+--  EINFÜGEN: am Ende des Hauptskripts, direkt NACH dem
+--  bestehenden Shop-Modul-Ladeblock:
+--
+--      task.spawn(function()
+--          task.wait(2)
+--          ... (Shop-Loader) ...
+--      end)
+--
+--  Diesen Block dahinter einfügen – KEIN loadstring-Scope-Problem
+--  da der Loader selbst keine HazeHUB-Variablen direkt nutzt.
+-- ============================================================
+
+-- Craft-Modul laden (Modul 4)
+task.spawn(function()
+    task.wait(3)   -- nach Autofarm (1s) und Shop (2s) laden
+
+    -- ★ RewardDB-Brücke für Craft-Modul:
+    --   Damit das Craft-Modul die beste Welt für Materialien
+    --   finden kann, exportieren wir die RewardDB hier sobald
+    --   das Autofarm-Modul sie geladen hat.
+    task.spawn(function()
+        while true do
+            task.wait(2)
+            pcall(function()
+                -- autofarm.lua hält AF.RewardDatabase intern.
+                -- Wir exportieren sie über HazeShared sobald verfügbar.
+                -- (autofarm.lua: nach "AF.RewardDatabase = data" einfügen:
+                --   _G.HazeShared._AutoFarm_RewardDB = AF.RewardDatabase )
+                -- Hier als Fallback: WorldData aus dem Hauptskript nutzen
+                if not _G.HazeShared._AutoFarm_RewardDB then
+                    -- Kein separater Eintrag nötig –
+                    -- FindBestWorldForMaterial() greift auf GetWorldData() zurück
+                end
+            end)
+        end
+    end)
+
+    local CRAFT_URL = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/craft"
+
+    local httpOk, rawScript = pcall(function()
+        return game:HttpGet(CRAFT_URL)
+    end)
+
+    if not httpOk or not rawScript or #rawScript < 10 then
+        warn("[HazeHUB] Craft-Modul: HttpGet fehlgeschlagen – " .. tostring(rawScript):sub(1, 80))
+        return
+    end
+
+    local execOk, execErr = pcall(function()
+        loadstring(rawScript)()
+    end)
+
+    if not execOk then
+        warn("[HazeHUB] Craft-Modul Fehler: " .. tostring(execErr):sub(1, 100))
+    end
+end)
