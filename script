@@ -1,53 +1,65 @@
 -- ============================================================
---  ★ SETTINGS TAB – NEUE BUTTONS (nach unloadBtn einfügen)
---  Einfügen NACH:  unloadBtn.MouseButton1Click:Connect(...)
+--  ★ SETTINGS TAB – NEUE BUTTONS
+--
+--  EINFÜGEN: direkt in das HAUPTSKRIPT (script, nicht loadstring)
+--  POSITION: nach der Zeile
+--      unloadBtn.MouseButton1Click:Connect(function() ... end)
+--  im Abschnitt "=== SETTINGS TAB ==="
+--
+--  WICHTIG: Dieser Code MUSS im selben Lua-Scope wie das
+--  Hauptskript stehen, damit D, S, H, K, Svc, Corner, Stroke,
+--  Pad, VList, Card, NeonBtn, MkLbl, SecLbl, Tw, TF, TM,
+--  SaveWorldData, ApplyFallback, RebuildWorldList,
+--  WORLD_CACHE_FILE alle aufgelöst werden können.
 -- ============================================================
 
 -- ────────────────────────────────────────────────────────────
---  TRENNLINIE
+--  Trennlinie
 -- ────────────────────────────────────────────────────────────
-local sepTools = Instance.new("Frame", SettPage)
-sepTools.Size = UDim2.new(1, 0, 0, 1)
-sepTools.BackgroundColor3 = D.BorderCyan
-sepTools.BackgroundTransparency = 0.5
-sepTools.BorderSizePixel = 0
+local _sepDBTools = Instance.new("Frame", SettPage)
+_sepDBTools.Size = UDim2.new(1, 0, 0, 1)
+_sepDBTools.BackgroundColor3 = D.BorderCyan
+_sepDBTools.BackgroundTransparency = 0.5
+_sepDBTools.BorderSizePixel = 0
 
 -- ────────────────────────────────────────────────────────────
---  KARTE: DATENBANK-WERKZEUGE
+--  Karte: Datenbank-Werkzeuge
 -- ────────────────────────────────────────────────────────────
-local dbToolCard = Card(SettPage)
-Pad(dbToolCard, 10, 10, 10, 10)
-VList(dbToolCard, 8)
-SecLbl(dbToolCard, "🗄  DATENBANK-WERKZEUGE")
+local _dbToolCard = Card(SettPage)
+Pad(_dbToolCard, 10, 10, 10, 10)
+VList(_dbToolCard, 8)
+SecLbl(_dbToolCard, "🗄  DATENBANK-WERKZEUGE")
 
--- Status-Label für diese Sektion
-local dbToolStatus = MkLbl(dbToolCard, "Bereit.", 10, D.TextLow)
-dbToolStatus.Size = UDim2.new(1, 0, 0, 16)
-H.UI.Lbl.DBToolStatus = dbToolStatus
+local _dbToolStatusLbl = MkLbl(_dbToolCard, "Bereit.", 10, D.TextLow)
+_dbToolStatusLbl.Size = UDim2.new(1, 0, 0, 16)
+H.UI.Lbl.DBToolStatus = _dbToolStatusLbl
 
--- ── BUTTON 1: Reset & Rescan Rewards ────────────────────────
-MkLbl(dbToolCard,
+-- ╔══════════════════════════════════════════════════════════╗
+--  BUTTON 1 – Reset & Rescan Rewards
+-- ╚══════════════════════════════════════════════════════════╝
+MkLbl(_dbToolCard,
     "Löscht HazeHUB_RewardDB.json und startet sofort den Deep-Scan neu.",
-    9, D.TextLow).Size = UDim2.new(1, 0, 0, 22)
+    9, D.TextLow
+).Size = UDim2.new(1, 0, 0, 22)
 
-local resetRescanBtn = NeonBtn(dbToolCard, "🔄  Reset & Rescan Rewards", D.Red, 38)
-resetRescanBtn.MouseButton1Click:Connect(function()
-    -- Schutz: nicht doppelt ausführen
-    if resetRescanBtn.Text:find("läuft") then return end
+local _resetRescanBtn = NeonBtn(_dbToolCard, "🔄  Reset & Rescan Rewards", D.Red, 38)
+
+_resetRescanBtn.MouseButton1Click:Connect(function()
+    if _resetRescanBtn.Text:find("läuft") then return end
 
     -- 1. RewardDB-Datei löschen
+    local _dbFile = "HazeHUB/HazeHUB_RewardDB.json"
     pcall(function()
-        local dbFile = "HazeHUB/HazeHUB_RewardDB.json"
-        if isfile and isfile(dbFile) then
-            delfile(dbFile)
+        if isfile and isfile(_dbFile) then
+            delfile(_dbFile)
             print("[HazeHUB] RewardDB.json gelöscht.")
         end
     end)
 
-    -- 2. _G.HazeShared-Referenz auf autofarm-Scan nutzen
+    -- 2. Autofarm-Modul über _G.HazeShared ansprechen
     if _G.HazeShared and _G.HazeShared.TriggerResetRescan then
-        resetRescanBtn.Text = "⏳  Scan läuft..."
-        resetRescanBtn.TextColor3 = D.Yellow
+        _resetRescanBtn.Text = "⏳  Scan läuft..."
+        _resetRescanBtn.TextColor3 = D.Yellow
         H.UI.Lbl.DBToolStatus.Text = "⏳ RewardDB gelöscht – Deep-Scan gestartet..."
         H.UI.Lbl.DBToolStatus.TextColor3 = D.Yellow
 
@@ -58,50 +70,52 @@ resetRescanBtn.MouseButton1Click:Connect(function()
                     H.UI.Lbl.DBToolStatus.TextColor3 = D.Green
                 end)
             end)
+            task.wait(1)
             pcall(function()
-                resetRescanBtn.Text = "🔄  Reset & Rescan Rewards"
-                resetRescanBtn.TextColor3 = D.Red
+                _resetRescanBtn.Text = "🔄  Reset & Rescan Rewards"
+                _resetRescanBtn.TextColor3 = D.Red
             end)
         end)
     else
-        H.UI.Lbl.DBToolStatus.Text = "⚠ Autofarm-Modul nicht geladen!"
+        H.UI.Lbl.DBToolStatus.Text = "⚠ Autofarm-Modul nicht geladen – bitte warten!"
         H.UI.Lbl.DBToolStatus.TextColor3 = D.Orange
     end
 end)
 
--- ── BUTTON 2: Permanent World Scan ──────────────────────────
-local sepWS = Instance.new("Frame", dbToolCard)
-sepWS.Size = UDim2.new(1, 0, 0, 1)
-sepWS.BackgroundColor3 = D.Border
-sepWS.BackgroundTransparency = 0.4
-sepWS.BorderSizePixel = 0
+-- ╔══════════════════════════════════════════════════════════╗
+--  BUTTON 2 – Permanent World Scan (Full Sync)
+-- ╚══════════════════════════════════════════════════════════╝
+local _sepWS = Instance.new("Frame", _dbToolCard)
+_sepWS.Size = UDim2.new(1, 0, 0, 1)
+_sepWS.BackgroundColor3 = D.Border
+_sepWS.BackgroundTransparency = 0.4
+_sepWS.BorderSizePixel = 0
 
-MkLbl(dbToolCard,
+MkLbl(_dbToolCard,
     "Navigiert durch alle Welten/Chapters (2s pro Stage) und speichert WorldCache.json permanent.",
-    9, D.TextLow).Size = UDim2.new(1, 0, 0, 28)
+    9, D.TextLow
+).Size = UDim2.new(1, 0, 0, 28)
 
--- Fortschrittsanzeige für den World-Scan
-local wScanProgressLbl = MkLbl(dbToolCard, "", 10, D.Yellow)
-wScanProgressLbl.Size = UDim2.new(1, 0, 0, 16)
-H.UI.Lbl.WScanProgress = wScanProgressLbl
+local _wScanProgressLbl = MkLbl(_dbToolCard, "", 10, D.Yellow)
+_wScanProgressLbl.Size = UDim2.new(1, 0, 0, 16)
+H.UI.Lbl.WScanProgress = _wScanProgressLbl
 
-local wScanBarBg = Instance.new("Frame", dbToolCard)
-wScanBarBg.Size = UDim2.new(1, 0, 0, 6)
-wScanBarBg.BackgroundColor3 = Color3.fromRGB(18, 26, 48)
-wScanBarBg.BorderSizePixel = 0
-Corner(wScanBarBg, 3)
-wScanBarBg.Visible = false
+local _wScanBarBg = Instance.new("Frame", _dbToolCard)
+_wScanBarBg.Size = UDim2.new(1, 0, 0, 6)
+_wScanBarBg.BackgroundColor3 = Color3.fromRGB(18, 26, 48)
+_wScanBarBg.BorderSizePixel = 0
+Corner(_wScanBarBg, 3)
+_wScanBarBg.Visible = false
 
-local wScanBarFill = Instance.new("Frame", wScanBarBg)
-wScanBarFill.Size = UDim2.new(0, 0, 1, 0)
-wScanBarFill.BackgroundColor3 = D.Cyan
-wScanBarFill.BorderSizePixel = 0
-Corner(wScanBarFill, 3)
-H.UI.Fr.WScanBarFill = wScanBarFill
+local _wScanBarFill = Instance.new("Frame", _wScanBarBg)
+_wScanBarFill.Size = UDim2.new(0, 0, 1, 0)
+_wScanBarFill.BackgroundColor3 = D.Cyan
+_wScanBarFill.BorderSizePixel = 0
+Corner(_wScanBarFill, 3)
+H.UI.Fr.WScanBarFill = _wScanBarFill
 
-local permWorldScanBtn = NeonBtn(dbToolCard, "🌍  Permanent World Scan (Full Sync)", D.Cyan, 38)
+local _permWorldScanBtn = NeonBtn(_dbToolCard, "🌍  Permanent World Scan (Full Sync)", D.Cyan, 38)
 
--- Die eigentliche Scan-Funktion
 local _worldScanRunning = false
 
 local function RunPermanentWorldScan()
@@ -117,118 +131,129 @@ local function RunPermanentWorldScan()
     end
 
     _worldScanRunning = true
-    permWorldScanBtn.Text = "⏳  Scan läuft..."
-    permWorldScanBtn.TextColor3 = D.Yellow
-    wScanBarBg.Visible = true
-    H.UI.Fr.WScanBarFill.Size = UDim2.new(0, 0, 1, 0)
-    H.UI.Fr.WScanBarFill.BackgroundColor3 = D.Cyan
+    _permWorldScanBtn.Text = "⏳  Scan läuft..."
+    _permWorldScanBtn.TextColor3 = D.Yellow
+    _wScanBarBg.Visible = true
+    _wScanBarFill.Size = UDim2.new(0, 0, 1, 0)
+    _wScanBarFill.BackgroundColor3 = D.Cyan
 
     task.spawn(function()
-        -- Alle Chapters sammeln
-        local tasks = {}
+        -- Alle Chapters als Tasks sammeln
+        local _tasks = {}
         for _, wid in ipairs(S.WorldIds) do
             local wd = S.WorldData[wid] or {}
             local isCal = wid:lower():find("calamity") ~= nil
             for _, cid in ipairs(wd.story or {}) do
-                table.insert(tasks, { worldId = wid, chapId = cid,
+                table.insert(_tasks, { worldId = wid, chapId = cid,
                     mode = isCal and "Calamity" or "Story" })
             end
             for _, cid in ipairs(wd.ranger or {}) do
-                table.insert(tasks, { worldId = wid, chapId = cid, mode = "Ranger" })
+                table.insert(_tasks, { worldId = wid, chapId = cid, mode = "Ranger" })
             end
         end
 
-        local total   = #tasks
-        local done    = 0
-        local failed  = 0
+        local _total  = #_tasks
+        local _done   = 0
+        local _failed = 0
 
-        if total == 0 then
+        if _total == 0 then
             H.UI.Lbl.DBToolStatus.Text = "⚠ Keine Chapters gefunden!"
             H.UI.Lbl.DBToolStatus.TextColor3 = D.Orange
             _worldScanRunning = false
-            permWorldScanBtn.Text = "🌍  Permanent World Scan (Full Sync)"
-            permWorldScanBtn.TextColor3 = D.Cyan
+            _permWorldScanBtn.Text = "🌍  Permanent World Scan (Full Sync)"
+            _permWorldScanBtn.TextColor3 = D.Cyan
             return
         end
 
-        print(string.format("[HazeHUB] Permanent World Scan: %d Chapters", total))
+        print(string.format("[HazeHUB] Permanent World Scan: %d Chapters", _total))
 
-        -- PlayRoom-Remote holen (selbe Logik wie FireCreateAndStart)
-        local prRemote = nil
+        -- PlayRoom-Remote holen (gleiche Logik wie R.PlayRoom oben)
+        local _prRemote = nil
         pcall(function()
-            prRemote = Svc.RS:WaitForChild("Remote", 5)
-                :WaitForChild("Server", 5):WaitForChild("PlayRoom", 5)
+            _prRemote = Svc.RS:WaitForChild("Remote", 5)
+                :WaitForChild("Server", 5)
+                :WaitForChild("PlayRoom", 5)
                 :WaitForChild("Event", 5)
         end)
 
-        local function Fire(action, data)
-            if prRemote then
+        local function _Fire(action, data)
+            if _prRemote then
                 pcall(function()
-                    if data then prRemote:FireServer(action, data)
-                    else         prRemote:FireServer(action) end
+                    if data then _prRemote:FireServer(action, data)
+                    else         _prRemote:FireServer(action) end
                 end)
+            else
+                -- Fallback auf das globale PR aus dem Hauptskript
+                PR(action, data)
             end
         end
 
-        Fire("Create"); task.wait(1.5)
+        _Fire("Create"); task.wait(1.5)
 
-        for _, t in ipairs(tasks) do
-            done = done + 1
-            local pct = done / total
-            local prog = string.format("🌍 %d/%d  [%s] %s", done, total, t.mode, t.chapId)
+        for _, t in ipairs(_tasks) do
+            _done = _done + 1
+            local _pct  = _done / _total
+            local _prog = string.format("🌍 %d/%d  [%s] %s",
+                _done, _total, t.mode, t.chapId)
 
             pcall(function()
-                H.UI.Lbl.WScanProgress.Text = prog
-                H.UI.Lbl.DBToolStatus.Text  = prog
+                H.UI.Lbl.WScanProgress.Text = _prog
+                H.UI.Lbl.DBToolStatus.Text  = _prog
                 H.UI.Lbl.DBToolStatus.TextColor3 = D.Yellow
-                Tw(H.UI.Fr.WScanBarFill, { Size = UDim2.new(pct, 0, 1, 0) }, TF)
+                Tw(_wScanBarFill, { Size = UDim2.new(_pct, 0, 1, 0) }, TF)
             end)
 
             print(string.format("[HazeHUB] WorldScan [%s] %s → %s (%d/%d)",
-                t.mode, t.worldId, t.chapId, done, total))
+                t.mode, t.worldId, t.chapId, _done, _total))
 
-            local ok = pcall(function()
+            local _ok = pcall(function()
                 if t.mode == "Story" then
-                    Fire("Create");                                          task.wait(0.4)
-                    Fire("Change-World",   { World   = t.worldId });        task.wait(0.4)
-                    Fire("Change-Chapter", { Chapter = t.chapId })
+                    _Fire("Create");                                          task.wait(0.4)
+                    _Fire("Change-World",   { World   = t.worldId });        task.wait(0.4)
+                    _Fire("Change-Chapter", { Chapter = t.chapId })
                 elseif t.mode == "Ranger" then
-                    Fire("Create");                                          task.wait(0.4)
-                    Fire("Change-Mode", { KeepWorld = t.worldId, Mode = "Ranger Stage" })
-                    task.wait(0.6)
-                    Fire("Change-World",   { World   = t.worldId });        task.wait(0.4)
-                    Fire("Change-Chapter", { Chapter = t.chapId })
+                    _Fire("Create");                                          task.wait(0.4)
+                    _Fire("Change-Mode",
+                        { KeepWorld = t.worldId, Mode = "Ranger Stage" });   task.wait(0.6)
+                    _Fire("Change-World",   { World   = t.worldId });        task.wait(0.4)
+                    _Fire("Change-Chapter", { Chapter = t.chapId })
                 elseif t.mode == "Calamity" then
-                    Fire("Create");                                          task.wait(0.4)
-                    Fire("Change-Mode",    { Mode    = "Calamity" });       task.wait(0.4)
-                    Fire("Change-Chapter", { Chapter = t.chapId })
+                    _Fire("Create");                                          task.wait(0.4)
+                    _Fire("Change-Mode",    { Mode    = "Calamity" });       task.wait(0.4)
+                    _Fire("Change-Chapter", { Chapter = t.chapId })
                 end
             end)
 
-            if not ok then failed = failed + 1 end
+            if not _ok then _failed = _failed + 1 end
 
-            -- ★ 2 Sekunden Pflicht-Aufenthalt pro Stage (Daten registrieren)
+            -- ★ 2 Sekunden Pflicht-Aufenthalt pro Stage
             task.wait(2.0)
 
-            -- Reset für nächsten Durchlauf
-            pcall(function() Fire("Submit"); task.wait(0.3); Fire("Create"); task.wait(0.5) end)
+            -- Stage schließen, bereit für nächste
+            pcall(function()
+                _Fire("Submit"); task.wait(0.3)
+                _Fire("Create"); task.wait(0.5)
+            end)
         end
 
-        -- WorldCache speichern (SaveWorldData ist im Hauptskript definiert)
+        -- ★ WorldCache speichern – nutzt SaveWorldData() aus dem Hauptskript
         pcall(SaveWorldData)
 
-        local msg = string.format("✅ World Scan fertig! %d/%d Welten gespeichert (%d Fehler)",
-            done - failed, total, failed)
-        print("[HazeHUB] " .. msg)
+        local _msg = string.format(
+            "✅ World Scan fertig! %d/%d Chapters gespeichert (%d Fehler)",
+            _done - _failed, _total, _failed)
+        print("[HazeHUB] " .. _msg)
 
         pcall(function()
-            H.UI.Lbl.WScanProgress.Text = msg
-            H.UI.Lbl.DBToolStatus.Text  = msg
+            H.UI.Lbl.WScanProgress.Text = _msg
+            H.UI.Lbl.DBToolStatus.Text  = _msg
             H.UI.Lbl.DBToolStatus.TextColor3 = D.Green
-            Tw(H.UI.Fr.WScanBarFill, { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = D.Green }, TM)
-            permWorldScanBtn.Text = "🌍  Permanent World Scan (Full Sync)"
-            permWorldScanBtn.TextColor3 = D.Cyan
-            H.UI.Lbl.ScanStatus.Text = "✅ " .. #S.WorldIds .. " Welten (Permanent Cache)"
+            Tw(_wScanBarFill,
+                { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = D.Green }, TM)
+            _permWorldScanBtn.Text = "🌍  Permanent World Scan (Full Sync)"
+            _permWorldScanBtn.TextColor3 = D.Cyan
+            H.UI.Lbl.ScanStatus.Text =
+                "✅ " .. #S.WorldIds .. " Welten (Permanent Cache)"
             H.UI.Lbl.ScanStatus.TextColor3 = D.Green
         end)
 
@@ -236,27 +261,29 @@ local function RunPermanentWorldScan()
     end)
 end
 
-permWorldScanBtn.MouseButton1Click:Connect(function()
-    RunPermanentWorldScan()
-end)
+_permWorldScanBtn.MouseButton1Click:Connect(RunPermanentWorldScan)
 
--- ★ Auch über _G.HazeShared erreichbar
+-- Auch über _G.HazeShared aufrufbar (z. B. aus autofarm)
 _G.HazeShared.RunPermanentWorldScan = RunPermanentWorldScan
 
--- ── BUTTON 3: Clear World Cache ─────────────────────────────
-local sepCWC = Instance.new("Frame", dbToolCard)
-sepCWC.Size = UDim2.new(1, 0, 0, 1)
-sepCWC.BackgroundColor3 = D.Border
-sepCWC.BackgroundTransparency = 0.4
-sepCWC.BorderSizePixel = 0
+-- ╔══════════════════════════════════════════════════════════╗
+--  BUTTON 3 – Clear World Cache
+-- ╚══════════════════════════════════════════════════════════╝
+local _sepCWC = Instance.new("Frame", _dbToolCard)
+_sepCWC.Size = UDim2.new(1, 0, 0, 1)
+_sepCWC.BackgroundColor3 = D.Border
+_sepCWC.BackgroundTransparency = 0.4
+_sepCWC.BorderSizePixel = 0
 
-MkLbl(dbToolCard,
+MkLbl(_dbToolCard,
     "Löscht HazeHUB_WorldCache.json und setzt die Weltliste auf Standard zurück.",
-    9, D.TextLow).Size = UDim2.new(1, 0, 0, 22)
+    9, D.TextLow
+).Size = UDim2.new(1, 0, 0, 22)
 
-local clearCacheBtn = NeonBtn(dbToolCard, "🗑  Clear World Cache", D.Orange, 34)
-clearCacheBtn.MouseButton1Click:Connect(function()
-    -- 1. Datei löschen
+local _clearCacheBtn = NeonBtn(_dbToolCard, "🗑  Clear World Cache", D.Orange, 34)
+
+_clearCacheBtn.MouseButton1Click:Connect(function()
+    -- 1. Cache-Datei löschen
     pcall(function()
         if isfile and isfile(WORLD_CACHE_FILE) then
             delfile(WORLD_CACHE_FILE)
@@ -264,13 +291,15 @@ clearCacheBtn.MouseButton1Click:Connect(function()
         end
     end)
 
-    -- 2. Laufzeit-Daten zurücksetzen
-    S.WorldData   = {}
-    S.WorldIds    = {}
-    S.ScanDone    = false
+    -- 2. Laufzeit-State zurücksetzen
+    S.WorldData     = {}
+    S.WorldIds      = {}
+    S.ScanDone      = false
     S.ChapFolderRef = nil
+    S.SelWorld      = nil
+    S.SelChap       = nil
 
-    -- 3. GUI zurücksetzen
+    -- 3. Welt-Buttons im Game-Tab leeren
     pcall(function()
         for _, v in pairs(H.UI.Fr.WorldBtns:GetChildren()) do
             if v:IsA("TextButton") then v:Destroy() end
@@ -279,19 +308,22 @@ clearCacheBtn.MouseButton1Click:Connect(function()
             if v:IsA("TextButton") then v:Destroy() end
         end
         H.UI.Fr.ChapBtns = {}
-        S.SelWorld = nil
-        S.SelChap  = nil
+    end)
 
-        H.UI.Lbl.WorldStatus.Text = "🗑 Cache gelöscht – Game-Tab öffnen für Neu-Scan"
+    -- 4. Status-Labels aktualisieren
+    pcall(function()
+        H.UI.Lbl.WorldStatus.Text =
+            "🗑 Cache gelöscht – Game-Tab öffnen für Neu-Scan"
         H.UI.Lbl.WorldStatus.TextColor3 = D.Orange
-        H.UI.Lbl.ScanStatus.Text  = "⚠ Kein Cache – bitte neu scannen"
+        H.UI.Lbl.ScanStatus.Text =
+            "⚠ Kein Cache – beim nächsten Start wird neu gescannt"
         H.UI.Lbl.ScanStatus.TextColor3 = D.Orange
-
-        H.UI.Lbl.DBToolStatus.Text = "✅ WorldCache.json gelöscht. Nächster Start scannt neu."
+        H.UI.Lbl.DBToolStatus.Text =
+            "✅ WorldCache.json gelöscht. Nächster Start scannt neu."
         H.UI.Lbl.DBToolStatus.TextColor3 = D.Green
     end)
 
-    -- 4. Fallback-Daten anzeigen bis echter Scan erfolgt
+    -- 5. Fallback laden damit GUI nicht leer bleibt
     ApplyFallback()
     pcall(RebuildWorldList)
 
