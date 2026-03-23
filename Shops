@@ -1,28 +1,31 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – Shops.lua  v1.0.0
---  GitHub: Hazeluxeeeees/HazeHub-Modules  (branch: main/Shops)
+--  HazeHUB – Shops.lua  v1.1.0
+--  GitHub: Hazeluxeeeees/HazeHub-Modules  (main/Shops)
 --
---  4 Shops: Ghoul Hunt · Merchant · Calamity · Raid Shop
---  Features:
---    + Kaufmenge-TextBox pro Item
---    + Live-Kosten-Vorschau (Cost × Menge)
---    + Aktuelle Spieler-Währung im Shop-Header
---    + Reset-Timer Fortschrittsbalken pro Shop
---      – Calamity / Ghoul / Raid : täglich 04:15 Uhr
---      – Merchant                : stündlich zur :15
---    + FireServer via Remotes in RS
+--  Shops: Ghoul Hunt · Merchant · Calamity · Raid Shop
+--  v1.1 Fixes:
+--    + Robusterer Shared-Wait (wartet auf ShopContainer)
+--    + Währungs-Header zeigt Live-Balance (alle 3s)
+--    + Reset-Timer mit os.time / os.date (kein Freeze)
+--    + Remote-Suche mit mehrfachem Fallback
+--    + Item-Scan aus RS-Ordnern mit WaitForChild
+--    + Kaufmenge-Eingabe + Live-Kostenvorschau
 --    + Alle Pfade dynamisch via LP.Name
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "1.0.0"
+local VERSION = "1.1.0"
 
 -- ============================================================
---  WARTEN BIS SHARED BEREIT (max 12s)
+--  WARTEN BIS SHARED BEREIT
 -- ============================================================
 local waited = 0
-while not (_G.HazeShared and _G.HazeShared.ShopContainer and _G.HazeShared.MkLbl) do
+while not (_G.HazeShared and _G.HazeShared.ShopContainer
+        and _G.HazeShared.Card and _G.HazeShared.MkLbl) do
     task.wait(0.3); waited = waited + 0.3
-    if waited >= 12 then warn("[HazeHub-Shops] _G.HazeShared nicht bereit."); return end
+    if waited >= 15 then
+        warn("[HazeHub-Shops] HazeShared nicht bereit nach 15s – abgebrochen.")
+        return
+    end
 end
 
 -- ============================================================
@@ -30,91 +33,94 @@ end
 -- ============================================================
 local HS      = _G.HazeShared
 local D       = HS.D
-local TF      = HS.TF; local TM = HS.TM; local Tw = HS.Tw
+local TF      = HS.TF;  local TM = HS.TM;  local Tw = HS.Tw
 local Svc     = HS.Svc
-local Card    = HS.Card;   local NeonBtn = HS.NeonBtn
-local MkLbl   = HS.MkLbl;  local SecLbl  = HS.SecLbl
-local MkInput = HS.MkInput; local VList   = HS.VList
-local HList   = HS.HList;   local Pad     = HS.Pad
-local Corner  = HS.Corner;  local Stroke  = HS.Stroke
-local FmtNum  -- definiert unten lokal
+local Card    = HS.Card;    local NeonBtn  = HS.NeonBtn
+local MkLbl   = HS.MkLbl;  local SecLbl   = HS.SecLbl
+local MkInput = HS.MkInput; local VList    = HS.VList
+local HList   = HS.HList;   local Pad      = HS.Pad
+local Corner  = HS.Corner;  local Stroke   = HS.Stroke
 
 -- ============================================================
 --  SERVICES & LOCALS
 -- ============================================================
-local Players  = game:GetService("Players")
-local RS       = game:GetService("ReplicatedStorage")
-local LP       = Players.LocalPlayer           -- ★ dynamisch
-local Http     = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local RS      = game:GetService("ReplicatedStorage")
+local LP      = Players.LocalPlayer   -- ★ immer dynamisch
 
 -- ============================================================
 --  HILFSFUNKTIONEN
 -- ============================================================
-FmtNum = function(n)
+local function FmtNum(n)
     n = math.floor(tonumber(n) or 0)
-    local s = tostring(n); local result = ""; local count = 0
+    local s = tostring(n); local r = ""; local c = 0
     for i = #s, 1, -1 do
-        count = count + 1; result = s:sub(i,i) .. result
-        if count % 3 == 0 and i > 1 then result = "," .. result end
+        c = c + 1; r = s:sub(i,i) .. r
+        if c % 3 == 0 and i > 1 then r = "," .. r end
     end
-    return result
+    return r
 end
 
--- Lese einen Wert aus RS.Player_Data.[LP.Name].[...Pfad]
-local function ReadPlayerData(...)
-    local val = nil
+-- Lese .Value aus RS.Player_Data.[LP.Name].Data.[key]
+local function ReadData(key)
+    local v = nil
     pcall(function()
-        local node = RS:WaitForChild("Player_Data", 3):WaitForChild(LP.Name, 3)
-        for _, part in ipairs({...}) do
-            node = node:WaitForChild(part, 2)
-        end
-        val = node.Value
+        v = RS:WaitForChild("Player_Data",3)
+             :WaitForChild(LP.Name,3)
+             :WaitForChild("Data",3)
+             :WaitForChild(key,2).Value
     end)
-    return val
+    return v
 end
 
--- Sekunden bis zum nächsten Ziel-Zeitpunkt (HH:MM täglich)
-local function SecsUntilDailyTime(targetHour, targetMin)
+-- ============================================================
+--  RESET-TIMER BERECHNUNG
+--  "daily415"  → nächster Reset um 04:15 Uhr lokal
+--  "hourly15"  → nächste volle Stunde + 15 Minuten
+-- ============================================================
+local function SecsUntilReset(timerType)
     local now = os.time()
     local t   = os.date("*t", now)
-    -- Ziel heute
-    local todayTarget = os.time({ year=t.year, month=t.month, day=t.day,
-                                   hour=targetHour, min=targetMin, sec=0 })
-    if todayTarget <= now then
-        todayTarget = todayTarget + 86400   -- morgen
+    if timerType == "hourly15" then
+        -- nächstes XX:15
+        local thisMin15 = os.time({ year=t.year, month=t.month, day=t.day,
+                                     hour=t.hour, min=15, sec=0 })
+        if thisMin15 <= now then thisMin15 = thisMin15 + 3600 end
+        return thisMin15 - now, 3600
+    else
+        -- täglich 04:15
+        local target = os.time({ year=t.year, month=t.month, day=t.day,
+                                  hour=4, min=15, sec=0 })
+        if target <= now then target = target + 86400 end
+        return target - now, 86400
     end
-    return todayTarget - now
 end
 
--- Sekunden bis zur nächsten :15 der aktuellen Stunde
-local function SecsUntilNextHourlyAt15()
-    local now = os.time()
-    local t   = os.date("*t", now)
-    local thisHour15 = os.time({ year=t.year, month=t.month, day=t.day,
-                                  hour=t.hour, min=15, sec=0 })
-    if thisHour15 <= now then
-        thisHour15 = thisHour15 + 3600   -- nächste Stunde :15
-    end
-    return thisHour15 - now
-end
-
-local function FormatCountdown(secs)
-    local h = math.floor(secs / 3600)
-    local m = math.floor((secs % 3600) / 60)
+local function FmtCountdown(secs)
+    secs = math.max(0, math.floor(secs))
+    local h = math.floor(secs/3600)
+    local m = math.floor((secs%3600)/60)
     local s = secs % 60
-    if h > 0 then return string.format("%dh %02dm %02ds", h, m, s)
-    else           return string.format("%dm %02ds", m, s) end
+    if h > 0 then return string.format("%dh %02dm %02ds",h,m,s)
+    else           return string.format("%dm %02ds",m,s) end
 end
 
 -- ============================================================
 --  REMOTE LOOKUP
+--  Sucht erst in RS.Remote.Server.[name], dann RS.[name] tief
 -- ============================================================
 local RemoteCache = {}
 local function GetRemote(name)
     if RemoteCache[name] then return RemoteCache[name] end
     local r = nil
-    pcall(function() r = RS:WaitForChild("Remote", 3):WaitForChild("Server", 3):WaitForChild(name, 3) end)
-    if not r then pcall(function() r = RS:FindFirstChild(name, true) end) end
+    -- Versuch 1: RS.Remote.Server.[name]
+    pcall(function()
+        r = RS:WaitForChild("Remote",3)
+             :WaitForChild("Server",3)
+             :WaitForChild(name,3)
+    end)
+    -- Versuch 2: irgendwo in RS (FindFirstChild tief)
+    if not r then pcall(function() r = RS:FindFirstChild(name,true) end) end
     if r then RemoteCache[name] = r end
     return r
 end
@@ -122,535 +128,503 @@ end
 local function FireRemote(remoteName, ...)
     local r = GetRemote(remoteName)
     if r then
-        pcall(function() r:FireServer(...) end)
-        print(string.format("[HazeHub-Shops] Fire %s(%s)", remoteName,
-            table.concat(table.pack(...), ", ")))
+        local args = {...}
+        pcall(function() r:FireServer(table.unpack(args)) end)
+        print(string.format("[HazeHub-Shops] %s:FireServer(%s)",
+            remoteName, table.concat(table.pack(...),", ")))
     else
-        warn("[HazeHub-Shops] Remote nicht gefunden: " .. remoteName)
+        warn("[HazeHub-Shops] Remote nicht gefunden: " .. tostring(remoteName))
     end
 end
 
 -- ============================================================
---  SHOP CONTAINER aus HazeShared
+--  SHOP-TAB CONTAINER
 -- ============================================================
-local ShopPage = HS.ShopContainer   -- ScrollingFrame / Tab-Page
+local ShopPage = HS.ShopContainer
 
--- Haupt-Layout
-MkLbl(ShopPage, "🏪  Shops", 14, D.Cyan, true)
+local titleLbl = Instance.new("TextLabel", ShopPage)
+titleLbl.Size = UDim2.new(1,0,0,24); titleLbl.BackgroundTransparency = 1
+titleLbl.Text = "🏪  Shops"; titleLbl.TextColor3 = D.Cyan
+titleLbl.TextSize = 14; titleLbl.Font = Enum.Font.GothamBold
+titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 
--- Status-Label (zeigt welches Modul geladen)
-local shopStatusLbl = MkLbl(ShopPage, "🟢  Shop-Modul v" .. VERSION .. " geladen", 10, D.Green)
-shopStatusLbl.Size = UDim2.new(1, 0, 0, 14)
+local verLbl = Instance.new("TextLabel", ShopPage)
+verLbl.Size = UDim2.new(1,0,0,13); verLbl.BackgroundTransparency = 1
+verLbl.Text = "🟢  Shop-Modul v" .. VERSION .. " | Spieler: " .. LP.Name
+verLbl.TextColor3 = D.Green; verLbl.TextSize = 9; verLbl.Font = Enum.Font.Gotham
+verLbl.TextXAlignment = Enum.TextXAlignment.Left
 
 -- ============================================================
 --  RESET-TIMER WIDGET
---  timerType = "daily415" | "hourly15"
 -- ============================================================
 local function BuildResetTimer(parent, timerType)
-    local timerCard = Instance.new("Frame", parent)
-    timerCard.Size = UDim2.new(1, 0, 0, 32); timerCard.BackgroundColor3 = Color3.fromRGB(12, 18, 36)
-    timerCard.BorderSizePixel = 0; Corner(timerCard, 6); Stroke(timerCard, D.CyanDim, 1, 0.5)
+    local tc = Instance.new("Frame", parent)
+    tc.Size = UDim2.new(1,0,0,32); tc.BackgroundColor3 = Color3.fromRGB(12,18,36)
+    tc.BorderSizePixel = 0; Corner(tc,6); Stroke(tc,D.CyanDim,1,0.5)
 
-    local timerLbl = Instance.new("TextLabel", timerCard)
-    timerLbl.Position = UDim2.new(0, 8, 0, 2); timerLbl.Size = UDim2.new(0.55, 0, 0, 14)
-    timerLbl.BackgroundTransparency = 1
-    timerLbl.Text = timerType == "hourly15" and "⏰ Reset: stündlich :15" or "⏰ Reset: täglich 04:15"
-    timerLbl.TextColor3 = D.TextLow; timerLbl.TextSize = 9; timerLbl.Font = Enum.Font.Gotham
-    timerLbl.TextXAlignment = Enum.TextXAlignment.Left
+    local labelTxt = timerType == "hourly15"
+        and "⏰ Reset: stündlich :15"
+        or  "⏰ Reset: täglich 04:15"
 
-    local countLbl = Instance.new("TextLabel", timerCard)
-    countLbl.Position = UDim2.new(0.55, 0, 0, 2); countLbl.Size = UDim2.new(0.44, 0, 0, 14)
-    countLbl.BackgroundTransparency = 1; countLbl.Text = "–"
-    countLbl.TextColor3 = D.Cyan; countLbl.TextSize = 10; countLbl.Font = Enum.Font.GothamBold
-    countLbl.TextXAlignment = Enum.TextXAlignment.Right
+    local tLbl = Instance.new("TextLabel", tc)
+    tLbl.Position = UDim2.new(0,8,0,2); tLbl.Size = UDim2.new(0.5,0,0,14)
+    tLbl.BackgroundTransparency = 1; tLbl.Text = labelTxt
+    tLbl.TextColor3 = D.TextLow; tLbl.TextSize = 9; tLbl.Font = Enum.Font.Gotham
+    tLbl.TextXAlignment = Enum.TextXAlignment.Left
 
-    local barBg = Instance.new("Frame", timerCard)
-    barBg.Position = UDim2.new(0, 8, 0, 18); barBg.Size = UDim2.new(1, -16, 0, 6)
-    barBg.BackgroundColor3 = Color3.fromRGB(20, 28, 50); barBg.BorderSizePixel = 0; Corner(barBg, 3)
+    local cLbl = Instance.new("TextLabel", tc)
+    cLbl.Position = UDim2.new(0.5,0,0,2); cLbl.Size = UDim2.new(0.49,0,0,14)
+    cLbl.BackgroundTransparency = 1; cLbl.Text = "–"
+    cLbl.TextColor3 = D.Cyan; cLbl.TextSize = 10; cLbl.Font = Enum.Font.GothamBold
+    cLbl.TextXAlignment = Enum.TextXAlignment.Right
 
-    local barFill = Instance.new("Frame", barBg)
-    barFill.Size = UDim2.new(1, 0, 1, 0); barFill.BackgroundColor3 = D.CyanDim
-    barFill.BorderSizePixel = 0; Corner(barFill, 3)
+    local barBg = Instance.new("Frame",tc)
+    barBg.Position = UDim2.new(0,8,0,18); barBg.Size = UDim2.new(1,-16,0,6)
+    barBg.BackgroundColor3 = Color3.fromRGB(20,28,50); barBg.BorderSizePixel=0; Corner(barBg,3)
 
-    -- Hintergrund-Loop
+    local barFill = Instance.new("Frame",barBg)
+    barFill.Size = UDim2.new(0,0,1,0); barFill.BackgroundColor3 = D.CyanDim
+    barFill.BorderSizePixel=0; Corner(barFill,3)
+
     task.spawn(function()
-        while timerCard.Parent do
-            local totalSecs, remainSecs
-            if timerType == "hourly15" then
-                totalSecs  = 3600
-                remainSecs = SecsUntilNextHourlyAt15()
-            else
-                totalSecs  = 86400
-                remainSecs = SecsUntilDailyTime(4, 15)
-            end
-            local pct = 1 - (remainSecs / totalSecs)
-            pct = math.max(0, math.min(1, pct))
+        while tc.Parent do
             pcall(function()
-                countLbl.Text = FormatCountdown(remainSecs)
-                Tw(barFill, { Size = UDim2.new(pct, 0, 1, 0),
-                    BackgroundColor3 = pct > 0.85 and D.Red or (pct > 0.5 and D.Yellow or D.Cyan) }, TF)
+                local remain, total = SecsUntilReset(timerType)
+                local elapsed = total - remain
+                local pct = math.max(0, math.min(1, elapsed / total))
+                local col = pct > 0.9 and D.Red or (pct > 0.6 and D.Yellow or D.CyanDim)
+                cLbl.Text = FmtCountdown(remain)
+                Tw(barFill, { Size = UDim2.new(pct,0,1,0), BackgroundColor3 = col }, TF)
             end)
             task.wait(1)
         end
     end)
-
-    return timerCard
+    return tc
 end
 
 -- ============================================================
---  ITEM-ROW BUILDER
---  Liest Items aus einem RS-Ordner und baut je eine Kauf-Zeile
+--  SHOP HEADER WIDGET
 -- ============================================================
---  shopDef = {
---    remoteName  = string,
---    extraArgs   = function(itemName, qty) -> {...}  (optional)
---  }
---  folderGetter = function() -> Folder | nil
---  currencyKey  = string  (Name in Player_Data.Data)
+local function BuildShopHeader(parent, shopName, currencyKey, acc)
+    acc = acc or D.Cyan
+    local r,g,b = math.floor(acc.R*255), math.floor(acc.G*255), math.floor(acc.B*255)
+
+    local hc = Instance.new("Frame", parent)
+    hc.Size = UDim2.new(1,0,0,40); hc.BorderSizePixel=0; Corner(hc,8)
+    hc.BackgroundColor3 = Color3.fromRGB(
+        math.clamp(math.floor(r*0.12),0,255),
+        math.clamp(math.floor(g*0.12),0,255),
+        math.clamp(math.floor(b*0.12),0,255))
+    Stroke(hc, acc, 2, 0.1)
+
+    local grad = Instance.new("UIGradient", hc)
+    grad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(
+            math.clamp(math.floor(r*0.25),0,255),
+            math.clamp(math.floor(g*0.25),0,255),
+            math.clamp(math.floor(b*0.25),0,255))),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(10,14,28)),
+    })
+    grad.Rotation = 90
+
+    local snL = Instance.new("TextLabel", hc)
+    snL.Position = UDim2.new(0,10,0,4); snL.Size = UDim2.new(0.58,-10,0,16)
+    snL.BackgroundTransparency=1; snL.Text = shopName
+    snL.TextColor3=acc; snL.TextSize=13; snL.Font=Enum.Font.GothamBold
+    snL.TextXAlignment=Enum.TextXAlignment.Left
+
+    local curL = Instance.new("TextLabel", hc)
+    curL.Position = UDim2.new(0,10,0,22); curL.Size = UDim2.new(0.58,-10,0,13)
+    curL.BackgroundTransparency=1; curL.Text = "U Have: " .. currencyKey
+    curL.TextColor3=D.TextLow; curL.TextSize=9; curL.Font=Enum.Font.Gotham
+    curL.TextXAlignment=Enum.TextXAlignment.Left
+
+    local balL = Instance.new("TextLabel", hc)
+    balL.Position = UDim2.new(0.58,0,0,0); balL.Size = UDim2.new(0.41,-4,1,0)
+    balL.BackgroundTransparency=1; balL.Text = "–"
+    balL.TextColor3=acc; balL.TextSize=17; balL.Font=Enum.Font.GothamBold
+    balL.TextXAlignment=Enum.TextXAlignment.Right
+
+    task.spawn(function()
+        while hc.Parent do
+            pcall(function()
+                local v = ReadData(currencyKey)
+                if v ~= nil then
+                    balL.Text = FmtNum(v)
+                    balL.TextColor3 = acc
+                    curL.Text = "U Have: " .. currencyKey
+                else
+                    balL.Text = "–"
+                    curL.Text = currencyKey .. " (Pfad fehlt)"
+                    balL.TextColor3 = D.TextLow
+                end
+            end)
+            task.wait(3)
+        end
+    end)
+    return hc
+end
+
 -- ============================================================
-local function BuildShopItemList(parent, folderGetter, shopDef, accentColor)
-    local acc = accentColor or D.Cyan
+--  ITEM-LISTEN BUILDER
+-- ============================================================
+local function BuildItemList(parent, folderGetter, shopDef, acc)
+    acc = acc or D.Cyan
 
-    local itemsContainer = Instance.new("Frame", parent)
-    itemsContainer.Size = UDim2.new(1, 0, 0, 0)
-    itemsContainer.AutomaticSize = Enum.AutomaticSize.Y
-    itemsContainer.BackgroundTransparency = 1
-    VList(itemsContainer, 5)
+    local container = Instance.new("Frame", parent)
+    container.Size = UDim2.new(1,0,0,0); container.AutomaticSize = Enum.AutomaticSize.Y
+    container.BackgroundTransparency=1; VList(container,5)
 
-    local emptyLbl = MkLbl(itemsContainer, "⏳ Shop-Daten werden geladen...", 10, D.TextLow)
-    emptyLbl.Size = UDim2.new(1, 0, 0, 24)
+    local statusLbl = MkLbl(container, "⏳ Lade Shop-Items...", 10, D.TextLow)
+    statusLbl.Size = UDim2.new(1,0,0,22)
 
     local function Rebuild()
-        for _, v in pairs(itemsContainer:GetChildren()) do
+        for _,v in pairs(container:GetChildren()) do
             if v:IsA("Frame") then v:Destroy() end
         end
-        emptyLbl.Visible = true
+        statusLbl.Text = "⏳ Lade Shop-Items..."
+        statusLbl.TextColor3 = D.TextLow
+        statusLbl.Visible = true
 
         local folder = folderGetter()
         if not folder then
-            emptyLbl.Text = "⚠ Shop-Ordner nicht gefunden (Pfad prüfen)."
-            emptyLbl.TextColor3 = D.Orange
+            statusLbl.Text = "⚠ Shop-Ordner nicht gefunden."
+            statusLbl.TextColor3 = D.Orange
             return
         end
 
         local items = {}
-        for _, child in ipairs(folder:GetChildren()) do
-            if not child:IsA("UIGridLayout") and not child:IsA("UIListLayout")
-            and not child:IsA("UIPadding") then
-                table.insert(items, child)
+        for _, ch in ipairs(folder:GetChildren()) do
+            if not (ch:IsA("UIGridLayout") or ch:IsA("UIListLayout")
+                 or ch:IsA("UIPadding")    or ch:IsA("UICorner")) then
+                table.insert(items, ch)
             end
         end
-        table.sort(items, function(a,b) return a.Name < b.Name end)
-
         if #items == 0 then
-            emptyLbl.Text = "Shop ist leer."; emptyLbl.TextColor3 = D.TextLow; return
+            statusLbl.Text = "Shop ist leer."; statusLbl.TextColor3 = D.TextLow; return
         end
-        emptyLbl.Visible = false
+        table.sort(items, function(a,b) return a.Name < b.Name end)
+        statusLbl.Visible = false
+
+        local r,g,b = math.floor(acc.R*255), math.floor(acc.G*255), math.floor(acc.B*255)
 
         for _, item in ipairs(items) do
             local iName = item.Name
-            local qty, costAmt = "–", "–"
+            local rawQty, rawCost = 0, 0
+            local qtyStr, costStr = "–", "–"
             pcall(function()
-                local qv = item:FindFirstChild("Quantity") or item:FindFirstChild("Amount")
-                if qv then qty = FmtNum(qv.Value) end
+                local qv = item:FindFirstChild("Quantity")
+                         or item:FindFirstChild("Amount")
+                         or item:FindFirstChild("Stock")
+                if qv then rawQty = tonumber(qv.Value) or 0; qtyStr = FmtNum(rawQty) end
             end)
             pcall(function()
-                local cv = item:FindFirstChild("CurrencyAmount") or item:FindFirstChild("Cost")
+                local cv = item:FindFirstChild("CurrencyAmount")
+                         or item:FindFirstChild("Cost")
                          or item:FindFirstChild("Price")
-                if cv then costAmt = FmtNum(cv.Value) end
+                if cv then rawCost = tonumber(cv.Value) or 0; costStr = FmtNum(rawCost) end
             end)
 
-            -- Row-Frame (Höhe 64 für TextBox + Vorschau)
-            local row = Instance.new("Frame", itemsContainer)
-            row.Size = UDim2.new(1, 0, 0, 64); row.BackgroundColor3 = D.Card
-            row.BorderSizePixel = 0; Corner(row, 8); Stroke(row, acc, 1, 0.65)
+            local row = Instance.new("Frame", container)
+            row.Size = UDim2.new(1,0,0,72); row.BackgroundColor3 = D.Card
+            row.BorderSizePixel=0; Corner(row,8); Stroke(row,acc,1,0.6)
 
-            local acBar = Instance.new("Frame", row)
-            acBar.Size = UDim2.new(0, 3, 1, 0); acBar.BackgroundColor3 = acc
-            acBar.BorderSizePixel = 0; Corner(acBar, 2)
+            local acBar = Instance.new("Frame",row)
+            acBar.Size = UDim2.new(0,3,1,0); acBar.BackgroundColor3=acc
+            acBar.BorderSizePixel=0; Corner(acBar,2)
 
-            -- Name
-            local nameLbl = Instance.new("TextLabel", row)
-            nameLbl.Position = UDim2.new(0, 10, 0, 4); nameLbl.Size = UDim2.new(0.6, -10, 0, 16)
-            nameLbl.BackgroundTransparency = 1; nameLbl.Text = iName
-            nameLbl.TextColor3 = D.TextHi; nameLbl.TextSize = 12; nameLbl.Font = Enum.Font.GothamBold
-            nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-            nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+            local nL = Instance.new("TextLabel",row)
+            nL.Position = UDim2.new(0,10,0,4); nL.Size = UDim2.new(1,-14,0,18)
+            nL.BackgroundTransparency=1; nL.Text = iName
+            nL.TextColor3=D.TextHi; nL.TextSize=12; nL.Font=Enum.Font.GothamBold
+            nL.TextXAlignment=Enum.TextXAlignment.Left; nL.TextTruncate=Enum.TextTruncate.AtEnd
 
-            -- Menge & Preis
-            local infoLbl = Instance.new("TextLabel", row)
-            infoLbl.Position = UDim2.new(0, 10, 0, 22); infoLbl.Size = UDim2.new(0.6, -10, 0, 13)
-            infoLbl.BackgroundTransparency = 1
-            infoLbl.Text = "Qty: " .. qty .. "  |  Preis: " .. costAmt
-            infoLbl.TextColor3 = D.TextLow; infoLbl.TextSize = 9; infoLbl.Font = Enum.Font.Gotham
-            infoLbl.TextXAlignment = Enum.TextXAlignment.Left
+            local iL = Instance.new("TextLabel",row)
+            iL.Position = UDim2.new(0,10,0,24); iL.Size = UDim2.new(1,-14,0,13)
+            iL.BackgroundTransparency=1
+            iL.Text = string.format("Qty: %s  |  Preis: %s", qtyStr, costStr)
+            iL.TextColor3=D.TextLow; iL.TextSize=9; iL.Font=Enum.Font.Gotham
+            iL.TextXAlignment=Enum.TextXAlignment.Left
 
-            -- Eingabe-Box (Kaufmenge)
-            local inputOuter = Instance.new("Frame", row)
-            inputOuter.Position = UDim2.new(0, 10, 0, 38); inputOuter.Size = UDim2.new(0.38, -14, 0, 20)
-            inputOuter.BackgroundColor3 = D.Input; inputOuter.BorderSizePixel = 0
-            Corner(inputOuter, 5); Stroke(inputOuter, acc, 1, 0.4)
+            local inOuter = Instance.new("Frame",row)
+            inOuter.Position = UDim2.new(0,10,0,40); inOuter.Size = UDim2.new(0.36,-14,0,24)
+            inOuter.BackgroundColor3=D.Input; inOuter.BorderSizePixel=0
+            Corner(inOuter,5); Stroke(inOuter,acc,1,0.4)
 
-            local inputBox = Instance.new("TextBox", inputOuter)
-            inputBox.Size = UDim2.new(1, 0, 1, 0); inputBox.BackgroundTransparency = 1
-            inputBox.PlaceholderText = "Menge..."; inputBox.PlaceholderColor3 = D.TextLow
-            inputBox.Text = ""; inputBox.TextColor3 = D.TextHi
-            inputBox.TextSize = 10; inputBox.Font = Enum.Font.Gotham
-            inputBox.ClearTextOnFocus = false
-            Pad(inputBox, 0, 6, 0, 6)
+            local inBox = Instance.new("TextBox",inOuter)
+            inBox.Size = UDim2.new(1,0,1,0); inBox.BackgroundTransparency=1
+            inBox.PlaceholderText="Menge"; inBox.PlaceholderColor3=D.TextLow
+            inBox.Text=""; inBox.TextColor3=D.TextHi
+            inBox.TextSize=10; inBox.Font=Enum.Font.Gotham
+            inBox.ClearTextOnFocus=false
+            Pad(inBox,0,5,0,5)
 
-            -- Live-Kosten-Vorschau
-            local previewLbl = Instance.new("TextLabel", row)
-            previewLbl.Position = UDim2.new(0.38, 2, 0, 38); previewLbl.Size = UDim2.new(0.28, -4, 0, 20)
-            previewLbl.BackgroundTransparency = 1; previewLbl.Text = ""
-            previewLbl.TextColor3 = D.Gold; previewLbl.TextSize = 9; previewLbl.Font = Enum.Font.GothamBold
-            previewLbl.TextXAlignment = Enum.TextXAlignment.Left; previewLbl.TextWrapped = true
+            local pvL = Instance.new("TextLabel",row)
+            pvL.Position = UDim2.new(0.36,2,0,40); pvL.Size = UDim2.new(0.28,-4,0,24)
+            pvL.BackgroundTransparency=1; pvL.Text=""
+            pvL.TextColor3=D.Gold; pvL.TextSize=9; pvL.Font=Enum.Font.GothamBold
+            pvL.TextXAlignment=Enum.TextXAlignment.Left; pvL.TextWrapped=true
 
-            local rawCost = 0
-            pcall(function()
-                local cv = item:FindFirstChild("CurrencyAmount") or item:FindFirstChild("Cost")
-                         or item:FindFirstChild("Price")
-                if cv then rawCost = tonumber(cv.Value) or 0 end
-            end)
-
-            inputBox:GetPropertyChangedSignal("Text"):Connect(function()
-                local n = tonumber(inputBox.Text)
-                if n and n > 0 and rawCost > 0 then
-                    previewLbl.Text = "= " .. FmtNum(n * rawCost)
-                    previewLbl.TextColor3 = D.Gold
-                elseif n and n > 0 then
-                    previewLbl.Text = "= ?"
-                    previewLbl.TextColor3 = D.TextLow
+            inBox:GetPropertyChangedSignal("Text"):Connect(function()
+                local n = tonumber(inBox.Text)
+                if n and n > 0 then
+                    pvL.Text = rawCost > 0 and ("= " .. FmtNum(math.floor(n*rawCost))) or "= ?"
+                    pvL.TextColor3 = rawCost > 0 and D.Gold or D.TextLow
                 else
-                    previewLbl.Text = ""
+                    pvL.Text = ""
                 end
             end)
 
-            -- Kauf-Button
-            local buyBtn = Instance.new("TextButton", row)
-            buyBtn.Position = UDim2.new(0.68, 2, 0, 36); buyBtn.Size = UDim2.new(0.32, -8, 0, 22)
+            local buyBtn = Instance.new("TextButton",row)
+            buyBtn.Position = UDim2.new(0.65,2,0,38); buyBtn.Size = UDim2.new(0.35,-8,0,26)
             buyBtn.BackgroundColor3 = Color3.fromRGB(
-                math.clamp(math.floor(acc.R*255*0.25), 0, 255),
-                math.clamp(math.floor(acc.G*255*0.25), 0, 255),
-                math.clamp(math.floor(acc.B*255*0.25), 0, 255))
-            buyBtn.Text = "🛒 Kaufen"; buyBtn.TextColor3 = acc
-            buyBtn.TextSize = 10; buyBtn.Font = Enum.Font.GothamBold
-            buyBtn.AutoButtonColor = false; buyBtn.BorderSizePixel = 0
-            Corner(buyBtn, 6); Stroke(buyBtn, acc, 1, 0.3)
+                math.clamp(math.floor(r*0.22),0,255),
+                math.clamp(math.floor(g*0.22),0,255),
+                math.clamp(math.floor(b*0.22),0,255))
+            buyBtn.Text = "🛒 Kaufen"; buyBtn.TextColor3=acc
+            buyBtn.TextSize=10; buyBtn.Font=Enum.Font.GothamBold
+            buyBtn.AutoButtonColor=false; buyBtn.BorderSizePixel=0
+            Corner(buyBtn,6); Stroke(buyBtn,acc,1,0.25)
 
             buyBtn.MouseEnter:Connect(function()
-                Tw(buyBtn, { BackgroundColor3 = Color3.fromRGB(
-                    math.clamp(math.floor(acc.R*255*0.4), 0, 255),
-                    math.clamp(math.floor(acc.G*255*0.4), 0, 255),
-                    math.clamp(math.floor(acc.B*255*0.4), 0, 255)) })
+                Tw(buyBtn,{BackgroundColor3=Color3.fromRGB(
+                    math.clamp(math.floor(r*0.38),0,255),
+                    math.clamp(math.floor(g*0.38),0,255),
+                    math.clamp(math.floor(b*0.38),0,255))})
             end)
             buyBtn.MouseLeave:Connect(function()
-                Tw(buyBtn, { BackgroundColor3 = Color3.fromRGB(
-                    math.clamp(math.floor(acc.R*255*0.25), 0, 255),
-                    math.clamp(math.floor(acc.G*255*0.25), 0, 255),
-                    math.clamp(math.floor(acc.B*255*0.25), 0, 255)) })
+                Tw(buyBtn,{BackgroundColor3=Color3.fromRGB(
+                    math.clamp(math.floor(r*0.22),0,255),
+                    math.clamp(math.floor(g*0.22),0,255),
+                    math.clamp(math.floor(b*0.22),0,255))})
             end)
 
             local capName = iName
             buyBtn.MouseButton1Click:Connect(function()
-                local qty2 = tonumber(inputBox.Text)
-                if not qty2 or qty2 <= 0 then
-                    buyBtn.Text = "⚠ Menge!"; buyBtn.TextColor3 = D.Red
-                    task.delay(1.5, function() pcall(function()
-                        buyBtn.Text = "🛒 Kaufen"; buyBtn.TextColor3 = acc
+                local qty = math.floor(tonumber(inBox.Text) or 0)
+                if qty <= 0 then
+                    buyBtn.Text = "⚠ Menge!"; buyBtn.TextColor3=D.Red
+                    task.delay(1.5,function() pcall(function()
+                        buyBtn.Text="🛒 Kaufen"; buyBtn.TextColor3=acc
                     end) end)
                     return
                 end
-                qty2 = math.floor(qty2)
-                buyBtn.Text = "⏳..."; buyBtn.TextColor3 = D.Yellow
-
-                -- Remote feuern – Extra-Args kommen aus shopDef.extraArgs
-                local args
-                if shopDef.extraArgs then
-                    args = shopDef.extraArgs(capName, qty2)
-                else
-                    args = { capName, qty2 }
-                end
+                buyBtn.Text = "⏳..."; buyBtn.TextColor3=D.Yellow
+                local args = shopDef.extraArgs
+                    and shopDef.extraArgs(capName,qty)
+                    or  {capName, qty}
                 FireRemote(shopDef.remoteName, table.unpack(args))
-
-                task.delay(1.2, function() pcall(function()
-                    buyBtn.Text = "✅ OK"; buyBtn.TextColor3 = D.GreenBright
-                    task.delay(1.5, function() pcall(function()
-                        buyBtn.Text = "🛒 Kaufen"; buyBtn.TextColor3 = acc
+                task.delay(1,function() pcall(function()
+                    buyBtn.Text="✅ OK"; buyBtn.TextColor3=D.GreenBright
+                    task.delay(1.5,function() pcall(function()
+                        buyBtn.Text="🛒 Kaufen"; buyBtn.TextColor3=acc
                     end) end)
                 end) end)
             end)
         end
     end
 
-    -- Sofort laden
     task.spawn(function() pcall(Rebuild) end)
-
-    -- Refresh-Button zurückgeben für externen Aufruf
-    return itemsContainer, Rebuild
+    return container, Rebuild
 end
 
 -- ============================================================
---  SHOP HEADER WIDGET
---  Zeigt Shop-Name + aktuelle Spieler-Währung
+--  SHOP BUILDER HELPER
 -- ============================================================
-local function BuildShopHeader(parent, shopName, currencyKey, accentColor)
-    local acc = accentColor or D.Cyan
-    local hCard = Instance.new("Frame", parent)
-    hCard.Size = UDim2.new(1, 0, 0, 38); hCard.BackgroundColor3 = Color3.fromRGB(
-        math.clamp(math.floor(acc.R*255*0.12), 0, 255),
-        math.clamp(math.floor(acc.G*255*0.12), 0, 255),
-        math.clamp(math.floor(acc.B*255*0.12), 0, 255))
-    hCard.BorderSizePixel = 0; Corner(hCard, 8); Stroke(hCard, acc, 2, 0.15)
+local function BuildShop(opts)
+    local shopCard = Card(opts.parent)
+    Pad(shopCard,10,12,10,12); VList(shopCard,7)
+    Stroke(shopCard, opts.accent, 1.5, 0.25)
 
-    local gradient = Instance.new("UIGradient", hCard)
-    gradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(
-            math.clamp(math.floor(acc.R*255*0.22), 0, 255),
-            math.clamp(math.floor(acc.G*255*0.22), 0, 255),
-            math.clamp(math.floor(acc.B*255*0.22), 0, 255))),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 14, 28)),
-    })
-    gradient.Rotation = 90
+    BuildShopHeader(shopCard, opts.name, opts.currencyKey, opts.accent)
+    BuildResetTimer(shopCard, opts.timerType)
 
-    local titleLbl = Instance.new("TextLabel", hCard)
-    titleLbl.Position = UDim2.new(0, 10, 0, 4); titleLbl.Size = UDim2.new(0.55, 0, 0.55, 0)
-    titleLbl.BackgroundTransparency = 1; titleLbl.Text = shopName
-    titleLbl.TextColor3 = acc; titleLbl.TextSize = 13; titleLbl.Font = Enum.Font.GothamBold
-    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+    local _, rebuildFn = BuildItemList(shopCard, opts.folderGetter, opts.shopDef, opts.accent)
 
-    local currencyLbl = Instance.new("TextLabel", hCard)
-    currencyLbl.Position = UDim2.new(0, 10, 0.5, 0); currencyLbl.Size = UDim2.new(0.55, 0, 0.5, 0)
-    currencyLbl.BackgroundTransparency = 1; currencyLbl.Text = "U Have: ..."
-    currencyLbl.TextColor3 = D.TextLow; currencyLbl.TextSize = 9; currencyLbl.Font = Enum.Font.Gotham
-    currencyLbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    local balanceLbl = Instance.new("TextLabel", hCard)
-    balanceLbl.Position = UDim2.new(0.55, 0, 0, 0); balanceLbl.Size = UDim2.new(0.44, 0, 1, 0)
-    balanceLbl.BackgroundTransparency = 1; balanceLbl.Text = "–"
-    balanceLbl.TextColor3 = acc; balanceLbl.TextSize = 16; balanceLbl.Font = Enum.Font.GothamBold
-    balanceLbl.TextXAlignment = Enum.TextXAlignment.Right
-
-    -- Laufend aktualisieren
-    task.spawn(function()
-        while hCard.Parent do
-            pcall(function()
-                local val = ReadPlayerData("Data", currencyKey)
-                if val ~= nil then
-                    balanceLbl.Text = FmtNum(val)
-                    currencyLbl.Text = "U Have: " .. currencyKey
-                    balanceLbl.TextColor3 = acc
-                else
-                    balanceLbl.Text = "–"
-                    currencyLbl.Text = currencyKey .. " (nicht gefunden)"
-                    balanceLbl.TextColor3 = D.TextLow
-                end
-            end)
-            task.wait(3)
-        end
+    local refBtn = NeonBtn(shopCard, "🔄 Shop neu laden", D.CyanDim, 26)
+    refBtn.MouseButton1Click:Connect(function()
+        refBtn.Text="⏳ Lädt..."; refBtn.TextColor3=D.Yellow
+        task.spawn(function()
+            pcall(rebuildFn)
+            pcall(function() refBtn.Text="🔄 Shop neu laden"; refBtn.TextColor3=D.CyanDim end)
+        end)
     end)
-
-    return hCard
+    return shopCard
 end
 
 -- ============================================================
---  SHOP 1: GHOUL HUNT  (RCCells)
+--  SHOP 1 – GHOUL HUNT
 --  Pfad  : RS.Player_Data.[Name].GhoulHunt
---  Remote: GhoulHuntExchange:FireServer(ItemName, Menge)
+--  Remote: GhoulHuntExchange(ItemName, Menge)
+--  Währung: RCCells
 -- ============================================================
-do
-    local shopCard = Card(ShopPage); Pad(shopCard, 10, 12, 10, 12); VList(shopCard, 7)
-    Stroke(shopCard, D.Teal, 1.5, 0.3)
-
-    BuildShopHeader(shopCard, "👻  Ghoul Hunt", "RCCells", D.Teal)
-    BuildResetTimer(shopCard, "daily415")
-
-    local refreshLbl = MkLbl(shopCard, "", 9, D.TextLow); refreshLbl.Size = UDim2.new(1,0,0,0)
-    local _, rebuild1 = BuildShopItemList(shopCard,
-        function()
-            local f = nil
-            pcall(function()
-                f = RS:WaitForChild("Player_Data",3):WaitForChild(LP.Name,3)
-                     :WaitForChild("GhoulHunt", 3)
-            end)
-            return f
-        end,
-        {
-            remoteName = "GhoulHuntExchange",
-            -- FireServer(ItemName, Menge)
-            extraArgs = function(name, qty) return { name, qty } end
-        },
-        D.Teal
-    )
-
-    local refBtn = NeonBtn(shopCard, "🔄 Shop neu laden", D.CyanDim, 26)
-    refBtn.MouseButton1Click:Connect(function()
-        task.spawn(function() pcall(rebuild1) end)
-    end)
-end
+BuildShop({
+    parent       = ShopPage,
+    name         = "👻  Ghoul Hunt",
+    currencyKey  = "RCCells",
+    accent       = D.Teal,
+    timerType    = "daily415",
+    folderGetter = function()
+        local f=nil
+        pcall(function()
+            f = RS:WaitForChild("Player_Data",3)
+                 :WaitForChild(LP.Name,3)
+                 :WaitForChild("GhoulHunt",3)
+        end)
+        return f
+    end,
+    shopDef = {
+        remoteName = "GhoulHuntExchange",
+        extraArgs  = function(name,qty) return {name,qty} end,
+    },
+})
 
 -- ============================================================
---  SHOP 2: MERCHANT  (Gold)
+--  SHOP 2 – MERCHANT
 --  Pfad  : RS.Player_Data.[Name].Merchant
---  Remote: Merchant:FireServer(ItemName, Menge)
+--  Remote: Merchant(ItemName, Menge)
+--  Währung: Gold
+-- ============================================================
+BuildShop({
+    parent       = ShopPage,
+    name         = "🏦  Merchant",
+    currencyKey  = "Gold",
+    accent       = D.Gold,
+    timerType    = "hourly15",
+    folderGetter = function()
+        local f=nil
+        pcall(function()
+            f = RS:WaitForChild("Player_Data",3)
+                 :WaitForChild(LP.Name,3)
+                 :WaitForChild("Merchant",3)
+        end)
+        return f
+    end,
+    shopDef = {
+        remoteName = "Merchant",
+        extraArgs  = function(name,qty) return {name,qty} end,
+    },
+})
+
+-- ============================================================
+--  SHOP 3 – CALAMITY (FireForce + JJK)
+--  Pfad  : RS.Calamity_Shop.FireForce  /  .JJK
+--  Remote: Calamity_Shop(ShopType, ItemName, Menge)
+--  Währung: Sol Token | Cursed Essence
 -- ============================================================
 do
-    local shopCard = Card(ShopPage); Pad(shopCard, 10, 12, 10, 12); VList(shopCard, 7)
-    Stroke(shopCard, D.Gold, 1.5, 0.3)
+    local calCard = Card(ShopPage); Pad(calCard,10,12,10,12); VList(calCard,8)
+    Stroke(calCard, D.Orange, 1.5, 0.25)
 
-    BuildShopHeader(shopCard, "🏦  Merchant", "Gold", D.Gold)
-    BuildResetTimer(shopCard, "hourly15")
+    local hdr = Instance.new("TextLabel",calCard)
+    hdr.Size=UDim2.new(1,0,0,22); hdr.BackgroundTransparency=1
+    hdr.Text="⚡  Calamity Shop"; hdr.TextColor3=D.Orange
+    hdr.TextSize=13; hdr.Font=Enum.Font.GothamBold; hdr.TextXAlignment=Enum.TextXAlignment.Left
 
-    local _, rebuild2 = BuildShopItemList(shopCard,
-        function()
-            local f = nil
-            pcall(function()
-                f = RS:WaitForChild("Player_Data",3):WaitForChild(LP.Name,3)
-                     :WaitForChild("Merchant", 3)
-            end)
-            return f
-        end,
-        {
-            remoteName = "Merchant",
-            extraArgs = function(name, qty) return { name, qty } end
-        },
-        D.Gold
-    )
-
-    local refBtn = NeonBtn(shopCard, "🔄 Shop neu laden", D.CyanDim, 26)
-    refBtn.MouseButton1Click:Connect(function()
-        task.spawn(function() pcall(rebuild2) end)
-    end)
-end
-
--- ============================================================
---  SHOP 3: CALAMITY SHOP
---  Zwei Untershops: FireForce (Sol Token) & JJK (Cursed Essence)
---  Pfad  : RS.Calamity_Shop.FireForce  /  RS.Calamity_Shop.JJK
---  Remote: Calamity_Shop:FireServer(ShopType, ItemName, Menge)
--- ============================================================
-do
-    local shopCard = Card(ShopPage); Pad(shopCard, 10, 12, 10, 12); VList(shopCard, 8)
-    Stroke(shopCard, D.Orange, 1.5, 0.3)
-
-    -- Kein einzelner Header – zwei Sub-Header
-    local mainHdr = Instance.new("TextLabel", shopCard)
-    mainHdr.Size = UDim2.new(1,0,0,22); mainHdr.BackgroundTransparency = 1
-    mainHdr.Text = "⚡  Calamity Shop"; mainHdr.TextColor3 = D.Orange
-    mainHdr.TextSize = 13; mainHdr.Font = Enum.Font.GothamBold
-    mainHdr.TextXAlignment = Enum.TextXAlignment.Left
-
-    BuildResetTimer(shopCard, "daily415")
+    BuildResetTimer(calCard,"daily415")
 
     -- FireForce (Sol Token)
-    do
-        BuildShopHeader(shopCard, "🔥  FireForce", "Sol Token", D.Orange)
+    Instance.new("Frame",calCard).Size = UDim2.new(1,0,0,1)  -- thin separator
 
-        local _, rebFF = BuildShopItemList(shopCard,
-            function()
-                local f = nil
-                pcall(function() f = RS:WaitForChild("Calamity_Shop",3):WaitForChild("FireForce",3) end)
-                return f
-            end,
-            {
-                remoteName = "Calamity_Shop",
-                -- FireServer("FireForce", ItemName, Menge)
-                extraArgs = function(name, qty) return { "FireForce", name, qty } end
-            },
-            D.Orange
-        )
-
-        local refBtn = NeonBtn(shopCard, "🔄 FireForce neu laden", Color3.fromRGB(160,80,0), 24)
-        refBtn.MouseButton1Click:Connect(function() task.spawn(function() pcall(rebFF) end) end)
-    end
+    BuildShopHeader(calCard,"🔥  FireForce","Sol Token",D.Orange)
+    local _,rebFF = BuildItemList(calCard,
+        function()
+            local f=nil; pcall(function()
+                f=RS:WaitForChild("Calamity_Shop",3):WaitForChild("FireForce",3)
+            end); return f
+        end,
+        { remoteName="Calamity_Shop",
+          extraArgs=function(n,q) return {"FireForce",n,q} end },
+        D.Orange)
+    local rfFF = NeonBtn(calCard,"🔄 FireForce neu laden",Color3.fromRGB(150,75,0),24)
+    rfFF.MouseButton1Click:Connect(function()
+        rfFF.Text="⏳..."; rfFF.TextColor3=D.Yellow
+        task.spawn(function() pcall(rebFF)
+            pcall(function() rfFF.Text="🔄 FireForce neu laden"; rfFF.TextColor3=Color3.fromRGB(150,75,0) end)
+        end)
+    end)
 
     -- JJK (Cursed Essence)
-    do
-        BuildShopHeader(shopCard, "🌀  JJK", "Cursed Essence", D.Purple)
+    Instance.new("Frame",calCard).Size = UDim2.new(1,0,0,1)
 
-        local _, rebJJK = BuildShopItemList(shopCard,
-            function()
-                local f = nil
-                pcall(function() f = RS:WaitForChild("Calamity_Shop",3):WaitForChild("JJK",3) end)
-                return f
-            end,
-            {
-                remoteName = "Calamity_Shop",
-                -- FireServer("JJK", ItemName, Menge)
-                extraArgs = function(name, qty) return { "JJK", name, qty } end
-            },
-            D.Purple
-        )
-
-        local refBtn = NeonBtn(shopCard, "🔄 JJK neu laden", D.CyanDim, 24)
-        refBtn.MouseButton1Click:Connect(function() task.spawn(function() pcall(rebJJK) end) end)
-    end
+    BuildShopHeader(calCard,"🌀  JJK","Cursed Essence",D.Purple)
+    local _,rebJJK = BuildItemList(calCard,
+        function()
+            local f=nil; pcall(function()
+                f=RS:WaitForChild("Calamity_Shop",3):WaitForChild("JJK",3)
+            end); return f
+        end,
+        { remoteName="Calamity_Shop",
+          extraArgs=function(n,q) return {"JJK",n,q} end },
+        D.Purple)
+    local rfJJK = NeonBtn(calCard,"🔄 JJK neu laden",D.CyanDim,24)
+    rfJJK.MouseButton1Click:Connect(function()
+        rfJJK.Text="⏳..."; rfJJK.TextColor3=D.Yellow
+        task.spawn(function() pcall(rebJJK)
+            pcall(function() rfJJK.Text="🔄 JJK neu laden"; rfJJK.TextColor3=D.CyanDim end)
+        end)
+    end)
 end
 
 -- ============================================================
---  SHOP 4: RAID SHOP
---  Zwei Untershops: Esper (Esper Token) & JJK (Cursed Scrolls)
---  Pfad  : RS.JJK_Raid_Shop.Esper  /  RS.JJK_Raid_Shop.JJK
---  Remote: JJK_RaidShop:FireServer(ShopType, ItemName, Menge)
+--  SHOP 4 – RAID SHOP (Esper + JJK)
+--  Pfad  : RS.JJK_Raid_Shop.Esper  /  .JJK
+--  Remote: JJK_RaidShop(ShopType, ItemName, Menge)
+--  Währung: Esper Token | Cursed Scrolls
 -- ============================================================
 do
-    local shopCard = Card(ShopPage); Pad(shopCard, 10, 12, 10, 12); VList(shopCard, 8)
-    Stroke(shopCard, D.Purple, 1.5, 0.3)
+    local raidCard = Card(ShopPage); Pad(raidCard,10,12,10,12); VList(raidCard,8)
+    Stroke(raidCard, D.Purple, 1.5, 0.25)
 
-    local mainHdr = Instance.new("TextLabel", shopCard)
-    mainHdr.Size = UDim2.new(1,0,0,22); mainHdr.BackgroundTransparency = 1
-    mainHdr.Text = "⚔️  Raid Shop"; mainHdr.TextColor3 = D.Purple
-    mainHdr.TextSize = 13; mainHdr.Font = Enum.Font.GothamBold
-    mainHdr.TextXAlignment = Enum.TextXAlignment.Left
+    local hdr = Instance.new("TextLabel",raidCard)
+    hdr.Size=UDim2.new(1,0,0,22); hdr.BackgroundTransparency=1
+    hdr.Text="⚔️  Raid Shop"; hdr.TextColor3=D.Purple
+    hdr.TextSize=13; hdr.Font=Enum.Font.GothamBold; hdr.TextXAlignment=Enum.TextXAlignment.Left
 
-    BuildResetTimer(shopCard, "daily415")
+    BuildResetTimer(raidCard,"daily415")
 
     -- Esper (Esper Token)
-    do
-        BuildShopHeader(shopCard, "🔮  Esper", "Esper Token", D.Purple)
+    Instance.new("Frame",raidCard).Size = UDim2.new(1,0,0,1)
 
-        local _, rebEsp = BuildShopItemList(shopCard,
-            function()
-                local f = nil
-                pcall(function() f = RS:WaitForChild("JJK_Raid_Shop",3):WaitForChild("Esper",3) end)
-                return f
-            end,
-            {
-                remoteName = "JJK_RaidShop",
-                -- FireServer("Esper", ItemName, Menge)
-                extraArgs = function(name, qty) return { "Esper", name, qty } end
-            },
-            D.Purple
-        )
-
-        local refBtn = NeonBtn(shopCard, "🔄 Esper neu laden", D.CyanDim, 24)
-        refBtn.MouseButton1Click:Connect(function() task.spawn(function() pcall(rebEsp) end) end)
-    end
+    BuildShopHeader(raidCard,"🔮  Esper","Esper Token",D.Purple)
+    local _,rebEsp = BuildItemList(raidCard,
+        function()
+            local f=nil; pcall(function()
+                f=RS:WaitForChild("JJK_Raid_Shop",3):WaitForChild("Esper",3)
+            end); return f
+        end,
+        { remoteName="JJK_RaidShop",
+          extraArgs=function(n,q) return {"Esper",n,q} end },
+        D.Purple)
+    local rfEsp = NeonBtn(raidCard,"🔄 Esper neu laden",D.CyanDim,24)
+    rfEsp.MouseButton1Click:Connect(function()
+        rfEsp.Text="⏳..."; rfEsp.TextColor3=D.Yellow
+        task.spawn(function() pcall(rebEsp)
+            pcall(function() rfEsp.Text="🔄 Esper neu laden"; rfEsp.TextColor3=D.CyanDim end)
+        end)
+    end)
 
     -- JJK (Cursed Scrolls)
-    do
-        BuildShopHeader(shopCard, "📜  JJK", "Cursed Scrolls", D.Lavender)
+    Instance.new("Frame",raidCard).Size = UDim2.new(1,0,0,1)
 
-        local _, rebJJK2 = BuildShopItemList(shopCard,
-            function()
-                local f = nil
-                pcall(function() f = RS:WaitForChild("JJK_Raid_Shop",3):WaitForChild("JJK",3) end)
-                return f
-            end,
-            {
-                remoteName = "JJK_RaidShop",
-                -- FireServer("JJK", ItemName, Menge)
-                extraArgs = function(name, qty) return { "JJK", name, qty } end
-            },
-            D.Lavender
-        )
-
-        local refBtn = NeonBtn(shopCard, "🔄 JJK neu laden", D.CyanDim, 24)
-        refBtn.MouseButton1Click:Connect(function() task.spawn(function() pcall(rebJJK2) end) end)
-    end
+    BuildShopHeader(raidCard,"📜  JJK (Raid)","Cursed Scrolls",D.Lavender)
+    local _,rebJJK2 = BuildItemList(raidCard,
+        function()
+            local f=nil; pcall(function()
+                f=RS:WaitForChild("JJK_Raid_Shop",3):WaitForChild("JJK",3)
+            end); return f
+        end,
+        { remoteName="JJK_RaidShop",
+          extraArgs=function(n,q) return {"JJK",n,q} end },
+        D.Lavender)
+    local rfJJK2 = NeonBtn(raidCard,"🔄 JJK (Raid) neu laden",D.CyanDim,24)
+    rfJJK2.MouseButton1Click:Connect(function()
+        rfJJK2.Text="⏳..."; rfJJK2.TextColor3=D.Yellow
+        task.spawn(function() pcall(rebJJK2)
+            pcall(function() rfJJK2.Text="🔄 JJK (Raid) neu laden"; rfJJK2.TextColor3=D.CyanDim end)
+        end)
+    end)
 end
 
 -- ============================================================
---  ABSCHLUSS
--- ============================================================
-print(string.format("[HazeHub-Shops] v%s geladen | Spieler: %s", VERSION, LP.Name))
+print(string.format("[HazeHub-Shops] v%s geladen | %s", VERSION, LP.Name))
