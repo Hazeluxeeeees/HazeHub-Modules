@@ -1345,9 +1345,9 @@ statSep.BackgroundTransparency = 0.5; statSep.BorderSizePixel = 0
 SecLbl(playerStatsCard, "⚔ UPGRADE STATS")
 
 local UPGRADE_STATS = {
-    { key = "BaseHealth",   label = "Tower Health",  icon = "🏰", color = D.Red    },
-    { key = "YenMax",       label = "Maximum Yen",   icon = "💰", color = D.Gold   },
-    { key = "YenGenarate",  label = "Yen Generation",icon = "⚡", color = D.Yellow },
+    { key = "BaseHealth",  levelKey = "BaseHealthLevel",  maxLvl = 100, label = "Tower Health",   icon = "🏰", color = D.Red,    goldRate = 200 },
+    { key = "YenMax",      levelKey = "YenMaxLevel",      maxLvl = 100, label = "Maximum Yen",    icon = "💰", color = D.Gold,   goldRate = 250 },
+    { key = "YenGenarate", levelKey = "YenGenarateLevel", maxLvl = 50,  label = "Yen Generation", icon = "⚡", color = D.Yellow, goldRate = 500, flatCost = true },
 }
 
 H.UI.Lbl.UpgradeStats = {}
@@ -1438,75 +1438,62 @@ local function RefreshPlayerStats()
         end
     end)
 
-    -- ★ Upgrade Stats – exakte Pfade laut Spec
-    --   Aktueller Wert : RS.Player_Data.[Name].Stats.[key].Value
-    --   Level-Text     : PlayerGui.PlayerStats.Main.[key].Frame.Level.ContentText
-    --   Kosten-Text    : PlayerGui.PlayerStats.Main.[key].Frame.Cost.Numbers.ContentText
+    -- ★ Upgrade Stats
+    --   Level  : RS.Player_Data.[Name].Stats.[levelKey].Value  (direkte Zahl, kein PlayerGui nötig)
+    --   Wert   : RS.Player_Data.[Name].Stats.[key].Value
+    --   Kosten : PlayerGui.PlayerStats.Main.[key].Frame.Cost.Numbers.ContentText  (optional)
     for _, statDef in ipairs(UPGRADE_STATS) do
         pcall(function()
             local lbls = H.UI.Lbl.UpgradeStats[statDef.key]
             if not lbls then return end
 
-            -- Aktueller Stat-Wert aus RS (WaitForChild für jeden Knoten)
+            -- ★ Level aus RS.Player_Data.[Name].Stats.[levelKey]  (tonumber!)
+            local curLvl = nil
+            pcall(function()
+                local pd  = Svc.RS:WaitForChild("Player_Data", 5)
+                local pn  = pd:WaitForChild(Svc.Player.Name, 5)
+                local st  = pn:WaitForChild("Stats", 3)
+                local lv  = st:WaitForChild(statDef.levelKey, 3)
+                curLvl = tonumber(lv.Value)
+            end)
+
+            -- ★ Aktueller Stat-Wert (optional, für Anzeige)
             local statVal = nil
             pcall(function()
                 local pd  = Svc.RS:WaitForChild("Player_Data", 3)
                 local pn  = pd:WaitForChild(Svc.Player.Name, 3)
                 local st  = pn:WaitForChild("Stats", 3)
-                local key = st:WaitForChild(statDef.key, 3)
-                statVal = key.Value
+                local sv  = st:WaitForChild(statDef.key, 3)
+                statVal = tonumber(sv.Value)
             end)
 
-            -- Level-Text aus PlayerGui mit WaitForChild-Kette
-            local lvlTxt = nil
-            pcall(function()
-                local pg   = Svc.Player:WaitForChild("PlayerGui", 5)
-                local ps   = pg:WaitForChild("PlayerStats", 5)
-                local main = ps:WaitForChild("Main", 3)
-                local sn   = main:WaitForChild(statDef.key, 3)
-                local fr   = sn:WaitForChild("Frame", 3)
-                local lv   = fr:WaitForChild("Level", 3)
-                lvlTxt = lv.ContentText
-            end)
-
-            -- Kosten-Text aus PlayerGui mit WaitForChild-Kette
+            -- ★ Kosten-Text aus PlayerGui (optional – kein Pflichtfeld)
             local costTxt = nil
             pcall(function()
-                local pg   = Svc.Player:WaitForChild("PlayerGui", 5)
-                local ps   = pg:WaitForChild("PlayerStats", 5)
-                local main = ps:WaitForChild("Main", 3)
-                local sn   = main:WaitForChild(statDef.key, 3)
-                local fr   = sn:WaitForChild("Frame", 3)
-                local co   = fr:WaitForChild("Cost", 3)
-                local nm   = co:WaitForChild("Numbers", 3)
+                local pg   = Svc.Player:WaitForChild("PlayerGui", 3)
+                local ps   = pg:FindFirstChild("PlayerStats")
+                if not ps then return end
+                local main = ps:FindFirstChild("Main"); if not main then return end
+                local sn   = main:FindFirstChild(statDef.key); if not sn then return end
+                local fr   = sn:FindFirstChild("Frame"); if not fr then return end
+                local co   = fr:FindFirstChild("Cost"); if not co then return end
+                local nm   = co:FindFirstChild("Numbers"); if not nm then return end
                 costTxt = nm.ContentText
             end)
 
-            -- ★ MAX prüfen: ContentText kann "(MAX)", "MAX", "max" enthalten
-            local isMax = lvlTxt and (
-                lvlTxt:upper():find("MAX") ~= nil or
-                lvlTxt:find("%(MAX%)") ~= nil
-            )
+            -- ★ MAX-Prüfung: >= maxLvl
+            local isMax = curLvl ~= nil and curLvl >= statDef.maxLvl
 
-            -- ★ Level-Zahl extrahieren: erste Zahl im ContentText
-            local curLvl = nil
-            if lvlTxt and not isMax then
-                curLvl = tonumber(lvlTxt:match("(%d+)"))
-            end
-
-            -- Level-Label aufbauen
+            -- Level-Label
             if isMax then
-                lbls.level.Text = "✅ MAX"
+                lbls.level.Text = "✅ LVL: MAX"
                 lbls.level.TextColor3 = D.GreenBright
             elseif curLvl then
                 local valStr = statVal ~= nil and ("  [" .. FmtNum(statVal) .. "]") or ""
-                lbls.level.Text = "Lv. " .. tostring(curLvl) .. valStr
-                lbls.level.TextColor3 = D.TextMid
-            elseif statVal ~= nil then
-                lbls.level.Text = "Wert: " .. FmtNum(statVal)
+                lbls.level.Text = string.format("Lv. %d / %d%s", curLvl, statDef.maxLvl, valStr)
                 lbls.level.TextColor3 = D.TextMid
             else
-                lbls.level.Text = "Lv. –  (GUI nicht offen?)"
+                lbls.level.Text = "Lv. –"
                 lbls.level.TextColor3 = D.TextLow
             end
 
@@ -1519,31 +1506,24 @@ local function RefreshPlayerStats()
                 lbls.cost.TextColor3 = D.TextLow
             end
 
-            -- ★ Gold bis Max Berechnung (arithmetische Reihe)
+            -- ★ Gold bis Max Berechnung
             if lbls.gold then
                 if isMax then
                     lbls.gold.Text = "🪙 Gold bis Max: ✅ MAX"
                     lbls.gold.TextColor3 = D.GreenBright
                 elseif curLvl then
                     local goldNeeded = 0
-                    if statDef.key == "YenGenarate" then
-                        -- Max LVL 50, konstant 500 Gold/Upgrade
-                        -- Formel: (50 − curLvl) × 500
-                        goldNeeded = math.max(0, 50 - curLvl) * 500
-                    elseif statDef.key == "YenMax" then
-                        -- Max LVL 100, Level n kostet n×250
-                        -- Summe von curLvl bis 99: Σ(n×250) = 250 × Σn
-                        -- Σn von a bis b = (a+b)*(b-a+1)/2
-                        local a, b = curLvl, 99
+                    if statDef.flatCost then
+                        -- Yen Generation: konstant 500 Gold pro Upgrade
+                        -- Formel: (maxLvl − curLvl) × 500
+                        goldNeeded = math.max(0, statDef.maxLvl - curLvl) * statDef.goldRate
+                    else
+                        -- Tower Health / Max Yen: Level n kostet n × goldRate
+                        -- Σ von curLvl bis (maxLvl-1): goldRate × (a+b)×(b-a+1)/2
+                        local a = curLvl
+                        local b = statDef.maxLvl - 1
                         if a <= b then
-                            goldNeeded = 250 * (a + b) * (b - a + 1) / 2
-                        end
-                    elseif statDef.key == "BaseHealth" then
-                        -- Max LVL 100, Level n kostet n×200
-                        -- Summe von curLvl bis 99: Σ(n×200) = 200 × Σn
-                        local a, b = curLvl, 99
-                        if a <= b then
-                            goldNeeded = 200 * (a + b) * (b - a + 1) / 2
+                            goldNeeded = statDef.goldRate * (a + b) * (b - a + 1) / 2
                         end
                     end
                     goldNeeded = math.floor(goldNeeded)
@@ -1555,7 +1535,7 @@ local function RefreshPlayerStats()
                         lbls.gold.TextColor3 = D.TextLow
                     end
                 else
-                    lbls.gold.Text = "🪙 Gold bis Max: –  (Stats öffnen)"
+                    lbls.gold.Text = "🪙 Gold bis Max: –"
                     lbls.gold.TextColor3 = D.TextLow
                 end
             end
