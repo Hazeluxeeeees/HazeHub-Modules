@@ -1333,15 +1333,19 @@ for _, statDef in ipairs(UPGRADE_STATS) do
 end
 
 local function RefreshPlayerStats()
-    -- XP aus HUD
+    -- ★ XP aus HUD: Pfad PlayerGui.HUD.ExpBar.Numbers.ContentText
     pcall(function()
-        local hudText = GetHUDExpText()
+        local hudText = nil
+        pcall(function()
+            hudText = Svc.Player.PlayerGui.HUD.ExpBar.Numbers.ContentText
+        end)
         if hudText and hudText ~= "" then
             H.UI.Lbl.XPText.Text = hudText
             H.UI.Lbl.XPText.TextColor3 = D.Cyan
-            -- Parse Level und XP für Bar
-            local curXP, maxXP = hudText:match("(%d[%d,]*)%s*/s*(%d[%d,]*)XP")
-            if not curXP then curXP, maxXP = hudText:match("(%d[%d,]*)/(%d[%d,]*)") end
+            -- Parse z.B. "Level 106 [3,650/10,600XP]"
+            local curXP, maxXP = hudText:match("(%d[%d,]+)/(%d[%d,]+)XP")
+            if not curXP then curXP, maxXP = hudText:match("%[(%d[%d,]+)/(%d[%d,]+)") end
+            if not curXP then curXP, maxXP = hudText:match("(%d[%d,]+)/(%d[%d,]+)") end
             if curXP and maxXP then
                 local c = tonumber(curXP:gsub(",","")) or 0
                 local m = tonumber(maxXP:gsub(",","")) or 1
@@ -1349,15 +1353,22 @@ local function RefreshPlayerStats()
                 Tw(H.UI.Fr.XPBarFill, { Size = UDim2.new(pct, 0, 1, 0) }, TM)
             end
         else
-            H.UI.Lbl.XPText.Text = "XP nicht verfügbar"
+            H.UI.Lbl.XPText.Text = "HUD XP nicht verfügbar"
             H.UI.Lbl.XPText.TextColor3 = D.TextLow
         end
     end)
-    -- Level aus RS.Player_Data
+
+    -- ★ Level aus RS.Player_Data.[Name].Data
     pcall(function()
-        local lvl = GetDataValue("Level")
-        local exp = GetDataValue("Exp")
-        local maxExp = GetDataValue("MaxExp")
+        local dataFolder = Svc.RS:WaitForChild("Player_Data", 3)
+            :WaitForChild(Svc.Player.Name, 3)
+            :WaitForChild("Data", 3)
+        local lvlChild    = dataFolder:FindFirstChild("Level")
+        local expChild    = dataFolder:FindFirstChild("Exp")
+        local maxExpChild = dataFolder:FindFirstChild("MaxExp")
+        local lvl    = lvlChild    and lvlChild.Value    or nil
+        local exp    = expChild    and expChild.Value    or nil
+        local maxExp = maxExpChild and maxExpChild.Value or nil
         if lvl then
             local lvlTxt = "Level " .. tostring(lvl)
             if exp and maxExp then
@@ -1366,30 +1377,67 @@ local function RefreshPlayerStats()
                 Tw(H.UI.Fr.XPBarFill, { Size = UDim2.new(pct, 0, 1, 0) }, TM)
             end
             H.UI.Lbl.PlayerLevel.Text = lvlTxt
+        else
+            H.UI.Lbl.PlayerLevel.Text = "–"
         end
     end)
-    -- Upgrade Stats
+
+    -- ★ Upgrade Stats – exakte Pfade laut Spec
+    --   Aktueller Wert : RS.Player_Data.[Name].Stats.[key].Value
+    --   Level-Text     : PlayerGui.PlayerStats.Main.[key].Frame.Level.ContentText
+    --   Kosten-Text    : PlayerGui.PlayerStats.Main.[key].Frame.Cost.Numbers.ContentText
     for _, statDef in ipairs(UPGRADE_STATS) do
         pcall(function()
             local lbls = H.UI.Lbl.UpgradeStats[statDef.key]
             if not lbls then return end
-            -- Level lesen
-            local lvlTxt = GetUpgradeStatLevel(statDef.key)
-            if lvlTxt then
+
+            -- Aktueller Stat-Wert aus RS
+            local statVal = nil
+            pcall(function()
+                statVal = Svc.RS:WaitForChild("Player_Data", 3)
+                    :WaitForChild(Svc.Player.Name, 3)
+                    :WaitForChild("Stats", 3)
+                    :WaitForChild(statDef.key, 3).Value
+            end)
+
+            -- Level-Text aus PlayerGui (.ContentText)
+            local lvlTxt = nil
+            pcall(function()
+                lvlTxt = Svc.Player.PlayerGui.PlayerStats.Main[statDef.key].Frame.Level.ContentText
+            end)
+
+            -- Kosten-Text aus PlayerGui (.ContentText)
+            local costTxt = nil
+            pcall(function()
+                costTxt = Svc.Player.PlayerGui.PlayerStats.Main[statDef.key].Frame.Cost.Numbers.ContentText
+            end)
+
+            -- Level-Label aufbauen
+            if lvlTxt and lvlTxt ~= "" then
                 if lvlTxt:find("MAX") or lvlTxt:find("max") then
-                    lbls.level.Text = "✅ MAX"; lbls.level.TextColor3 = D.GreenBright
+                    lbls.level.Text = "✅ MAX"
+                    lbls.level.TextColor3 = D.GreenBright
                 else
-                    lbls.level.Text = "Lv. " .. lvlTxt; lbls.level.TextColor3 = D.TextMid
+                    -- Stat-Wert anhängen wenn verfügbar
+                    local valStr = statVal ~= nil and ("  [" .. FmtNum(statVal) .. "]") or ""
+                    lbls.level.Text = "Lv. " .. lvlTxt .. valStr
+                    lbls.level.TextColor3 = D.TextMid
                 end
+            elseif statVal ~= nil then
+                lbls.level.Text = "Wert: " .. FmtNum(statVal)
+                lbls.level.TextColor3 = D.TextMid
             else
-                lbls.level.Text = "Lv. –"; lbls.level.TextColor3 = D.TextLow
+                lbls.level.Text = "Lv. –"
+                lbls.level.TextColor3 = D.TextLow
             end
-            -- Kosten lesen
-            local costTxt = GetUpgradeStatCost(statDef.key)
-            if costTxt then
-                lbls.cost.Text = "💰 " .. costTxt; lbls.cost.TextColor3 = D.Gold
+
+            -- Kosten-Label
+            if costTxt and costTxt ~= "" then
+                lbls.cost.Text = "💰 " .. costTxt
+                lbls.cost.TextColor3 = D.Gold
             else
-                lbls.cost.Text = "–"; lbls.cost.TextColor3 = D.TextLow
+                lbls.cost.Text = "–"
+                lbls.cost.TextColor3 = D.TextLow
             end
         end)
     end
@@ -1648,56 +1696,102 @@ local function RebuildQuestsUI()
         if v:IsA("Frame") or v:IsA("TextLabel") then v:Destroy() end
     end
 
+    -- ★ Exakter Root-Pfad: RS.Player_Data.[Name].PlayerQuest
+    local playerDataRoot = nil
+    pcall(function()
+        playerDataRoot = Svc.RS:WaitForChild("Player_Data", 3)
+            :WaitForChild(Svc.Player.Name, 3)
+    end)
+
+    if not playerDataRoot then
+        local errLbl = MkLbl(questContainer, "⚠ Player_Data.[" .. Svc.Player.Name .. "] nicht gefunden!", 11, D.Orange)
+        errLbl.Size = UDim2.new(1, 0, 0, 28); return
+    end
+
     local playerQuestRoot = nil
     pcall(function()
-        playerQuestRoot = Svc.RS:WaitForChild("Player_Data", 3)
-            :WaitForChild(Svc.Player.Name, 3)
-            :WaitForChild("PlayerQuest", 3)
+        playerQuestRoot = playerDataRoot:WaitForChild("PlayerQuest", 3)
     end)
 
     if not playerQuestRoot then
-        local errLbl = MkLbl(questContainer, "⚠ PlayerQuest-Pfad nicht gefunden!", 11, D.Orange)
+        local errLbl = MkLbl(questContainer, "⚠ PlayerQuest-Ordner nicht gefunden!", 11, D.Orange)
         errLbl.Size = UDim2.new(1, 0, 0, 28); return
     end
 
     -- ────────────────────────────────────────────────────────
-    --  Easy / Normal / Hard Kategorien
+    --  Easy / Normal / Hard
+    --  ★ Ordner-Namen: easy_quest, normal_quest, hard_quest
+    --  ★ Kategorie-claimed: [folder].claimed.Value
+    --  ★ Sub-Quests im Unterordner .Quests ODER direkt als
+    --    easy_quest_1..4 im Kategorieordner
+    --  ★ Gesamt-Fortschritt: [folder].progress.Value / [folder].questneed.Value
     -- ────────────────────────────────────────────────────────
-    for _, qType in ipairs({"Easy", "Normal", "Hard"}) do
-        local color = QUEST_COLORS[qType]
-        local qTypeFolder = nil
-        pcall(function() qTypeFolder = playerQuestRoot:WaitForChild(qType, 2) end)
+    local CATEGORY_DEFS = {
+        { folderName = "easy_quest",   label = "EASY QUESTS",   icon = "🟢", color = D.Green  },
+        { folderName = "normal_quest", label = "NORMAL QUESTS", icon = "🟡", color = D.Yellow },
+        { folderName = "hard_quest",   label = "HARD QUESTS",   icon = "🔴", color = D.Red    },
+    }
 
-        -- Kategorie-Header Card
+    for _, catDef in ipairs(CATEGORY_DEFS) do
+        local color = catDef.color
+        local catFolder = nil
+        pcall(function() catFolder = playerQuestRoot:FindFirstChild(catDef.folderName) end)
+
+        -- Card für diese Kategorie
         local catCard = Card(questContainer); Pad(catCard, 10, 12, 10, 12); VList(catCard, 6)
         Stroke(catCard, color, 1.5, 0.3)
 
-        -- Header-Zeile
-        local hRow = Instance.new("Frame", catCard)
-        hRow.Size = UDim2.new(1, 0, 0, 22); hRow.BackgroundTransparency = 1; HList(hRow, 8)
-        local hLbl = Instance.new("TextLabel", hRow)
-        hLbl.Size = UDim2.new(0.7, 0, 1, 0); hLbl.BackgroundTransparency = 1
-        hLbl.Text = (qType == "Easy" and "🟢" or qType == "Normal" and "🟡" or "🔴") .. "  " .. qType:upper() .. " QUESTS"
+        -- Header
+        local hLbl = Instance.new("TextLabel", catCard)
+        hLbl.Size = UDim2.new(1, 0, 0, 22); hLbl.BackgroundTransparency = 1
+        hLbl.Text = catDef.icon .. "  " .. catDef.label
         hLbl.TextColor3 = color; hLbl.TextSize = 12; hLbl.Font = Enum.Font.GothamBold
         hLbl.TextXAlignment = Enum.TextXAlignment.Left
 
-        if not qTypeFolder then
-            MkLbl(catCard, "Pfad nicht gefunden: PlayerQuest." .. qType, 10, D.TextLow).Size = UDim2.new(1, 0, 0, 18)
+        if not catFolder then
+            MkLbl(catCard, "Ordner '" .. catDef.folderName .. "' nicht gefunden.", 10, D.TextLow).Size = UDim2.new(1, 0, 0, 18)
             continue
         end
 
-        -- Prüfe ob gesamte Kategorie claimed ist
+        -- ★ Kategorie komplett claimed?
         local catClaimed = false
         pcall(function()
-            local claimedVal = qTypeFolder:FindFirstChild("claimed")
-            if claimedVal and claimedVal.Value == true then catClaimed = true end
+            local cl = catFolder:FindFirstChild("claimed")
+            if cl and cl.Value == true then catClaimed = true end
         end)
 
+        -- ★ Gesamt-Fortschritt der Kategorie
+        local catProgress, catNeed = 0, 1
+        pcall(function()
+            local pg = catFolder:FindFirstChild("progress")
+            local nd = catFolder:FindFirstChild("questneed")
+            if pg then catProgress = tonumber(pg.Value) or 0 end
+            if nd then catNeed     = tonumber(nd.Value) or 1 end
+        end)
+
+        -- Fortschrittsbalken der Kategorie (immer anzeigen)
+        local catPct = math.min(1, catProgress / math.max(1, catNeed))
+        local catProgRow = Instance.new("Frame", catCard)
+        catProgRow.Size = UDim2.new(1, 0, 0, 18); catProgRow.BackgroundTransparency = 1; HList(catProgRow, 6)
+        local catProgTxt = Instance.new("TextLabel", catProgRow)
+        catProgTxt.Size = UDim2.new(0.55, 0, 1, 0); catProgTxt.BackgroundTransparency = 1
+        catProgTxt.Text = string.format("Gesamt: %d / %d", catProgress, catNeed)
+        catProgTxt.TextColor3 = catClaimed and D.GreenBright or D.TextMid
+        catProgTxt.TextSize = 10; catProgTxt.Font = Enum.Font.GothamSemibold
+        catProgTxt.TextXAlignment = Enum.TextXAlignment.Left
+        local catBarBg = Instance.new("Frame", catProgRow)
+        catBarBg.Size = UDim2.new(0.45, 0, 0, 6); catBarBg.BackgroundColor3 = Color3.fromRGB(20,28,50)
+        catBarBg.BorderSizePixel = 0; Corner(catBarBg, 3)
+        local catBarFill = Instance.new("Frame", catBarBg)
+        catBarFill.Size = UDim2.new(catPct, 0, 1, 0)
+        catBarFill.BackgroundColor3 = catClaimed and D.GreenBright or color
+        catBarFill.BorderSizePixel = 0; Corner(catBarFill, 3)
+
         if catClaimed then
-            local allDoneLbl = Instance.new("Frame", catCard)
-            allDoneLbl.Size = UDim2.new(1, 0, 0, 30); allDoneLbl.BackgroundColor3 = D.GreenDark
-            allDoneLbl.BorderSizePixel = 0; Corner(allDoneLbl, 7); Stroke(allDoneLbl, D.GreenBright, 1.5, 0.2)
-            local dLbl = Instance.new("TextLabel", allDoneLbl)
+            local doneFr = Instance.new("Frame", catCard)
+            doneFr.Size = UDim2.new(1, 0, 0, 30); doneFr.BackgroundColor3 = D.GreenDark
+            doneFr.BorderSizePixel = 0; Corner(doneFr, 7); Stroke(doneFr, D.GreenBright, 1.5, 0.2)
+            local dLbl = Instance.new("TextLabel", doneFr)
             dLbl.Size = UDim2.new(1, 0, 1, 0); dLbl.BackgroundTransparency = 1
             dLbl.Text = "✅ ALLE BELOHNUNGEN ABGEHOLT!"; dLbl.TextColor3 = D.GreenBright
             dLbl.TextSize = 12; dLbl.Font = Enum.Font.GothamBold
@@ -1705,26 +1799,38 @@ local function RebuildQuestsUI()
             continue
         end
 
-        -- Unter-Quests listen (easy_quest_1 bis easy_quest_4, Fallback: alle Kinder)
-        local typeLower = qType:lower()
+        -- ★ Sub-Quests: suche erst im Unterordner "Quests", dann direkt [name]_1..4
         local subQuests = {}
-        for i = 1, 4 do
-            local qName = typeLower .. "_quest_" .. i
-            local qf = qTypeFolder:FindFirstChild(qName)
-            if qf then table.insert(subQuests, qf) end
-        end
-        -- Fallback: alle Folder-Kinder
-        if #subQuests == 0 then
-            for _, ch in ipairs(qTypeFolder:GetChildren()) do
-                if ch:IsA("Folder") and ch.Name ~= "claimed" then
+        local questsSubfolder = catFolder:FindFirstChild("Quests")
+        if questsSubfolder then
+            -- Unterordner .Quests vorhanden → alle Kinder scannen
+            for _, ch in ipairs(questsSubfolder:GetChildren()) do
+                if not ch:IsA("UIGridLayout") and not ch:IsA("UIListLayout") then
                     table.insert(subQuests, ch)
+                end
+            end
+        else
+            -- Direkt im Kategorieordner: z.B. easy_quest_1 .. easy_quest_4
+            for i = 1, 4 do
+                local qf = catFolder:FindFirstChild(catDef.folderName .. "_" .. i)
+                if qf then table.insert(subQuests, qf) end
+            end
+            -- Fallback: alle Folder-Kinder außer claimed/progress/questneed
+            if #subQuests == 0 then
+                local SKIP = { claimed=true, progress=true, questneed=true, Quests=true }
+                for _, ch in ipairs(catFolder:GetChildren()) do
+                    if not SKIP[ch.Name] then
+                        table.insert(subQuests, ch)
+                    end
                 end
             end
         end
 
         if #subQuests == 0 then
-            MkLbl(catCard, "Keine Unter-Quests gefunden.", 10, D.TextLow).Size = UDim2.new(1, 0, 0, 18)
+            MkLbl(catCard, "Keine Sub-Quests gefunden.", 10, D.TextLow).Size = UDim2.new(1, 0, 0, 18)
         else
+            -- Sub-Quests sortiert nach Name
+            table.sort(subQuests, function(a, b) return a.Name < b.Name end)
             for _, sqFolder in ipairs(subQuests) do
                 local sqClaimed = false
                 pcall(function()
@@ -1740,10 +1846,14 @@ local function RebuildQuestsUI()
 
     -- ────────────────────────────────────────────────────────
     --  Weekly Quests
+    --  ★ Pfad: RS.Player_Data.[Name].WeeklyQuest
+    --  ★ claimed == true → Quest komplett ausblenden
     -- ────────────────────────────────────────────────────────
     do
         local weeklyRoot = nil
-        pcall(function() weeklyRoot = playerQuestRoot:WaitForChild("WeeklyQuest", 2) end)
+        pcall(function()
+            weeklyRoot = playerDataRoot:FindFirstChild("WeeklyQuest")
+        end)
 
         local wCard = Card(questContainer); Pad(wCard, 10, 12, 10, 12); VList(wCard, 6)
         Stroke(wCard, D.Purple, 1.5, 0.3)
@@ -1755,34 +1865,46 @@ local function RebuildQuestsUI()
         wHdr.TextXAlignment = Enum.TextXAlignment.Left
 
         if not weeklyRoot then
-            MkLbl(wCard, "WeeklyQuest-Pfad nicht gefunden.", 10, D.TextLow).Size = UDim2.new(1, 0, 0, 18)
+            MkLbl(wCard, "WeeklyQuest nicht gefunden unter Player_Data." .. Svc.Player.Name, 10, D.TextLow).Size = UDim2.new(1, 0, 0, 18)
         else
             local wFound = false
+            local SKIP_W = { claimed=true, progress=true, questneed=true }
             for _, qFolder in ipairs(weeklyRoot:GetChildren()) do
-                if not qFolder:IsA("Folder") then continue end
+                if SKIP_W[qFolder.Name] then continue end
+                -- ★ claimed == true → Quest komplett nicht anzeigen
                 local isClaimed = false
                 pcall(function()
                     local cl = qFolder:FindFirstChild("claimed")
                     if cl and cl.Value == true then isClaimed = true end
                 end)
-                if isClaimed then continue end -- Claimed quests ausblenden
+                if isClaimed then continue end
+                -- Titel = Ordnername, des = Attribut, Balken aus progress/questneed
                 local des = GetQuestDes(qFolder)
                 local prog, need = GetQuestProgress(qFolder)
                 BuildQuestRow(wCard, qFolder.Name, des, prog, need, false, D.Purple)
                 wFound = true
             end
             if not wFound then
-                MkLbl(wCard, "✅ Alle wöchentlichen Quests abgeschlossen.", 10, D.GreenBright).Size = UDim2.new(1, 0, 0, 18)
+                local allDoneFr = Instance.new("Frame", wCard)
+                allDoneFr.Size = UDim2.new(1, 0, 0, 28); allDoneFr.BackgroundColor3 = D.GreenDark
+                allDoneFr.BorderSizePixel = 0; Corner(allDoneFr, 7); Stroke(allDoneFr, D.GreenBright, 1.5, 0.2)
+                local dL = Instance.new("TextLabel", allDoneFr); dL.Size = UDim2.new(1,0,1,0); dL.BackgroundTransparency=1
+                dL.Text = "✅ Alle Weekly Quests erledigt!"; dL.TextColor3 = D.GreenBright
+                dL.TextSize = 11; dL.Font = Enum.Font.GothamBold; dL.TextXAlignment = Enum.TextXAlignment.Center
             end
         end
     end
 
     -- ────────────────────────────────────────────────────────
     --  Daily Quests
+    --  ★ Pfad: RS.Player_Data.[Name].DailyQuest
+    --  ★ claimed == true → Quest komplett ausblenden
     -- ────────────────────────────────────────────────────────
     do
         local dailyRoot = nil
-        pcall(function() dailyRoot = playerQuestRoot:WaitForChild("DailyQuest", 2) end)
+        pcall(function()
+            dailyRoot = playerDataRoot:FindFirstChild("DailyQuest")
+        end)
 
         local dCard = Card(questContainer); Pad(dCard, 10, 12, 10, 12); VList(dCard, 6)
         Stroke(dCard, D.Teal, 1.5, 0.3)
@@ -1794,24 +1916,31 @@ local function RebuildQuestsUI()
         dHdr.TextXAlignment = Enum.TextXAlignment.Left
 
         if not dailyRoot then
-            MkLbl(dCard, "DailyQuest-Pfad nicht gefunden.", 10, D.TextLow).Size = UDim2.new(1, 0, 0, 18)
+            MkLbl(dCard, "DailyQuest nicht gefunden unter Player_Data." .. Svc.Player.Name, 10, D.TextLow).Size = UDim2.new(1, 0, 0, 18)
         else
             local dFound = false
+            local SKIP_D = { claimed=true, progress=true, questneed=true }
             for _, qFolder in ipairs(dailyRoot:GetChildren()) do
-                if not qFolder:IsA("Folder") then continue end
+                if SKIP_D[qFolder.Name] then continue end
+                -- ★ claimed == true → Quest komplett nicht anzeigen
                 local isClaimed = false
                 pcall(function()
                     local cl = qFolder:FindFirstChild("claimed")
                     if cl and cl.Value == true then isClaimed = true end
                 end)
-                if isClaimed then continue end -- Claimed quests ausblenden
+                if isClaimed then continue end
                 local des = GetQuestDes(qFolder)
                 local prog, need = GetQuestProgress(qFolder)
                 BuildQuestRow(dCard, qFolder.Name, des, prog, need, false, D.Teal)
                 dFound = true
             end
             if not dFound then
-                MkLbl(dCard, "✅ Alle täglichen Quests abgeschlossen.", 10, D.GreenBright).Size = UDim2.new(1, 0, 0, 18)
+                local allDoneFr = Instance.new("Frame", dCard)
+                allDoneFr.Size = UDim2.new(1, 0, 0, 28); allDoneFr.BackgroundColor3 = D.GreenDark
+                allDoneFr.BorderSizePixel = 0; Corner(allDoneFr, 7); Stroke(allDoneFr, D.GreenBright, 1.5, 0.2)
+                local dL = Instance.new("TextLabel", allDoneFr); dL.Size = UDim2.new(1,0,1,0); dL.BackgroundTransparency=1
+                dL.Text = "✅ Alle Daily Quests erledigt!"; dL.TextColor3 = D.GreenBright
+                dL.TextSize = 11; dL.Font = Enum.Font.GothamBold; dL.TextXAlignment = Enum.TextXAlignment.Center
             end
         end
     end
