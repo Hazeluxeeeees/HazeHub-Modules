@@ -265,6 +265,32 @@ local function LoadDB()
     local c = 0; for _ in pairs(data) do c = c + 1 end
     if c == 0 then return false end
     AF.RewardDatabase = data
+    -- ============================================================
+--  ★ autofarm.lua – EINZEILIGE ERGÄNZUNG (RewardDB-Brücke)
+--
+--  Suche in autofarm.lua nach dieser Zeile:
+--      AF.RewardDatabase = data
+--
+--  Diese Zeile kommt in der Funktion LoadDB() vor.
+--  Füge DIREKT DANACH folgende Zeile ein:
+-- ============================================================
+ 
+_G.HazeShared._AutoFarm_RewardDB = AF.RewardDatabase
+ 
+-- ============================================================
+--  ZUSÄTZLICH: In ScanAllRewards(), nach der Zeile:
+--      if DBCount() > 0 then SaveDB() end
+--  auch diese Zeile einfügen:
+-- ============================================================
+ 
+_G.HazeShared._AutoFarm_RewardDB = AF.RewardDatabase
+ 
+-- ============================================================
+--  Das war es. Das Craft-Modul kann jetzt automatisch die
+--  beste Welt/Stage für jedes fehlende Crafting-Material
+--  aus der Reward-Datenbank lesen.
+-- ============================================================
+ 
     print("[HazeHub] DB geladen: " .. c .. " Chapters")
     return true
 end
