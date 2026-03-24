@@ -265,7 +265,32 @@ local function LoadDB()
     local c = 0; for _ in pairs(data) do c = c + 1 end
     if c == 0 then return false end
     AF.RewardDatabase = data
-    _G.HazeShared._AutoFarm_RewardDB = AF.RewardDatabase
+    -- ============================================================
+--  ★ autofarm.lua – EINZEILIGE ERGÄNZUNG (RewardDB-Brücke)
+--
+--  Suche in autofarm.lua nach dieser Zeile:
+--      AF.RewardDatabase = data
+--
+--  Diese Zeile kommt in der Funktion LoadDB() vor.
+--  Füge DIREKT DANACH folgende Zeile ein:
+-- ============================================================
+ 
+_G.HazeShared._AutoFarm_RewardDB = AF.RewardDatabase
+ 
+-- ============================================================
+--  ZUSÄTZLICH: In ScanAllRewards(), nach der Zeile:
+--      if DBCount() > 0 then SaveDB() end
+--  auch diese Zeile einfügen:
+-- ============================================================
+ 
+_G.HazeShared._AutoFarm_RewardDB = AF.RewardDatabase
+ 
+-- ============================================================
+--  Das war es. Das Craft-Modul kann jetzt automatisch die
+--  beste Welt/Stage für jedes fehlende Crafting-Material
+--  aus der Reward-Datenbank lesen.
+-- ============================================================
+ 
     print("[HazeHub] DB geladen: " .. c .. " Chapters")
     return true
 end
@@ -452,10 +477,7 @@ local function ScanAllRewards(onProgress)
         pcall(function() Fire("Submit"); task.wait(0.4); Fire("Create"); task.wait(0.6) end)
     end
 
-    if DBCount() > 0 then
-        SaveDB()
-        _G.HazeShared._AutoFarm_RewardDB = AF.RewardDatabase
-    end
+    if DBCount() > 0 then SaveDB() end
     AF.Scanning = false
     local c=DBCount(); local ok=c>0
     local msg = string.format("%s Scan: %d/%d (%d Fehler, %d Retries)", ok and "OK" or "FEHLER", c, total, failed, retried)
@@ -611,29 +633,6 @@ local function GetNextItem()
     for _, q in ipairs(AF.Queue) do if not q.done then return q end end; return nil
 end
 
-local function AddOrUpdateQueueItem(itemName, amount)
-    local iname = tostring(itemName or ""):match("^%s*(.-)%s*$")
-    local iamt = math.floor(tonumber(amount) or 0)
-    if iname == "" or iamt <= 0 then return false end
-
-    for _, q in ipairs(AF.Queue) do
-        if q.item == iname then
-            q.amount = math.max(1, q.amount + iamt)
-            q.done = false
-            SaveQueueFile()
-            pcall(UpdateQueueUI)
-            pcall(function() HS.UpdateGoalsUI() end)
-            return true
-        end
-    end
-
-    table.insert(AF.Queue, { item = iname, amount = iamt, done = false })
-    SaveQueueFile()
-    pcall(UpdateQueueUI)
-    pcall(function() HS.UpdateGoalsUI() end)
-    return true
-end
-
 local function FarmLoop()
     AF.Active=true; AF.Running=true; _G.AutoFarmRunning=true; SaveState()
     print("[HazeHub] ===== FARM LOOP START =====")
@@ -688,8 +687,6 @@ HS.StartFarmFromMain = function()
         end)
     else task.spawn(FarmLoop) end
 end
-HS.AddAutoFarmQueueItem = AddOrUpdateQueueItem
-_G.AddAutoFarmQueueItem = AddOrUpdateQueueItem
 
 -- ============================================================
 --  SCAN-TASK HELPER
