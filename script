@@ -364,6 +364,16 @@ local function GetItemTextureId(itemName)
                         end
                         if id and id ~= "" then return end
                     end
+                    local back = objFolder:FindFirstChild("Back")
+                    if back then
+                        local btex = back:FindFirstChildOfClass("Texture") or back:FindFirstChildOfClass("Decal")
+                        if btex then
+                            id = tostring(btex.Texture or btex.TextureId or "")
+                        elseif back:IsA("BasePart") then
+                            pcall(function() id = tostring(back.TextureID) end)
+                        end
+                        if id and id ~= "" and id ~= "rbxassetid://0" then return end
+                    end
                     -- Fallback: alle BaseParts durchsuchen
                     for _, desc in pairs(itemFolder:GetDescendants()) do
                         if desc:IsA("Texture") or desc:IsA("Decal") then
@@ -1515,6 +1525,15 @@ task.spawn(function()
         end
     end
     pcall(RebuildWorldList)
+end)
+
+task.delay(8,function()
+    pcall(function()
+        if H.UI.Lbl.AFDBHint and not S.DBReady then
+            H.UI.Lbl.AFDBHint.Text="⚠ Datenbank nicht geladen – Bitte Rescan durchführen"
+            H.UI.Lbl.AFDBHint.TextColor3=D.Orange
+        end
+    end)
 end)
 
 -- ╔══════════════════════════════════════════════════════════╗
