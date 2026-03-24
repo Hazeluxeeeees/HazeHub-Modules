@@ -259,11 +259,11 @@ end)
 --  DESIGN – Glas-Schwarz (kein natives UI-Backdrop-Blur in Roblox:
 --  Effekt = dunkle Flächen + BackgroundTransparency + dezente Ränder)
 -- ╚══════════════════════════════════════════════════════════╝
--- Logo: PNG nach Roblox hochladen → rbxassetid hier setzen.
--- Discord-Webhooks brauchen eine öffentliche https://-URL (z. B. GitHub raw, Imgur).
+-- Logo: Emblem-PNG nach Roblox hochladen → LogoRbx setzen (GUI + Mobile).
+-- LogoHttps: gleiche Datei öffentlich hosten (z. B. raw.githubusercontent.com/.../haze_emblem_logo.png).
 local HAZE_ASSETS = {
     LogoRbx = "rbxassetid://0",
-    LogoHttps = "",
+    LogoHttps = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/main/assets/haze_emblem_logo.png",
 }
 local D={
     GlassPane=0.18, GlassDeep=0.22, GlassStroke=0.35,
@@ -875,8 +875,12 @@ local function SendWebhook(rewardTable,goalItem,goalAmt)
             {name="🎁 Loot",value=rTxt,inline=false},
             {name="📊 Gesamt",value=sTxt,inline=false}
         },
-        footer={text="Haze Hub · V19.8 · "..dur}
     }
+    if logoOk then
+        embed.footer={text="Haze Hub · V19.8 · "..dur,icon_url=HAZE_ASSETS.LogoHttps}
+    else
+        embed.footer={text="Haze Hub · V19.8 · "..dur}
+    end
     if isGoal then table.insert(embed.fields,2,{name="🎯 Ziel",value=string.format("**%s** `%d/%d` ✅",goalItem,goalAmt,goalAmt),inline=false}) end
     task.spawn(function() pcall(function()
         local fn=request or http_request or (syn and syn.request); if not fn then return end
