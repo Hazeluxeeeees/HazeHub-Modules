@@ -1529,8 +1529,15 @@ end)
 
 task.delay(8,function()
     pcall(function()
-        if H.UI.Lbl.AFDBHint and not S.DBReady then
-            H.UI.Lbl.AFDBHint.Text="⚠ Datenbank nicht geladen – Bitte Rescan durchführen"
+        local hasDb = false
+        if _G.HazeShared and type(_G.HazeShared._AutoFarm_RewardDB) == "table" then
+            hasDb = next(_G.HazeShared._AutoFarm_RewardDB) ~= nil
+        end
+        if _G.HazeHUB_Database and type(_G.HazeHUB_Database) == "table" then
+            hasDb = hasDb or (next(_G.HazeHUB_Database) ~= nil)
+        end
+        if H.UI.Lbl.AFDBHint and (not S.DBReady or not hasDb) then
+            H.UI.Lbl.AFDBHint.Text="⚠ Datenbank fehlt"
             H.UI.Lbl.AFDBHint.TextColor3=D.Orange
         end
     end)
