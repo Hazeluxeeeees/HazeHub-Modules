@@ -143,7 +143,14 @@ unitSearchOuter.Size=UDim2.new(1,0,0,28)
 
 local unitListFrame=Instance.new("Frame",unitCard)
 unitListFrame.Size=UDim2.new(1,0,0,0); unitListFrame.AutomaticSize=Enum.AutomaticSize.Y
-unitListFrame.BackgroundTransparency=1; VList(unitListFrame,3)
+unitListFrame.BackgroundTransparency=1
+local unitGrid=Instance.new("UIGridLayout",unitListFrame)
+unitGrid.CellSize=UDim2.new(0.45,0,0,170)
+unitGrid.CellPadding=UDim2.new(0.03,0,0,8)
+unitGrid.FillDirection=Enum.FillDirection.Horizontal
+unitGrid.HorizontalAlignment=Enum.HorizontalAlignment.Center
+unitGrid.VerticalAlignment=Enum.VerticalAlignment.Top
+unitGrid.SortOrder=Enum.SortOrder.LayoutOrder
 TR.UI.Fr.UnitList=unitListFrame
 
 local unitEmptyLbl=MkLbl(unitListFrame,"Keine Einheiten gefunden.",11,D.TextLow)
@@ -332,16 +339,22 @@ local function FillViewportWithUnit(vp, unitName)
         end
 
         local cam = Instance.new("Camera")
-        cam.FieldOfView = 55
+        cam.FieldOfView = 58
         cam.Parent = vp
         vp.CurrentCamera = cam
 
         local cf, size = clone:GetBoundingBox()
-        local maxDim = math.max(size.X, size.Y, size.Z, 0.1)
-        local distance = (maxDim * 1.35) / math.tan(math.rad(cam.FieldOfView * 0.5))
+        local ext = clone:GetExtentsSize()
         local focus = cf.Position
+        local baseLook = Vector3.new(0,0,-1)
+        if clone.PrimaryPart then
+            baseLook = clone.PrimaryPart.CFrame.LookVector
+        end
+        local nearDist = math.max(0.8, ext.Y * 0.8)
+        local side = math.max(0.4, ext.X * 0.2)
+        local up = math.max(0.3, ext.Y * 0.15)
         cam.CFrame = CFrame.new(
-            focus + Vector3.new(distance * 0.28, distance * 0.20, distance),
+            focus - (baseLook * nearDist) + Vector3.new(side, up, 0),
             focus
         )
         ok = true
@@ -358,20 +371,18 @@ local function BuildUnitList(filter)
         shown = shown + 1
         local isSelected = (TR.SelectedUnit == u.instance)
         local row = Instance.new("Frame",TR.UI.Fr.UnitList)
-        row.Size = UDim2.new(1,0,0,58); row.BorderSizePixel=0; Corner(row,7)
+        row.Size = UDim2.new(1,0,1,0); row.BorderSizePixel=0; Corner(row,10)
         if isSelected then row.BackgroundColor3=Color3.fromRGB(0,30,60); Stroke(row,D.Cyan,1.5,0)
         else row.BackgroundColor3=D.CardHover; Stroke(row,D.Border,1,0.4) end
-        local bar=Instance.new("Frame",row); bar.Size=UDim2.new(0,3,0.8,0); bar.Position=UDim2.new(0,0,0.1,0); bar.BackgroundColor3=isSelected and D.Cyan or D.Border; bar.BorderSizePixel=0; Corner(bar,2)
+        local bar=Instance.new("Frame",row); bar.Size=UDim2.new(0,3,0.94,0); bar.Position=UDim2.new(0,0,0.03,0); bar.BackgroundColor3=isSelected and D.Cyan or D.Border; bar.BorderSizePixel=0; Corner(bar,2)
         local vpWrap = Instance.new("Frame", row)
-        vpWrap.Position = UDim2.new(0,8,0.5,-22)
-        vpWrap.Size = UDim2.new(0,44,0,44)
+        vpWrap.AnchorPoint = Vector2.new(0.5,0)
+        vpWrap.Position = UDim2.new(0.5,0,0.03,0)
+        vpWrap.Size = UDim2.new(0.9,0,0.9,0)
         vpWrap.BackgroundColor3 = Color3.fromRGB(12,18,34)
         vpWrap.BorderSizePixel = 0
         Corner(vpWrap,6)
         Stroke(vpWrap,isSelected and D.Cyan or D.Border,1,0.4)
-        local vpScale = Instance.new("UIScale")
-        vpScale.Scale = 1
-        vpScale.Parent = vpWrap
         local vpAspect = Instance.new("UIAspectRatioConstraint")
         vpAspect.AspectRatio = 1
         vpAspect.Parent = vpWrap
@@ -397,11 +408,11 @@ local function BuildUnitList(filter)
         -- Traits lesen für Mini-Anzeige
         local main,sub = GetUnitTraits(u.instance)
         local mainColor = main and AllTraits[main] and GetRarityColor(AllTraits[main].Rarity) or D.TextLow
-        local nL=Instance.new("TextLabel",row); nL.Position=UDim2.new(0,58,0,6); nL.Size=UDim2.new(1,-64,0,20); nL.BackgroundTransparency=1
+        local nL=Instance.new("TextLabel",row); nL.Position=UDim2.new(0.05,0,0.77,0); nL.Size=UDim2.new(0.9,0,0,18); nL.BackgroundTransparency=1
         nL.Text=u.displayName; nL.TextColor3=isSelected and D.Cyan or D.TextHi; nL.TextSize=11; nL.Font=Enum.Font.GothamBold; nL.TextXAlignment=Enum.TextXAlignment.Left; nL.TextTruncate=Enum.TextTruncate.AtEnd
-        local tL=Instance.new("TextLabel",row); tL.Position=UDim2.new(0,58,0,30); tL.Size=UDim2.new(1,-64,0,18); tL.BackgroundTransparency=1
+        local tL=Instance.new("TextLabel",row); tL.Position=UDim2.new(0.05,0,0.88,0); tL.Size=UDim2.new(0.9,0,0,16); tL.BackgroundTransparency=1
         local tStr = (main or "?").." / "..(sub or "?")
-        tL.Text=tStr; tL.TextColor3=mainColor; tL.TextSize=9; tL.Font=Enum.Font.GothamSemibold; tL.TextXAlignment=Enum.TextXAlignment.Left; tL.TextTruncate=Enum.TextTruncate.AtEnd
+        tL.Text=tStr; tL.TextColor3=mainColor; tL.TextSize=10; tL.Font=Enum.Font.GothamSemibold; tL.TextXAlignment=Enum.TextXAlignment.Left; tL.TextTruncate=Enum.TextTruncate.AtEnd
         local clickBtn=Instance.new("TextButton",row); clickBtn.Size=UDim2.new(1,0,1,0); clickBtn.BackgroundTransparency=1; clickBtn.Text=""; clickBtn.BorderSizePixel=0
         local capU = u
         clickBtn.MouseButton1Click:Connect(function()
