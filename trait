@@ -89,10 +89,7 @@ local TR = {
     Units           = {},    -- {instance, name, index, displayName}
     Rolling         = false,
     RollCount       = 0,
-    TargetMain      = {},    -- Set von Trait-Namen
-    TargetSub       = {},    -- Set von Trait-Namen
-    StopOnMain      = true,
-    StopOnSub       = true,
+    TargetTraits    = {},    -- gemeinsames Set von Ziel-Traits
     UI = { Lbl={}, Fr={}, Btn={}, Inp={} },
 }
 
@@ -392,48 +389,7 @@ local function BuildMultiSelectDropdown(parent, title, accent, targetSet)
     end)
 end
 
-BuildMultiSelectDropdown(targetCard,"🥇 Main Trait Dropdown (Multi-Select)",D.Gold,TR.TargetMain)
-BuildMultiSelectDropdown(targetCard,"🥈 Sup Trait Dropdown (Multi-Select)",D.Purple,TR.TargetSub)
-
--- ── Main Trait Ziele ─────────────────────────────────────────
-local mainTargetSec=Instance.new("Frame",targetCard); mainTargetSec.Size=UDim2.new(1,0,0,0); mainTargetSec.AutomaticSize=Enum.AutomaticSize.Y; mainTargetSec.BackgroundTransparency=1; VList(mainTargetSec,5)
-local mainTargetHeader=Instance.new("Frame",mainTargetSec); mainTargetHeader.Size=UDim2.new(1,0,0,20); mainTargetHeader.BackgroundTransparency=1; HList(mainTargetHeader,6)
-local mainTargetTitleLbl=Instance.new("TextLabel",mainTargetHeader); mainTargetTitleLbl.Size=UDim2.new(0.55,0,1,0); mainTargetTitleLbl.BackgroundTransparency=1; mainTargetTitleLbl.Text="🥇 MAIN TRAIT ZIELE"; mainTargetTitleLbl.TextColor3=D.Gold; mainTargetTitleLbl.TextSize=10; mainTargetTitleLbl.Font=Enum.Font.GothamBold; mainTargetTitleLbl.TextXAlignment=Enum.TextXAlignment.Left
--- Stop-Toggle für Main
-local mainStopRow=Instance.new("Frame",mainTargetSec); mainStopRow.Size=UDim2.new(1,0,0,26); mainStopRow.BackgroundTransparency=1; HList(mainStopRow,6)
-local mainStopLbl=MkLbl(mainStopRow,"Stopp wenn Main-Ziel erreicht:",10,D.TextLow); mainStopLbl.Size=UDim2.new(0.72,0,1,0)
-local mainStopBtn=Instance.new("TextButton",mainStopRow); mainStopBtn.Size=UDim2.new(0.26,0,0,24); mainStopBtn.BackgroundColor3=D.GreenDark; mainStopBtn.Text="✅ AN"; mainStopBtn.TextColor3=D.GreenBright; mainStopBtn.TextSize=10; mainStopBtn.Font=Enum.Font.GothamBold; mainStopBtn.AutoButtonColor=false; mainStopBtn.BorderSizePixel=0; Corner(mainStopBtn,6); Stroke(mainStopBtn,D.GreenBright,1,0)
-mainStopBtn.MouseButton1Click:Connect(function()
-    TR.StopOnMain = not TR.StopOnMain
-    if TR.StopOnMain then mainStopBtn.Text="✅ AN"; mainStopBtn.TextColor3=D.GreenBright; mainStopBtn.BackgroundColor3=D.GreenDark; Stroke(mainStopBtn,D.GreenBright,1,0)
-    else mainStopBtn.Text="⬜ AUS"; mainStopBtn.TextColor3=D.TextLow; mainStopBtn.BackgroundColor3=D.CardHover; Stroke(mainStopBtn,D.TextLow,1,0.5) end
-end)
--- Main-Ziel Eingabe
-local mainInputRow=Instance.new("Frame",mainTargetSec); mainInputRow.Size=UDim2.new(1,0,0,28); mainInputRow.BackgroundTransparency=1; HList(mainInputRow,5)
-local mainTOuter,mainTBox=MkInput(mainInputRow,"Trait-Name (z.B. Sovereign)..."); mainTOuter.Size=UDim2.new(0.78,0,0,28)
-local mainAddBtn=Instance.new("TextButton",mainInputRow); mainAddBtn.Size=UDim2.new(0.19,0,0,28); mainAddBtn.BackgroundColor3=D.Gold; mainAddBtn.Text="+ Add"; mainAddBtn.TextColor3=Color3.fromRGB(20,15,0); mainAddBtn.TextSize=10; mainAddBtn.Font=Enum.Font.GothamBold; mainAddBtn.AutoButtonColor=false; mainAddBtn.BorderSizePixel=0; Corner(mainAddBtn,6); Stroke(mainAddBtn,D.Gold,1,0.2)
-mainAddBtn.MouseEnter:Connect(function() Tw(mainAddBtn,{BackgroundColor3=Color3.fromRGB(220,170,0)}) end); mainAddBtn.MouseLeave:Connect(function() Tw(mainAddBtn,{BackgroundColor3=D.Gold}) end)
-TR.UI.Fr.MainTargetList=Instance.new("Frame",mainTargetSec); TR.UI.Fr.MainTargetList.Size=UDim2.new(1,0,0,0); TR.UI.Fr.MainTargetList.AutomaticSize=Enum.AutomaticSize.Y; TR.UI.Fr.MainTargetList.BackgroundTransparency=1; VList(TR.UI.Fr.MainTargetList,3)
-
--- ── Sub Trait Ziele ──────────────────────────────────────────
-local subTargetSec=Instance.new("Frame",targetCard); subTargetSec.Size=UDim2.new(1,0,0,0); subTargetSec.AutomaticSize=Enum.AutomaticSize.Y; subTargetSec.BackgroundTransparency=1; VList(subTargetSec,5)
-local subTargetHeader=Instance.new("Frame",subTargetSec); subTargetHeader.Size=UDim2.new(1,0,0,20); subTargetHeader.BackgroundTransparency=1; HList(subTargetHeader,6)
-local subTargetTitleLbl=Instance.new("TextLabel",subTargetHeader); subTargetTitleLbl.Size=UDim2.new(0.55,0,1,0); subTargetTitleLbl.BackgroundTransparency=1; subTargetTitleLbl.Text="🥈 SUB TRAIT ZIELE"; subTargetTitleLbl.TextColor3=D.Purple; subTargetTitleLbl.TextSize=10; subTargetTitleLbl.Font=Enum.Font.GothamBold; subTargetTitleLbl.TextXAlignment=Enum.TextXAlignment.Left
--- Stop-Toggle für Sub
-local subStopRow=Instance.new("Frame",subTargetSec); subStopRow.Size=UDim2.new(1,0,0,26); subStopRow.BackgroundTransparency=1; HList(subStopRow,6)
-local subStopLbl=MkLbl(subStopRow,"Stopp wenn Sub-Ziel erreicht:",10,D.TextLow); subStopLbl.Size=UDim2.new(0.72,0,1,0)
-local subStopBtn=Instance.new("TextButton",subStopRow); subStopBtn.Size=UDim2.new(0.26,0,0,24); subStopBtn.BackgroundColor3=D.GreenDark; subStopBtn.Text="✅ AN"; subStopBtn.TextColor3=D.GreenBright; subStopBtn.TextSize=10; subStopBtn.Font=Enum.Font.GothamBold; subStopBtn.AutoButtonColor=false; subStopBtn.BorderSizePixel=0; Corner(subStopBtn,6); Stroke(subStopBtn,D.GreenBright,1,0)
-subStopBtn.MouseButton1Click:Connect(function()
-    TR.StopOnSub = not TR.StopOnSub
-    if TR.StopOnSub then subStopBtn.Text="✅ AN"; subStopBtn.TextColor3=D.GreenBright; subStopBtn.BackgroundColor3=D.GreenDark; Stroke(subStopBtn,D.GreenBright,1,0)
-    else subStopBtn.Text="⬜ AUS"; subStopBtn.TextColor3=D.TextLow; subStopBtn.BackgroundColor3=D.CardHover; Stroke(subStopBtn,D.TextLow,1,0.5) end
-end)
--- Sub-Ziel Eingabe
-local subInputRow=Instance.new("Frame",subTargetSec); subInputRow.Size=UDim2.new(1,0,0,28); subInputRow.BackgroundTransparency=1; HList(subInputRow,5)
-local subTOuter,subTBox=MkInput(subInputRow,"Trait-Name (z.B. Seraph)..."); subTOuter.Size=UDim2.new(0.78,0,0,28)
-local subAddBtn=Instance.new("TextButton",subInputRow); subAddBtn.Size=UDim2.new(0.19,0,0,28); subAddBtn.BackgroundColor3=D.Purple; subAddBtn.Text="+ Add"; subAddBtn.TextColor3=Color3.new(1,1,1); subAddBtn.TextSize=10; subAddBtn.Font=Enum.Font.GothamBold; subAddBtn.AutoButtonColor=false; subAddBtn.BorderSizePixel=0; Corner(subAddBtn,6); Stroke(subAddBtn,D.Purple,1,0.2)
-subAddBtn.MouseEnter:Connect(function() Tw(subAddBtn,{BackgroundColor3=Color3.fromRGB(150,60,220)}) end); subAddBtn.MouseLeave:Connect(function() Tw(subAddBtn,{BackgroundColor3=D.Purple}) end)
-TR.UI.Fr.SubTargetList=Instance.new("Frame",subTargetSec); TR.UI.Fr.SubTargetList.Size=UDim2.new(1,0,0,0); TR.UI.Fr.SubTargetList.AutomaticSize=Enum.AutomaticSize.Y; TR.UI.Fr.SubTargetList.BackgroundTransparency=1; VList(TR.UI.Fr.SubTargetList,3)
+BuildMultiSelectDropdown(targetCard,"🎯 Ziel-Traits Dropdown (Multi-Select)",D.Cyan,TR.TargetTraits)
 
 -- Bekannte Traits als Schnell-Buttons (aus DivineTraitReRoll)
 do
@@ -448,59 +404,18 @@ do
         local qBtn=Instance.new("TextButton",qGrid); qBtn.BackgroundColor3=D.CardHover; qBtn.Text=tn; qBtn.TextColor3=col; qBtn.TextSize=9; qBtn.Font=Enum.Font.GothamBold; qBtn.AutoButtonColor=false; qBtn.BorderSizePixel=0; Corner(qBtn,5); Stroke(qBtn,col,1,0.3)
         qBtn.MouseEnter:Connect(function() Tw(qBtn,{BackgroundColor3=Color3.fromRGB(35,42,68)}) end); qBtn.MouseLeave:Connect(function() Tw(qBtn,{BackgroundColor3=D.CardHover}) end)
         qBtn.MouseButton1Click:Connect(function()
-            -- Toggle: zu Main oder Sub hinzufügen
-            if not TR.TargetMain[tn] then
-                TR.TargetMain[tn]=true; RebuildTargetList("main")
-                Stroke(qBtn,D.Gold,1.5,0); Tw(qBtn,{BackgroundColor3=Color3.fromRGB(40,30,0)})
-                SetStatus("+ "..tn.." → Main Ziel",D.Gold)
-            elseif not TR.TargetSub[tn] then
-                TR.TargetSub[tn]=true; RebuildTargetList("sub")
-                Stroke(qBtn,D.Purple,1.5,0); Tw(qBtn,{BackgroundColor3=Color3.fromRGB(28,15,50)})
-                SetStatus("+ "..tn.." → Sub Ziel",D.Purple)
+            if not TR.TargetTraits[tn] then
+                TR.TargetTraits[tn]=true
+                Stroke(qBtn,D.Cyan,1.5,0); Tw(qBtn,{BackgroundColor3=Color3.fromRGB(0,35,58)})
+                SetStatus("+ "..tn.." als Ziel gesetzt",D.Cyan)
             else
-                TR.TargetMain[tn]=nil; TR.TargetSub[tn]=nil; RebuildTargetList("main"); RebuildTargetList("sub")
+                TR.TargetTraits[tn]=nil
                 Stroke(qBtn,col,1,0.3); Tw(qBtn,{BackgroundColor3=D.CardHover})
                 SetStatus("- "..tn.." entfernt",D.TextLow)
             end
         end)
     end
 end
-
--- ── Target-Liste Rebuild ─────────────────────────────────────
-function RebuildTargetList(which)
-    local listFrame = which=="main" and TR.UI.Fr.MainTargetList or TR.UI.Fr.SubTargetList
-    local targetSet = which=="main" and TR.TargetMain or TR.TargetSub
-    for _,v in pairs(listFrame:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
-    for tname,_ in pairs(targetSet) do
-        local td = AllTraits[tname]; local col = td and td.Rarity and GetRarityColor(td.Rarity) or D.TextMid
-        local row=Instance.new("Frame",listFrame); row.Size=UDim2.new(1,0,0,26); row.BorderSizePixel=0; Corner(row,6)
-        row.BackgroundColor3=Color3.fromRGB(15,22,38); Stroke(row,col,1,0.3)
-        local bar=Instance.new("Frame",row); bar.Size=UDim2.new(0,3,1,0); bar.BackgroundColor3=col; bar.BorderSizePixel=0; Corner(bar,2)
-        local nL=Instance.new("TextLabel",row); nL.Position=UDim2.new(0,10,0,0); nL.Size=UDim2.new(1,-40,1,0); nL.BackgroundTransparency=1; nL.Text=tname..(td and td.Rarity and " ["..td.Rarity.."]" or ""); nL.TextColor3=col; nL.TextSize=10; nL.Font=Enum.Font.GothamBold; nL.TextXAlignment=Enum.TextXAlignment.Left; nL.TextTruncate=Enum.TextTruncate.AtEnd
-        local capName=tname; local capWhich=which
-        local xBtn=Instance.new("TextButton",row); xBtn.Size=UDim2.new(0,28,0,22); xBtn.Position=UDim2.new(1,-30,0.5,-11); xBtn.BackgroundColor3=Color3.fromRGB(50,12,12); xBtn.Text="✕"; xBtn.TextColor3=D.Red; xBtn.TextSize=10; xBtn.Font=Enum.Font.GothamBold; xBtn.AutoButtonColor=false; xBtn.BorderSizePixel=0; Corner(xBtn,5)
-        xBtn.MouseButton1Click:Connect(function()
-            if capWhich=="main" then TR.TargetMain[capName]=nil else TR.TargetSub[capName]=nil end
-            RebuildTargetList(capWhich)
-        end)
-    end
-end
-
--- Add-Button Logik
-local function AddTarget(which, name)
-    name = (name or ""):match("^%s*(.-)%s*$")
-    if name == "" then return end
-    if which=="main" then TR.TargetMain[name]=true; RebuildTargetList("main")
-    else TR.TargetSub[name]=true; RebuildTargetList("sub") end
-end
-mainAddBtn.MouseButton1Click:Connect(function()
-    AddTarget("main",mainTBox.Text); mainTBox.Text=""
-end)
-subAddBtn.MouseButton1Click:Connect(function()
-    AddTarget("sub",subTBox.Text); subTBox.Text=""
-end)
-mainTBox.FocusLost:Connect(function(enter) if enter then AddTarget("main",mainTBox.Text); mainTBox.Text="" end end)
-subTBox.FocusLost:Connect(function(enter) if enter then AddTarget("sub",subTBox.Text); subTBox.Text="" end end)
 
 -- ╔══════════════════════════════════════════════════════════╗
 --  REROLL STEUERUNG
@@ -549,34 +464,27 @@ local singleRollBtn=NeonBtn(rerollCard,"🎲  Einmal Rollen (Main)",D.CyanDim,30
 local function CheckGoalReached()
     if not TR.SelectedUnit then return false end
     local main, sub = GetUnitTraits(TR.SelectedUnit)
-    if TR.StopOnMain and main then
-        if TR.TargetMain[main] then
-            SetStatus("🎉 MAIN-ZIEL '"..main.."' ERREICHT! Gestoppt.", D.GreenBright)
-            return true
-        end
+    if main and TR.TargetTraits[main] then
+        SetStatus("🎉 Ziel-Trait '"..main.."' ERREICHT! Gestoppt.", D.GreenBright)
+        return true
     end
-    if TR.StopOnSub and sub then
-        if TR.TargetSub[sub] then
-            SetStatus("🎉 SUB-ZIEL '"..sub.."' ERREICHT! Gestoppt.", D.GreenBright)
-            return true
-        end
+    if sub and TR.TargetTraits[sub] then
+        SetStatus("🎉 Ziel-Trait '"..sub.."' ERREICHT! Gestoppt.", D.GreenBright)
+        return true
     end
     return false
 end
 
-local function DoSingleReroll(mode)
-    mode = mode or "Main"
+local function DoSingleReroll()
     if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!",D.Orange); return false end
     if not RerollRemote then SetStatus("⚠ RerollTrait Remote nicht gefunden!",D.Orange); return false end
-    local remoteMode = (mode == "Sub") and "Secondary" or "Main"
+    pcall(function()
+        if TraitAckRemote then TraitAckRemote:FireServer() end
+    end)
     local ok = pcall(function()
-        RerollRemote:FireServer(TR.SelectedUnit, "Reroll", remoteMode, "Shards")
+        RerollRemote:FireServer(TR.SelectedUnit, "Reroll", "Main", "Shards", {"",""})
     end)
     if ok then
-        -- Bestätigung senden
-        pcall(function()
-            if TraitAckRemote then TraitAckRemote:FireServer() end
-        end)
         TR.RollCount = TR.RollCount + 1
         pcall(function() TR.UI.Lbl.RollCount.Text = "Rolls: "..TR.RollCount end)
     end
@@ -585,7 +493,7 @@ end
 
 -- Single Roll Buttons
 singleRollBtn.MouseButton1Click:Connect(function()
-    DoSingleReroll("Main")
+    DoSingleReroll()
     task.wait(0.3); UpdateLiveTraitDisplay()
 end)
 
@@ -598,21 +506,11 @@ local function AutoRerollLoop()
     SetStatus("🎲 Auto-Reroll läuft...", D.Gold)
     local rollStart = os.time()
     while TR.Rolling do
-        -- Main reroll
-        local mainOk = DoSingleReroll("Main")
-        if not mainOk then SetStatus("❌ Main-Reroll fehlgeschlagen!",D.Red); TR.Rolling=false; break end
-        task.wait(delay * 0.5)
+        local ok = DoSingleReroll()
+        if not ok then SetStatus("❌ Reroll fehlgeschlagen!",D.Red); TR.Rolling=false; break end
+        task.wait(delay)
         pcall(UpdateLiveTraitDisplay)
         if CheckGoalReached() then TR.Rolling=false; break end
-        -- Sub reroll (nur wenn Sub-Ziele gesetzt)
-        if next(TR.TargetSub) then
-            local subOk = DoSingleReroll("Sub")
-            if not subOk then SetStatus("❌ Sub-Reroll fehlgeschlagen!",D.Red); TR.Rolling=false; break end
-            task.wait(delay * 0.5)
-            pcall(UpdateLiveTraitDisplay)
-            if CheckGoalReached() then TR.Rolling=false; break end
-        end
-        task.wait(delay)
         -- Rate anzeigen
         local elapsed = os.time() - rollStart
         if elapsed > 0 then
@@ -628,7 +526,7 @@ end
 startRerollBtn.MouseButton1Click:Connect(function()
     if TR.Rolling then SetStatus("⚠ Läuft bereits!",D.Yellow); return end
     if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!",D.Orange); return end
-    if next(TR.TargetMain)==nil and next(TR.TargetSub)==nil then
+    if next(TR.TargetTraits)==nil then
         SetStatus("⚠ Keine Ziel-Traits gesetzt!",D.Orange); return
     end
     task.spawn(AutoRerollLoop)
