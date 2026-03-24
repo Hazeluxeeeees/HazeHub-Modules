@@ -937,7 +937,7 @@ local function ShowDBConfirm(msg)
     S.DBReady=true
     pcall(function()
         if H.UI.Lbl.ModulStatus then
-            H.UI.Lbl.ModulStatus.Text = "🟢  Autofarm-Modul aktiv | Datenbank geladen"
+            H.UI.Lbl.ModulStatus.Text = "🟢  Autofarm-Modul aktiv [Datenbank: GELADEN]"
             H.UI.Lbl.ModulStatus.TextColor3 = D.GreenBright
         end
     end)
@@ -1464,7 +1464,17 @@ end
 _G.HazeShared.SetModuleLoaded=function(version)
     pcall(function()
         _G.HazeShared.Version=version or "1.0.0"; _G.HazeShared.Status="Geladen"
-        if H.UI.Lbl.ModulStatus then H.UI.Lbl.ModulStatus.Text="🟢  Autofarm-Modul v".._G.HazeShared.Version.." geladen!"; H.UI.Lbl.ModulStatus.TextColor3=D.Green end
+        if H.UI.Lbl.ModulStatus then
+            local hasDb = false
+            if _G.HazeShared and type(_G.HazeShared._AutoFarm_RewardDB) == "table" then
+                hasDb = next(_G.HazeShared._AutoFarm_RewardDB) ~= nil
+            end
+            if _G.HazeHUB_Database and type(_G.HazeHUB_Database) == "table" then
+                hasDb = hasDb or (next(_G.HazeHUB_Database) ~= nil)
+            end
+            H.UI.Lbl.ModulStatus.Text = string.format("🟢  Autofarm-Modul v%s [Datenbank: %s]", _G.HazeShared.Version, hasDb and "GELADEN" or "FEHLT")
+            H.UI.Lbl.ModulStatus.TextColor3 = hasDb and D.GreenBright or D.Orange
+        end
     end)
 end
 
@@ -1514,7 +1524,8 @@ task.delay(8,function()
             hasDb = hasDb or (next(_G.HazeHUB_Database) ~= nil)
         end
         if H.UI.Lbl.ModulStatus and (not S.DBReady or not hasDb) then
-            H.UI.Lbl.ModulStatus.Text = "🟠  Autofarm-Modul aktiv | Datenbank fehlt"
+            local ver = (_G.HazeShared and _G.HazeShared.Version) or "?"
+            H.UI.Lbl.ModulStatus.Text = string.format("🟠  Autofarm-Modul v%s [Datenbank: FEHLT]", ver)
             H.UI.Lbl.ModulStatus.TextColor3 = D.Orange
         end
     end)
