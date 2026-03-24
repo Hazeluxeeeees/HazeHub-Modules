@@ -560,7 +560,7 @@ local rerollCard = Card(TraitPage); Pad(rerollCard, 10, 12, 10, 12); VList(rerol
 SecLbl(rerollCard, "⚙ REROLL EINSTELLUNGEN")
 
 local TR_SELECTED_CURRENCY = "Shards"
-MkLbl(rerollCard, "💎 Währung: Shards (fest gesperrt – keine Gems/Tokens)", 14, D.Cyan, true).Size = UDim2.new(1, 0, 0, 22)
+MkLbl(rerollCard, "💎 Währung: Shards", 14, D.Cyan, true).Size = UDim2.new(1, 0, 0, 22)
 
 local rerollCtrlRow = Instance.new("Frame", rerollCard); rerollCtrlRow.Size = UDim2.new(1, 0, 0, 40); rerollCtrlRow.BackgroundTransparency = 1
 HList(rerollCtrlRow, 8)
