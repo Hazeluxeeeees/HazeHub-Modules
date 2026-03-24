@@ -277,6 +277,78 @@ local function ScanUnits()
     return true
 end
 
+local UnitModelRoot = nil
+local UnitModelIndex = {}
+
+local function BuildUnitModelIndex()
+    UnitModelIndex = {}
+    UnitModelRoot = nil
+    pcall(function()
+        UnitModelRoot = RS:WaitForChild("Assets",5):WaitForChild("UnitModels",5):WaitForChild("Unit",5)
+    end)
+    if not UnitModelRoot then return end
+    for _, entry in ipairs(UnitModelRoot:GetDescendants()) do
+        if entry:IsA("Model") then
+            UnitModelIndex[entry.Name:lower()] = entry
+        end
+    end
+end
+
+local function FindUnitModel(unitName)
+    if not UnitModelRoot then BuildUnitModelIndex() end
+    local key = tostring(unitName or ""):lower()
+    if key == "" then return nil end
+    local exact = UnitModelIndex[key]
+    if exact then return exact end
+    for n, mdl in pairs(UnitModelIndex) do
+        if n:find(key,1,true) or key:find(n,1,true) then
+            return mdl
+        end
+    end
+    return nil
+end
+
+local function FillViewportWithUnit(vp, unitName)
+    local ok = false
+    pcall(function()
+        for _, d in ipairs(vp:GetDescendants()) do
+            if d:IsA("WorldModel") or d:IsA("Camera") then d:Destroy() end
+        end
+
+        local source = FindUnitModel(unitName)
+        if not source then return end
+
+        local world = Instance.new("WorldModel")
+        world.Parent = vp
+        local clone = source:Clone()
+        clone.Parent = world
+
+        if not clone.PrimaryPart then
+            local pp = clone:FindFirstChildWhichIsA("BasePart", true)
+            if pp then clone.PrimaryPart = pp end
+        end
+        if clone.PrimaryPart then
+            clone:PivotTo(CFrame.new(0,0,0))
+        end
+
+        local cam = Instance.new("Camera")
+        cam.FieldOfView = 55
+        cam.Parent = vp
+        vp.CurrentCamera = cam
+
+        local cf, size = clone:GetBoundingBox()
+        local maxDim = math.max(size.X, size.Y, size.Z, 0.1)
+        local distance = (maxDim * 1.35) / math.tan(math.rad(cam.FieldOfView * 0.5))
+        local focus = cf.Position
+        cam.CFrame = CFrame.new(
+            focus + Vector3.new(distance * 0.28, distance * 0.20, distance),
+            focus
+        )
+        ok = true
+    end)
+    return ok
+end
+
 local function BuildUnitList(filter)
     for _,v in pairs(TR.UI.Fr.UnitList:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
     filter = (filter or ""):lower()
@@ -286,16 +358,48 @@ local function BuildUnitList(filter)
         shown = shown + 1
         local isSelected = (TR.SelectedUnit == u.instance)
         local row = Instance.new("Frame",TR.UI.Fr.UnitList)
-        row.Size = UDim2.new(1,0,0,34); row.BorderSizePixel=0; Corner(row,7)
+        row.Size = UDim2.new(1,0,0,58); row.BorderSizePixel=0; Corner(row,7)
         if isSelected then row.BackgroundColor3=Color3.fromRGB(0,30,60); Stroke(row,D.Cyan,1.5,0)
         else row.BackgroundColor3=D.CardHover; Stroke(row,D.Border,1,0.4) end
-        local bar=Instance.new("Frame",row); bar.Size=UDim2.new(0,3,0.6,0); bar.Position=UDim2.new(0,0,0.2,0); bar.BackgroundColor3=isSelected and D.Cyan or D.Border; bar.BorderSizePixel=0; Corner(bar,2)
+        local bar=Instance.new("Frame",row); bar.Size=UDim2.new(0,3,0.8,0); bar.Position=UDim2.new(0,0,0.1,0); bar.BackgroundColor3=isSelected and D.Cyan or D.Border; bar.BorderSizePixel=0; Corner(bar,2)
+        local vpWrap = Instance.new("Frame", row)
+        vpWrap.Position = UDim2.new(0,8,0.5,-22)
+        vpWrap.Size = UDim2.new(0,44,0,44)
+        vpWrap.BackgroundColor3 = Color3.fromRGB(12,18,34)
+        vpWrap.BorderSizePixel = 0
+        Corner(vpWrap,6)
+        Stroke(vpWrap,isSelected and D.Cyan or D.Border,1,0.4)
+        local vpScale = Instance.new("UIScale")
+        vpScale.Scale = 1
+        vpScale.Parent = vpWrap
+        local vpAspect = Instance.new("UIAspectRatioConstraint")
+        vpAspect.AspectRatio = 1
+        vpAspect.Parent = vpWrap
+        local vp = Instance.new("ViewportFrame", vpWrap)
+        vp.Size = UDim2.new(1,0,1,0)
+        vp.BackgroundTransparency = 1
+        vp.BorderSizePixel = 0
+        vp.ImageColor3 = Color3.new(1,1,1)
+        task.spawn(function()
+            local loaded = FillViewportWithUnit(vp, u.name)
+            if not loaded then
+                local fb = Instance.new("TextLabel", vpWrap)
+                fb.Size = UDim2.new(1,0,1,0)
+                fb.BackgroundTransparency = 1
+                fb.Text = u.name:sub(1,1):upper()
+                fb.TextColor3 = D.TextLow
+                fb.TextSize = 16
+                fb.Font = Enum.Font.GothamBold
+                fb.TextXAlignment = Enum.TextXAlignment.Center
+                fb.TextYAlignment = Enum.TextYAlignment.Center
+            end
+        end)
         -- Traits lesen für Mini-Anzeige
         local main,sub = GetUnitTraits(u.instance)
         local mainColor = main and AllTraits[main] and GetRarityColor(AllTraits[main].Rarity) or D.TextLow
-        local nL=Instance.new("TextLabel",row); nL.Position=UDim2.new(0,10,0,2); nL.Size=UDim2.new(1,-12,0,14); nL.BackgroundTransparency=1
+        local nL=Instance.new("TextLabel",row); nL.Position=UDim2.new(0,58,0,6); nL.Size=UDim2.new(1,-64,0,20); nL.BackgroundTransparency=1
         nL.Text=u.displayName; nL.TextColor3=isSelected and D.Cyan or D.TextHi; nL.TextSize=11; nL.Font=Enum.Font.GothamBold; nL.TextXAlignment=Enum.TextXAlignment.Left; nL.TextTruncate=Enum.TextTruncate.AtEnd
-        local tL=Instance.new("TextLabel",row); tL.Position=UDim2.new(0,10,0,17); tL.Size=UDim2.new(1,-12,0,13); tL.BackgroundTransparency=1
+        local tL=Instance.new("TextLabel",row); tL.Position=UDim2.new(0,58,0,30); tL.Size=UDim2.new(1,-64,0,18); tL.BackgroundTransparency=1
         local tStr = (main or "?").." / "..(sub or "?")
         tL.Text=tStr; tL.TextColor3=mainColor; tL.TextSize=9; tL.Font=Enum.Font.GothamSemibold; tL.TextXAlignment=Enum.TextXAlignment.Left; tL.TextTruncate=Enum.TextTruncate.AtEnd
         local clickBtn=Instance.new("TextButton",row); clickBtn.Size=UDim2.new(1,0,1,0); clickBtn.BackgroundTransparency=1; clickBtn.Text=""; clickBtn.BorderSizePixel=0
