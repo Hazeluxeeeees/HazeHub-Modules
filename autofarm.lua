@@ -965,8 +965,6 @@ local qAmtOuter,qAmtBox=MkInput(qRow,"Anzahl"); qAmtOuter.Size=UDim2.new(0.28,0,
 local qAddBtn=Instance.new("TextButton",qRow); qAddBtn.Size=UDim2.new(0.19,0,0,30); qAddBtn.BackgroundColor3=D.Green; qAddBtn.Text="+ Add"; qAddBtn.TextColor3=Color3.new(1,1,1); qAddBtn.TextSize=11; qAddBtn.Font=Enum.Font.GothamBold; qAddBtn.AutoButtonColor=false; qAddBtn.BorderSizePixel=0; Corner(qAddBtn,7); Stroke(qAddBtn,D.Green,1,0.2)
 qAddBtn.MouseEnter:Connect(function() Tw(qAddBtn,{BackgroundColor3=Color3.fromRGB(0,160,80)}) end)
 qAddBtn.MouseLeave:Connect(function() Tw(qAddBtn,{BackgroundColor3=D.Green}) end)
-AF.UI.Fr.List=Instance.new("ScrollingFrame",qCard); AF.UI.Fr.List.Size=UDim2.new(1,0,0,190); AF.UI.Fr.List.CanvasSize=UDim2.new(0,0,0,0); AF.UI.Fr.List.AutomaticCanvasSize=Enum.AutomaticSize.Y; AF.UI.Fr.List.ScrollBarThickness=4; AF.UI.Fr.List.ScrollBarImageColor3=D.CyanDim; AF.UI.Fr.List.BackgroundTransparency=1; AF.UI.Fr.List.BorderSizePixel=0; VList(AF.UI.Fr.List,4)
-AF.UI.Lbl.QueueEmpty=MkLbl(AF.UI.Fr.List,"Queue leer.",11,D.TextLow); AF.UI.Lbl.QueueEmpty.Size=UDim2.new(1,0,0,24)
 qAddBtn.MouseButton1Click:Connect(function()
     local iname=(qItemBox.Text or ""):match("^%s*(.-)%s*$"); local iamt=tonumber(qAmtBox.Text)
     if iname=="" or not iamt or iamt<=0 then return end
@@ -976,7 +974,7 @@ qAddBtn.MouseButton1Click:Connect(function()
     qItemBox.Text=""; qAmtBox.Text=""; UpdateQueueUI(); pcall(function() HS.UpdateGoalsUI() end)
     pcall(function() AF.UI.Lbl.QueueFileInfo.Text="Queue: "..#AF.Queue.." Items"; AF.UI.Lbl.QueueFileInfo.TextColor3=D.Green end)
 end)
-local ctrlRow=Instance.new("Frame",qCard); ctrlRow.Size=UDim2.new(1,0,0,32); ctrlRow.BackgroundTransparency=1; HList(ctrlRow,8)
+local ctrlRow=Instance.new("Frame",qCard); ctrlRow.Size=UDim2.new(1,0,0,32); ctrlRow.BackgroundTransparency=1; ctrlRow.LayoutOrder=3; HList(ctrlRow,8)
 local startBtn=Instance.new("TextButton",ctrlRow); startBtn.Size=UDim2.new(0.48,0,0,32); startBtn.BackgroundColor3=D.Green; startBtn.Text="Start Queue"; startBtn.TextColor3=Color3.new(1,1,1); startBtn.TextSize=12; startBtn.Font=Enum.Font.GothamBold; startBtn.AutoButtonColor=false; startBtn.BorderSizePixel=0; Corner(startBtn,8); Stroke(startBtn,D.Green,1,0.2)
 local stopBtn=Instance.new("TextButton",ctrlRow); stopBtn.Size=UDim2.new(0.48,0,0,32); stopBtn.BackgroundColor3=D.RedDark; stopBtn.Text="Stop"; stopBtn.TextColor3=D.Red; stopBtn.TextSize=12; stopBtn.Font=Enum.Font.GothamBold; stopBtn.AutoButtonColor=false; stopBtn.BorderSizePixel=0; Corner(stopBtn,8); Stroke(stopBtn,D.Red,1,0.4)
 startBtn.MouseButton1Click:Connect(function()
@@ -994,10 +992,23 @@ task.spawn(function() while true do task.wait(1); if not AF.Scanning then pcall(
 end) end end end)
 task.spawn(function() while true do task.wait(8); pcall(UpdateQueueUI) end end)
 local clearBtn=NeonBtn(qCard,"Queue leeren",D.Red,28)
+clearBtn.LayoutOrder=4
 clearBtn.MouseButton1Click:Connect(function()
     AF.Queue={}; SaveQueueFile(); UpdateQueueUI()
     pcall(function() AF.UI.Lbl.QueueFileInfo.Text="Queue geleert."; AF.UI.Lbl.QueueFileInfo.TextColor3=D.TextLow end)
 end)
+AF.UI.Fr.List=Instance.new("ScrollingFrame",qCard)
+AF.UI.Fr.List.LayoutOrder=5
+AF.UI.Fr.List.Size=UDim2.new(1,0,0,190)
+AF.UI.Fr.List.CanvasSize=UDim2.new(0,0,0,0)
+AF.UI.Fr.List.AutomaticCanvasSize=Enum.AutomaticSize.Y
+AF.UI.Fr.List.ScrollBarThickness=4
+AF.UI.Fr.List.ScrollBarImageColor3=D.CyanDim
+AF.UI.Fr.List.BackgroundTransparency=1
+AF.UI.Fr.List.BorderSizePixel=0
+VList(AF.UI.Fr.List,4)
+AF.UI.Lbl.QueueEmpty=MkLbl(AF.UI.Fr.List,"Queue leer.",11,D.TextLow)
+AF.UI.Lbl.QueueEmpty.Size=UDim2.new(1,0,0,24)
 
 -- ============================================================
 --  STARTUP
