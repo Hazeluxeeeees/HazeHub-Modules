@@ -270,6 +270,97 @@ local function LoadDB()
     return true
 end
 
+local function BuildDBFromModuleData()
+    local candidates = {
+        "Worlds",
+        "WorldData",
+        "WorldService",
+        "StageData",
+        "Rewards",
+    }
+    local built = {}
+
+    local function addEntry(chapId, worldId, mode, itemName, dropRate, dropAmount)
+        if not chapId or chapId == "" or not itemName or itemName == "" then return end
+        if not built[chapId] then
+            built[chapId] = { world = worldId or "Unknown", mode = mode or "Story", chapId = chapId, items = {} }
+        end
+        built[chapId].items[itemName] = {
+            dropRate = tonumber(dropRate) or 0,
+            dropAmount = tonumber(dropAmount) or 1,
+        }
+    end
+
+    local function parseStage(stageKey, stageData, worldId, mode)
+        if type(stageData) ~= "table" then return end
+        local chapId = tostring(stageData.chapId or stageData.chapterId or stageData.StageId or stageData.Chapter or stageKey)
+        local rewardContainers = {
+            stageData.items, stageData.Items, stageData.rewards, stageData.Rewards,
+            stageData.drop, stageData.Drop, stageData.drops, stageData.Drops,
+        }
+        for _, container in ipairs(rewardContainers) do
+            if type(container) == "table" then
+                for iname, idata in pairs(container) do
+                    if type(idata) == "table" then
+                        addEntry(chapId, worldId, mode, tostring(idata.item or idata.name or idata.ItemName or iname),
+                            idata.dropRate or idata.rate or idata.chance or idata.DropRate,
+                            idata.dropAmount or idata.amount or idata.DropAmount)
+                    else
+                        addEntry(chapId, worldId, mode, tostring(iname), 0, 1)
+                    end
+                end
+            end
+        end
+    end
+
+    for _, name in ipairs(candidates) do
+        local mod = nil
+        pcall(function()
+            local shared = RS:FindFirstChild("Shared")
+            local info = shared and shared:FindFirstChild("Info")
+            local target = info and info:FindFirstChild(name)
+            if target and target:IsA("ModuleScript") then
+                mod = require(target)
+            end
+        end)
+        if type(mod) == "table" then
+            for worldKey, worldData in pairs(mod) do
+                if type(worldData) == "table" then
+                    local worldId = tostring(worldData.world or worldData.World or worldKey)
+                    local mode = tostring(worldData.mode or worldData.Mode or "Story")
+                    local stageContainers = {
+                        worldData.stages, worldData.Stages, worldData.chapters, worldData.Chapters,
+                        worldData.story, worldData.Story, worldData.ranger, worldData.Ranger,
+                    }
+                    local parsedAny = false
+                    for _, sc in ipairs(stageContainers) do
+                        if type(sc) == "table" then
+                            parsedAny = true
+                            for stageKey, stageData in pairs(sc) do
+                                parseStage(stageKey, stageData, worldId, mode)
+                            end
+                        end
+                    end
+                    if not parsedAny then
+                        parseStage(worldKey, worldData, worldId, mode)
+                    end
+                end
+            end
+        end
+    end
+
+    local c = 0
+    for _ in pairs(built) do c = c + 1 end
+    if c == 0 then return false end
+
+    AF.RewardDatabase = built
+    _G.HazeShared._AutoFarm_RewardDB = AF.RewardDatabase
+    _G.HazeHUB_Database = AF.RewardDatabase
+    SaveDB()
+    print("[HazeHub] DB aus Shared.Info aufgebaut: " .. c .. " Chapters")
+    return true
+end
+
 local function ClearDB()
     AF.RewardDatabase = {}
     if writefile then pcall(function() writefile(DB_FILE, "{}") end) end
@@ -839,8 +930,9 @@ local loadDbBtn=Instance.new("TextButton",dbCard); loadDbBtn.Size=UDim2.new(1,0,
 loadDbBtn.MouseEnter:Connect(function() Tw(loadDbBtn,{BackgroundColor3=Color3.fromRGB(0,45,75)}) end)
 loadDbBtn.MouseLeave:Connect(function() Tw(loadDbBtn,{BackgroundColor3=D.CardHover}) end)
 loadDbBtn.MouseButton1Click:Connect(function()
-    if LoadDB() then
+    if LoadDB() or BuildDBFromModuleData() then
         local c=DBCount(); AF.UI.Lbl.DBStatus.Text=string.format("✅ DB: %d Chapters",c); AF.UI.Lbl.DBStatus.TextColor3=D.Green
+        _G.HazeHUB_Database = AF.RewardDatabase
         NotifyDBReady(c,string.format("Datenbank geladen! (%d Chapters)",c))
     else AF.UI.Lbl.DBStatus.Text="Keine gültige DB."; AF.UI.Lbl.DBStatus.TextColor3=D.Orange end
 end)
@@ -912,8 +1004,9 @@ end)
 if isfile and isfile(DB_FILE) then
     local raw; pcall(function() raw=readfile(DB_FILE) end)
     if raw and #raw<10 then AF.UI.Lbl.DBStatus.Text="⚠ DB korrupt!"; AF.UI.Lbl.DBStatus.TextColor3=D.Orange
-    elseif LoadDB() then
+    elseif LoadDB() or BuildDBFromModuleData() then
         local c=DBCount(); AF.UI.Lbl.DBStatus.Text=string.format("✅ DB: %d Chapters",c); AF.UI.Lbl.DBStatus.TextColor3=D.Green
+        _G.HazeHUB_Database = AF.RewardDatabase
         task.delay(0.5, function() NotifyDBReady(c, string.format("Datenbank geladen! (%d Chapters)",c)) end)
     end
 else AF.UI.Lbl.DBStatus.Text="Keine DB."; AF.UI.Lbl.DBStatus.TextColor3=D.TextLow end
