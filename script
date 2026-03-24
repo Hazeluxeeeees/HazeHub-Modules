@@ -664,12 +664,80 @@ local function MakeTab(name,icon)
     return P
 end
 
+local function MakeTraitsTab(name, icon)
+    local B = Instance.new("TextButton", H.UI.Fr.TabHolder)
+    B.Size = UDim2.new(1, 0, 0, 28)
+    B.BackgroundColor3 = D.TabInactive
+    B.Text = icon .. "  " .. name
+    B.TextColor3 = D.TextMid
+    B.TextSize = 10
+    B.Font = Enum.Font.GothamSemibold
+    B.AutoButtonColor = false
+    B.BorderSizePixel = 0
+    Corner(B, 7)
+    Stroke(B, D.Cyan, 1, 1)
+    B.MouseEnter:Connect(function() if S.ActiveTab ~= name then Tw(B, { BackgroundColor3 = D.CardHover }) end end)
+    B.MouseLeave:Connect(function() if S.ActiveTab ~= name then Tw(B, { BackgroundColor3 = D.TabInactive }) end end)
+    local TraitRoot = Instance.new("Frame", H.UI.Fr.Content)
+    TraitRoot.Name = name
+    TraitRoot.Size = UDim2.new(1, 0, 1, 0)
+    TraitRoot.Visible = false
+    TraitRoot.BackgroundTransparency = 1
+    TraitRoot.BorderSizePixel = 0
+    TraitRoot.ClipsDescendants = true
+    local rootList = Instance.new("UIListLayout", TraitRoot)
+    rootList.FillDirection = Enum.FillDirection.Vertical
+    rootList.SortOrder = Enum.SortOrder.LayoutOrder
+    rootList.Padding = UDim.new(0, 6)
+    rootList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    local TraitSticky = Instance.new("Frame", TraitRoot)
+    TraitSticky.Name = "TraitSticky"
+    TraitSticky.Size = UDim2.new(1, 0, 0, 0)
+    TraitSticky.AutomaticSize = Enum.AutomaticSize.Y
+    TraitSticky.BackgroundTransparency = 1
+    TraitSticky.LayoutOrder = 1
+    VList(TraitSticky, 6)
+    Pad(TraitSticky, 4, 10, 4, 10)
+    local TraitScroll = Instance.new("ScrollingFrame", TraitRoot)
+    TraitScroll.Name = "TraitScroll"
+    TraitScroll.Size = UDim2.new(1, 0, 0, 200)
+    TraitScroll.BackgroundTransparency = 1
+    TraitScroll.BorderSizePixel = 0
+    TraitScroll.ScrollBarThickness = 4
+    TraitScroll.ScrollBarImageColor3 = D.CyanDim
+    TraitScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    TraitScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    TraitScroll.ClipsDescendants = true
+    TraitScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+    TraitScroll.LayoutOrder = 2
+    VList(TraitScroll, 8)
+    Pad(TraitScroll, 10, 10, 10, 10)
+    local function syncTraitScrollH()
+        local h = TraitRoot.AbsoluteSize.Y
+        local sh = TraitSticky.AbsoluteSize.Y
+        local gap = 12
+        if h > 40 and sh > 0 and h > sh + gap + 40 then
+            TraitScroll.Size = UDim2.new(1, 0, 0, h - sh - gap)
+        else
+            TraitScroll.Size = UDim2.new(1, 0, 0, math.max(140, h * 0.5))
+        end
+    end
+    TraitRoot:GetPropertyChangedSignal("AbsoluteSize"):Connect(syncTraitScrollH)
+    TraitSticky:GetPropertyChangedSignal("AbsoluteSize"):Connect(syncTraitScrollH)
+    task.defer(syncTraitScrollH)
+    H.Tabs[name] = TraitRoot
+    H.TBtns[name] = B
+    B.MouseButton1Click:Connect(function() SelectTab(name) end)
+    return TraitRoot, TraitSticky, TraitScroll
+end
+
 local GamePage  = MakeTab("Game","🎮")
 local MiscPage  = MakeTab("Misc","🔧")
 local SessPage  = MakeTab("Session","📊")
 local InvPage   = MakeTab("Inventory","🎒")
 local QuestPage = MakeTab("Quests","📋")
-local TraitPage = MakeTab("Traits","✨")
+local TraitRoot, TraitSticky, TraitScroll = MakeTraitsTab("Traits", "✨")
+local TraitPage = TraitScroll
 local ShopPage  = MakeTab("Shops","🏪")
 local CraftPage = MakeTab("Crafting","🔨")
 local SettPage  = MakeTab("Settings","⚙")
@@ -678,6 +746,8 @@ local SettPage  = MakeTab("Settings","⚙")
 _G.HazeShared.ShopContainer = ShopPage
 _G.HazeShared.CraftPage     = CraftPage
 _G.HazeShared.TraitPage     = TraitPage
+_G.HazeShared.TraitSticky   = TraitSticky
+_G.HazeShared.TraitPageRoot = TraitRoot
 
 -- ── GUI-Resize ────────────────────────────────────────────────
 local function SetGUISize(mode)
@@ -1317,7 +1387,7 @@ end) -- end pcall Quests Tab
 --  TRAITS TAB  – Placeholder (trait.lua lädt hier rein)
 -- ╚══════════════════════════════════════════════════════════╝
 do
-    local traitWaitLbl=MkLbl(TraitPage,"⏳ Trait-Modul wird geladen...",11,D.Yellow)
+    local traitWaitLbl=MkLbl(TraitScroll,"⏳ Trait-Modul wird geladen...",11,D.Yellow)
     traitWaitLbl.Size=UDim2.new(1,0,0,20)
     _G._TraitWaitLbl=traitWaitLbl
 end
