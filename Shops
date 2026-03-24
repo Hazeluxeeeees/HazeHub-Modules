@@ -142,12 +142,6 @@ end
 -- ============================================================
 local ShopPage = HS.ShopContainer
 
-local titleLbl = Instance.new("TextLabel", ShopPage)
-titleLbl.Size = UDim2.new(1,0,0,24); titleLbl.BackgroundTransparency = 1
-titleLbl.Text = "🏪  Shops"; titleLbl.TextColor3 = D.Cyan
-titleLbl.TextSize = 14; titleLbl.Font = Enum.Font.GothamBold
-titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-
 local verLbl = Instance.new("TextLabel", ShopPage)
 verLbl.Size = UDim2.new(1,0,0,13); verLbl.BackgroundTransparency = 1
 verLbl.Text = "🟢  Shop-Modul v" .. VERSION .. " | Spieler: " .. LP.Name
