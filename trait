@@ -284,32 +284,73 @@ local function ScanUnits()
     return true
 end
 
-local UnitModelRoot = nil
-local UnitModelIndex = {}
+local UnitModelRoots = {
+    Unit = nil,
+    Shiny = nil,
+    Evo = nil,
+}
+local UnitModelIndex = {
+    Unit = {},
+    Shiny = {},
+    Evo = {},
+}
 
 local function BuildUnitModelIndex()
-    UnitModelIndex = {}
-    UnitModelRoot = nil
+    UnitModelIndex = { Unit = {}, Shiny = {}, Evo = {} }
+    UnitModelRoots = { Unit = nil, Shiny = nil, Evo = nil }
+
     pcall(function()
-        UnitModelRoot = RS:WaitForChild("Assets",5):WaitForChild("UnitModels",5):WaitForChild("Unit",5)
+        local root = RS:WaitForChild("Assets",5):WaitForChild("UnitModels",5)
+        UnitModelRoots.Unit = root:FindFirstChild("Unit")
+        UnitModelRoots.Shiny = root:FindFirstChild("Shiny")
+        UnitModelRoots.Evo = root:FindFirstChild("Evo")
     end)
-    if not UnitModelRoot then return end
-    for _, entry in ipairs(UnitModelRoot:GetDescendants()) do
-        if entry:IsA("Model") then
-            UnitModelIndex[entry.Name:lower()] = entry
+
+    for bucket, folder in pairs(UnitModelRoots) do
+        if folder then
+            for _, entry in ipairs(folder:GetDescendants()) do
+                if entry:IsA("Model") then
+                    UnitModelIndex[bucket][entry.Name:lower()] = entry
+                end
+            end
         end
     end
 end
 
+local function NormalizeUnitKey(unitName)
+    local raw = tostring(unitName or "")
+    local key = raw:lower()
+    key = key:gsub(":shiny","")
+    key = key:gsub(":evo","")
+    key = key:gsub("%s+$","")
+    key = key:gsub("^%s+","")
+    return key
+end
+
+local function ResolveModelBucket(unitName)
+    local n = tostring(unitName or ""):lower()
+    if n:find(":shiny",1,true) then return "Shiny" end
+    if n:find(":evo",1,true) then return "Evo" end
+    return "Unit"
+end
+
 local function FindUnitModel(unitName)
-    if not UnitModelRoot then BuildUnitModelIndex() end
-    local key = tostring(unitName or ""):lower()
+    if not UnitModelRoots.Unit then BuildUnitModelIndex() end
+    local key = NormalizeUnitKey(unitName)
     if key == "" then return nil end
-    local exact = UnitModelIndex[key]
-    if exact then return exact end
-    for n, mdl in pairs(UnitModelIndex) do
-        if n:find(key,1,true) or key:find(n,1,true) then
-            return mdl
+
+    local preferred = ResolveModelBucket(unitName)
+    local searchOrder = { preferred, "Unit" }
+    if preferred == "Unit" then searchOrder = { "Unit", "Shiny", "Evo" } end
+
+    for _, bucket in ipairs(searchOrder) do
+        local idx = UnitModelIndex[bucket] or {}
+        local exact = idx[key]
+        if exact then return exact end
+        for n, mdl in pairs(idx) do
+            if n:find(key,1,true) or key:find(n,1,true) then
+                return mdl
+            end
         end
     end
     return nil
