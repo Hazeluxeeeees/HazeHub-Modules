@@ -145,7 +145,7 @@ local unitListFrame=Instance.new("Frame",unitCard)
 unitListFrame.Size=UDim2.new(1,0,0,0); unitListFrame.AutomaticSize=Enum.AutomaticSize.Y
 unitListFrame.BackgroundTransparency=1
 local unitGrid=Instance.new("UIGridLayout",unitListFrame)
-unitGrid.CellSize=UDim2.new(0.45,0,0,170)
+unitGrid.CellSize=UDim2.new(0.48,0,0,180)
 unitGrid.CellPadding=UDim2.new(0.03,0,0,8)
 unitGrid.FillDirection=Enum.FillDirection.Horizontal
 unitGrid.HorizontalAlignment=Enum.HorizontalAlignment.Center
@@ -338,6 +338,28 @@ local function FillViewportWithUnit(vp, unitName)
             clone:PivotTo(CFrame.new(0,0,0))
         end
 
+        -- Unterkörper ausblenden (Hose/Füße/Beine), damit der Fokus auf Torso/Kopf liegt.
+        local torsoY = nil
+        local torso = clone:FindFirstChild("UpperTorso", true) or clone:FindFirstChild("Torso", true) or clone:FindFirstChild("LowerTorso", true)
+        if torso and torso:IsA("BasePart") then
+            torsoY = torso.Position.Y
+        end
+        for _, p in ipairs(clone:GetDescendants()) do
+            if p:IsA("BasePart") then
+                local n = p.Name:lower()
+                local lowerName = (n:find("leg",1,true) ~= nil) or (n:find("foot",1,true) ~= nil) or (n:find("shoe",1,true) ~= nil) or (n:find("pants",1,true) ~= nil)
+                local lowerPos = torsoY and (p.Position.Y < (torsoY - 0.1))
+                if lowerName or lowerPos then
+                    p.Transparency = 1
+                    for _, d in ipairs(p:GetDescendants()) do
+                        if d:IsA("Decal") or d:IsA("Texture") then
+                            d.Transparency = 1
+                        end
+                    end
+                end
+            end
+        end
+
         local cam = Instance.new("Camera")
         cam.FieldOfView = 58
         cam.Parent = vp
@@ -345,14 +367,14 @@ local function FillViewportWithUnit(vp, unitName)
 
         local cf, size = clone:GetBoundingBox()
         local ext = clone:GetExtentsSize()
-        local focus = cf.Position
+        local focus = cf.Position + Vector3.new(0, ext.Y * 0.2, 0)
         local baseLook = Vector3.new(0,0,-1)
         if clone.PrimaryPart then
             baseLook = clone.PrimaryPart.CFrame.LookVector
         end
-        local nearDist = math.max(0.8, ext.Y * 0.8)
-        local side = math.max(0.4, ext.X * 0.2)
-        local up = math.max(0.3, ext.Y * 0.15)
+        local nearDist = math.max(0.45, ext.Y * 0.5)
+        local side = math.max(0.15, ext.X * 0.08)
+        local up = math.max(0.45, ext.Y * 0.3)
         cam.CFrame = CFrame.new(
             focus - (baseLook * nearDist) + Vector3.new(side, up, 0),
             focus
