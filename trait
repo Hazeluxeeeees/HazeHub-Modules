@@ -367,18 +367,24 @@ local function FillViewportWithUnit(vp, unitName)
 
         local cf, size = clone:GetBoundingBox()
         local ext = clone:GetExtentsSize()
-        local focus = cf.Position + Vector3.new(0, ext.Y * 0.2, 0)
-        local baseLook = Vector3.new(0,0,-1)
-        if clone.PrimaryPart then
-            baseLook = clone.PrimaryPart.CFrame.LookVector
+        local head = clone:FindFirstChild("Head", true)
+        local upperTorso = clone:FindFirstChild("UpperTorso", true) or clone:FindFirstChild("Torso", true)
+        local focusPart = (head and head:IsA("BasePart")) and head or ((upperTorso and upperTorso:IsA("BasePart")) and upperTorso or nil)
+
+        if focusPart then
+            local focusPos = focusPart.Position
+            local look = focusPart.CFrame.LookVector
+            local camDist = math.max(1.2, ext.Y * 0.35)
+            cam.CFrame = CFrame.new(focusPos + (look * camDist), focusPos)
+        else
+            local focus = cf.Position + Vector3.new(0, ext.Y * 0.25, 0)
+            local baseLook = Vector3.new(0,0,-1)
+            if clone.PrimaryPart then
+                baseLook = clone.PrimaryPart.CFrame.LookVector
+            end
+            local nearDist = math.max(0.9, ext.Y * 0.4)
+            cam.CFrame = CFrame.new(focus + (baseLook * nearDist), focus)
         end
-        local nearDist = math.max(0.45, ext.Y * 0.5)
-        local side = math.max(0.15, ext.X * 0.08)
-        local up = math.max(0.45, ext.Y * 0.3)
-        cam.CFrame = CFrame.new(
-            focus - (baseLook * nearDist) + Vector3.new(side, up, 0),
-            focus
-        )
         ok = true
     end)
     return ok
