@@ -1,5 +1,6 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – craft.lua  v1.1.0
+--  HazeHUB – craft.lua  v1.2.0
+--  v1.2: Glas-Schwarz-Theme (D.*)
 --  FIXES v1.1.0:
 --    ✓ Modelle aus RS.Assets.ItemModels.Models (Multi-Part zentriert)
 --    ✓ ShopItems-Integration: kaufbare Items → Auto-Buy statt Farm-Queue
@@ -9,7 +10,7 @@
 --    ✓ Karte grün wenn ALLES bereit (inkl. kaufbare Items)
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "1.1.0"
+local VERSION = "1.2.0"
 
 -- Warten bis HazeShared & CraftPage bereit
 local _w = 0
@@ -240,7 +241,8 @@ local statusCard=Card(CraftPage,28); Pad(statusCard,4,10,4,10)
 Craft.UI.Lbl.Status=Instance.new("TextLabel",statusCard)
 Craft.UI.Lbl.Status.Size=UDim2.new(1,0,1,0); Craft.UI.Lbl.Status.BackgroundTransparency=1
 Craft.UI.Lbl.Status.Text="⏳ Lade Rezepte..."; Craft.UI.Lbl.Status.TextColor3=D.Yellow
-Craft.UI.Lbl.Status.TextSize=11; Craft.UI.Lbl.Status.Font=Enum.Font.GothamSemibold
+Craft.UI.Lbl.Status.TextSize=11; Craft.UI.Lbl.Status.Font=Enum.Font.GothamMedium
+Craft.UI.Lbl.Status.TextScaled=false; Craft.UI.Lbl.Status.RichText=true; Craft.UI.Lbl.Status.TextStrokeTransparency=1
 Craft.UI.Lbl.Status.TextXAlignment=Enum.TextXAlignment.Left
 
 local function SetStatus(txt,col) pcall(function() Craft.UI.Lbl.Status.Text=txt; Craft.UI.Lbl.Status.TextColor3=col or D.TextMid end) end
@@ -270,15 +272,15 @@ Craft.UI.Lbl.NoRecipes=MkLbl(Craft.UI.Fr.RecipeList,"Keine Rezepte gefunden.",12
 local collCard=Card(CraftPage); Pad(collCard,10,10,10,10); VList(collCard,8); Stroke(collCard,D.Purple,1.5,0.3)
 SecLbl(collCard,"🤖  AUTO-COLLECTOR QUEUE")
 Craft.UI.Lbl.CollStatus=MkLbl(collCard,"Queue leer.",10,D.TextLow); Craft.UI.Lbl.CollStatus.Size=UDim2.new(1,0,0,16)
-local collBarBg=Instance.new("Frame",collCard); collBarBg.Size=UDim2.new(1,0,0,6); collBarBg.BackgroundColor3=Color3.fromRGB(18,26,48); collBarBg.BorderSizePixel=0; collBarBg.Visible=false; Corner(collBarBg,3); Craft.UI.Fr.CollBarBg=collBarBg
-local collBarFill=Instance.new("Frame",collBarBg); collBarFill.Size=UDim2.new(0,0,1,0); collBarFill.BackgroundColor3=D.Purple; collBarFill.BorderSizePixel=0; Corner(collBarFill,3); Craft.UI.Fr.CollBarFill=collBarFill
+local collBarBg=Instance.new("Frame",collCard); collBarBg.Size=UDim2.new(1,0,0,6); collBarBg.BackgroundColor3=D.Input; collBarBg.BackgroundTransparency=D.GlassPane or 0.18; collBarBg.BorderSizePixel=0; collBarBg.Visible=false; Corner(collBarBg,4); Craft.UI.Fr.CollBarBg=collBarBg
+local collBarFill=Instance.new("Frame",collBarBg); collBarFill.Size=UDim2.new(0,0,1,0); collBarFill.BackgroundColor3=D.Purple; collBarFill.BorderSizePixel=0; Corner(collBarFill,4); Craft.UI.Fr.CollBarFill=collBarFill
 Craft.UI.Fr.CollQueue=Instance.new("Frame",collCard); Craft.UI.Fr.CollQueue.Size=UDim2.new(1,0,0,0); Craft.UI.Fr.CollQueue.AutomaticSize=Enum.AutomaticSize.Y; Craft.UI.Fr.CollQueue.BackgroundTransparency=1; VList(Craft.UI.Fr.CollQueue,4)
 local collCtrlRow=Instance.new("Frame",collCard); collCtrlRow.Size=UDim2.new(1,0,0,34); collCtrlRow.BackgroundTransparency=1; HList(collCtrlRow,8)
-Craft.UI.Btn.Start=Instance.new("TextButton",collCtrlRow); Craft.UI.Btn.Start.Size=UDim2.new(0.62,0,0,34); Craft.UI.Btn.Start.BackgroundColor3=Color3.fromRGB(40,10,80); Craft.UI.Btn.Start.Text="🤖  Start Auto-Farm"; Craft.UI.Btn.Start.TextColor3=D.Purple; Craft.UI.Btn.Start.TextSize=11; Craft.UI.Btn.Start.Font=Enum.Font.GothamBold; Craft.UI.Btn.Start.AutoButtonColor=false; Craft.UI.Btn.Start.BorderSizePixel=0; Corner(Craft.UI.Btn.Start,8); Stroke(Craft.UI.Btn.Start,D.Purple,1.5,0.2)
-Craft.UI.Btn.Start.MouseEnter:Connect(function() Tw(Craft.UI.Btn.Start,{BackgroundColor3=Color3.fromRGB(65,18,120)}) end)
-Craft.UI.Btn.Start.MouseLeave:Connect(function() Tw(Craft.UI.Btn.Start,{BackgroundColor3=Color3.fromRGB(40,10,80)}) end)
-local collStopBtn=Instance.new("TextButton",collCtrlRow); collStopBtn.Size=UDim2.new(0.34,0,0,34); collStopBtn.BackgroundColor3=D.RedDark; collStopBtn.Text="⏹ Stop"; collStopBtn.TextColor3=D.Red; collStopBtn.TextSize=11; collStopBtn.Font=Enum.Font.GothamBold; collStopBtn.AutoButtonColor=false; collStopBtn.BorderSizePixel=0; Corner(collStopBtn,8); Stroke(collStopBtn,D.Red,1,0.4)
-collStopBtn.MouseEnter:Connect(function() Tw(collStopBtn,{BackgroundColor3=D.Red}) end); collStopBtn.MouseLeave:Connect(function() Tw(collStopBtn,{BackgroundColor3=D.RedDark}) end)
+Craft.UI.Btn.Start=Instance.new("TextButton",collCtrlRow); Craft.UI.Btn.Start.Size=UDim2.new(0.62,0,0,34); Craft.UI.Btn.Start.BackgroundColor3=D.CardHover; Craft.UI.Btn.Start.BackgroundTransparency=D.GlassPane or 0.18; Craft.UI.Btn.Start.Text="🤖  Start Auto-Farm"; Craft.UI.Btn.Start.TextColor3=D.Purple; Craft.UI.Btn.Start.TextSize=11; Craft.UI.Btn.Start.Font=Enum.Font.GothamBold; Craft.UI.Btn.Start.AutoButtonColor=false; Craft.UI.Btn.Start.BorderSizePixel=0; Corner(Craft.UI.Btn.Start,8); Stroke(Craft.UI.Btn.Start,D.Purple,1.5,0.2)
+Craft.UI.Btn.Start.MouseEnter:Connect(function() Tw(Craft.UI.Btn.Start,{BackgroundColor3=D.TabActive,BackgroundTransparency=0.12}) end)
+Craft.UI.Btn.Start.MouseLeave:Connect(function() Tw(Craft.UI.Btn.Start,{BackgroundColor3=D.CardHover,BackgroundTransparency=D.GlassPane or 0.18}) end)
+local collStopBtn=Instance.new("TextButton",collCtrlRow); collStopBtn.Size=UDim2.new(0.34,0,0,34); collStopBtn.BackgroundColor3=Color3.fromRGB(48,16,18); collStopBtn.BackgroundTransparency=0.22; collStopBtn.Text="⏹ Stop"; collStopBtn.TextColor3=D.Red; collStopBtn.TextSize=11; collStopBtn.Font=Enum.Font.GothamBold; collStopBtn.AutoButtonColor=false; collStopBtn.BorderSizePixel=0; Corner(collStopBtn,8); Stroke(collStopBtn,D.Red,1,0.35)
+collStopBtn.MouseEnter:Connect(function() Tw(collStopBtn,{BackgroundColor3=Color3.fromRGB(72,24,28),BackgroundTransparency=0.12}) end); collStopBtn.MouseLeave:Connect(function() Tw(collStopBtn,{BackgroundColor3=Color3.fromRGB(48,16,18),BackgroundTransparency=0.22}) end)
 local collClearBtn=NeonBtn(collCard,"🗑  Queue leeren",D.Red,26)
 
 -- ── Queue-UI ──────────────────────────────────────────────────
@@ -292,14 +294,14 @@ local function UpdateQueueUI()
         local row=Instance.new("Frame",Craft.UI.Fr.CollQueue); row.Size=UDim2.new(1,0,0,40); row.BorderSizePixel=0; Corner(row,7)
         if done then row.BackgroundColor3=D.GreenDark; Stroke(row,D.GreenBright,1.5,0) else row.BackgroundColor3=D.CardHover; Stroke(row,D.Purple,1,0.5) end
         local acBar=Instance.new("Frame",row); acBar.Size=UDim2.new(0,3,0.7,0); acBar.Position=UDim2.new(0,0,0.15,0); acBar.BackgroundColor3=done and D.GreenBright or D.Purple; acBar.BorderSizePixel=0; Corner(acBar,2)
-        local nL=Instance.new("TextLabel",row); nL.Position=UDim2.new(0,10,0,4); nL.Size=UDim2.new(0.6,-10,0,15); nL.BackgroundTransparency=1; nL.Text=(done and "✅ " or (i==1 and "▶ " or ""))..entry.matName; nL.TextColor3=done and D.GreenBright or (i==1 and D.Cyan or D.TextHi); nL.TextSize=11; nL.Font=Enum.Font.GothamBold; nL.TextXAlignment=Enum.TextXAlignment.Left; nL.TextTruncate=Enum.TextTruncate.AtEnd
+        local nL=Instance.new("TextLabel",row); nL.Position=UDim2.new(0,10,0,4); nL.Size=UDim2.new(0.6,-10,0,15); nL.BackgroundTransparency=1; nL.Text=(done and "✅ " or (i==1 and "▶ " or ""))..entry.matName; nL.TextColor3=done and D.GreenBright or (i==1 and (D.Accent or D.Cyan) or D.TextHi); nL.TextSize=11; nL.Font=Enum.Font.GothamBold; nL.TextXAlignment=Enum.TextXAlignment.Left; nL.TextTruncate=Enum.TextTruncate.AtEnd
         local pL=Instance.new("TextLabel",row); pL.Position=UDim2.new(0,10,0,21); pL.Size=UDim2.new(0.6,-10,0,14); pL.BackgroundTransparency=1
         if done then pL.Text=string.format("✅ %d / %d",cur,needed); pL.TextColor3=D.GreenBright else pL.Text=string.format("%d / %d  (%.0f%%)",cur,needed,pct*100); pL.TextColor3=D.TextLow end
         pL.TextSize=10; pL.Font=Enum.Font.GothamSemibold; pL.TextXAlignment=Enum.TextXAlignment.Left
         -- Shopkäuflich-Badge
         if entry.shopType then local sLbl=Instance.new("TextLabel",row); sLbl.Position=UDim2.new(0.6,2,0,4); sLbl.Size=UDim2.new(0.32,-6,0,14); sLbl.BackgroundTransparency=1; sLbl.Text="🛒 "..entry.shopType; sLbl.TextColor3=D.Gold; sLbl.TextSize=8; sLbl.Font=Enum.Font.GothamSemibold; sLbl.TextXAlignment=Enum.TextXAlignment.Right
         elseif entry.chapId then local wLbl=Instance.new("TextLabel",row); wLbl.Position=UDim2.new(0.6,2,0,4); wLbl.Size=UDim2.new(0.32,-6,0,30); wLbl.BackgroundTransparency=1; wLbl.Text=string.format("[%s]\n%s",entry.mode or "?",entry.chapId or "?"); wLbl.TextColor3=D.TextLow; wLbl.TextSize=8; wLbl.Font=Enum.Font.Gotham; wLbl.TextXAlignment=Enum.TextXAlignment.Right; wLbl.TextWrapped=true end
-        local pgBg=Instance.new("Frame",row); pgBg.Size=UDim2.new(1,-14,0,3); pgBg.Position=UDim2.new(0,10,1,-5); pgBg.BackgroundColor3=Color3.fromRGB(20,28,50); pgBg.BorderSizePixel=0; Corner(pgBg,2)
+        local pgBg=Instance.new("Frame",row); pgBg.Size=UDim2.new(1,-14,0,3); pgBg.Position=UDim2.new(0,10,1,-5); pgBg.BackgroundColor3=D.Input; pgBg.BackgroundTransparency=D.GlassPane or 0.18; pgBg.BorderSizePixel=0; Corner(pgBg,2)
         local pgF=Instance.new("Frame",pgBg); pgF.Size=UDim2.new(pct,0,1,0); pgF.BackgroundColor3=done and D.GreenBright or D.Purple; pgF.BorderSizePixel=0; Corner(pgF,2)
         local ci=i; local xBtn=Instance.new("TextButton",row); xBtn.Size=UDim2.new(0,28,0,28); xBtn.Position=UDim2.new(1,-32,0.5,-14); xBtn.BackgroundColor3=Color3.fromRGB(50,12,12); xBtn.Text="✕"; xBtn.TextColor3=D.Red; xBtn.TextSize=11; xBtn.Font=Enum.Font.GothamBold; xBtn.AutoButtonColor=false; xBtn.BorderSizePixel=0; Corner(xBtn,6); Stroke(xBtn,D.Red,1,0.4)
         xBtn.MouseEnter:Connect(function() Tw(xBtn,{BackgroundColor3=D.RedDark}) end); xBtn.MouseLeave:Connect(function() Tw(xBtn,{BackgroundColor3=Color3.fromRGB(50,12,12)}) end)
@@ -333,9 +335,9 @@ local function BuildRecipeCard(parent,itemName,recipeData,craftAmt)
     end
 
     local card=Instance.new("Frame",parent); card.Size=UDim2.new(1,0,0,0); card.AutomaticSize=Enum.AutomaticSize.Y; card.BorderSizePixel=0; Corner(card,9)
-    if allMet and anyShop then card.BackgroundColor3=Color3.fromRGB(0,35,18); Stroke(card,D.Gold,1.5,0.1)
-    elseif allMet then card.BackgroundColor3=Color3.fromRGB(0,28,16); Stroke(card,D.GreenBright,1.5,0.1)
-    else card.BackgroundColor3=D.Card; Stroke(card,D.Border,1,0.3) end
+    if allMet and anyShop then card.BackgroundColor3=D.GreenDark; card.BackgroundTransparency=0.12; Stroke(card,D.Gold,1.5,0.1)
+    elseif allMet then card.BackgroundColor3=D.GreenDark; card.BackgroundTransparency=0.12; Stroke(card,D.GreenBright,1.5,0.1)
+    else card.BackgroundColor3=D.Card; card.BackgroundTransparency=D.GlassPane or 0.18; Stroke(card,D.Border,1,0.3) end
 
     local inner=Instance.new("Frame",card); inner.Size=UDim2.new(1,0,0,0); inner.AutomaticSize=Enum.AutomaticSize.Y; inner.BackgroundTransparency=1; Pad(inner,8,10,8,10); VList(inner,6)
 
@@ -347,7 +349,7 @@ local function BuildRecipeCard(parent,itemName,recipeData,craftAmt)
         preview=HS.BuildItemPreview(headerRow,itemName,52)
         preview.Position=UDim2.new(0,0,0,0)
     else
-        local vp=Instance.new("ViewportFrame",headerRow); vp.Size=UDim2.new(0,52,0,52); vp.Position=UDim2.new(0,0,0,0); vp.BackgroundColor3=Color3.fromRGB(12,18,36); vp.BorderSizePixel=0; vp.ImageColor3=Color3.new(1,1,1); Corner(vp,7)
+        local vp=Instance.new("ViewportFrame",headerRow); vp.Size=UDim2.new(0,52,0,52); vp.Position=UDim2.new(0,0,0,0); vp.BackgroundColor3=D.Input; vp.BackgroundTransparency=D.GlassPane or 0.18; vp.BorderSizePixel=0; vp.ImageColor3=Color3.new(1,1,1); Corner(vp,8)
         task.spawn(function()
             local ok=LoadItemViewport(vp,itemName)
             if not ok then
@@ -391,7 +393,7 @@ local function BuildRecipeCard(parent,itemName,recipeData,craftAmt)
                 sbL.Text="🛒 "..FmtNum(ml.shopCost); sbL.TextColor3=ml.shopMet and D.Gold or D.Orange; sbL.TextSize=9; sbL.Font=Enum.Font.GothamSemibold; sbL.TextXAlignment=Enum.TextXAlignment.Right
             else
                 local pct=math.min(1,ml.have/math.max(1,ml.need))
-                local pgBg=Instance.new("Frame",mr); pgBg.Size=UDim2.new(0.35,0,0,4); pgBg.Position=UDim2.new(0.63,0,0.5,-2); pgBg.BackgroundColor3=Color3.fromRGB(20,28,50); pgBg.BorderSizePixel=0; Corner(pgBg,2)
+                local pgBg=Instance.new("Frame",mr); pgBg.Size=UDim2.new(0.35,0,0,4); pgBg.Position=UDim2.new(0.63,0,0.5,-2); pgBg.BackgroundColor3=D.Input; pgBg.BackgroundTransparency=D.GlassPane or 0.18; pgBg.BorderSizePixel=0; Corner(pgBg,2)
                 local pgF=Instance.new("Frame",pgBg); pgF.Size=UDim2.new(pct,0,1,0); pgF.BackgroundColor3=ml.met and D.Green or D.Red; pgF.BorderSizePixel=0; Corner(pgF,2)
             end
 
@@ -447,12 +449,12 @@ local function BuildRecipeCard(parent,itemName,recipeData,craftAmt)
     local btnW=allMet and 1 or 0.48
     craftBtn.Size=UDim2.new(btnW,0,0,34); craftBtn.Font=Enum.Font.GothamBold; craftBtn.TextSize=11; craftBtn.AutoButtonColor=false; craftBtn.BorderSizePixel=0; Corner(craftBtn,8)
     if allMet then
-        local btnColor=anyShop and Color3.fromRGB(0,35,10) or D.GreenDark
+        local btnColor=anyShop and Color3.fromRGB(22,42,24) or D.GreenDark
         local txtColor=anyShop and D.Gold or D.GreenBright
-        craftBtn.BackgroundColor3=btnColor; craftBtn.Text="⚒  Jetzt Craften!"; craftBtn.TextColor3=txtColor; Stroke(craftBtn,txtColor,1.5,0)
-        craftBtn.MouseEnter:Connect(function() Tw(craftBtn,{BackgroundColor3=anyShop and Color3.fromRGB(0,55,15) or Color3.fromRGB(0,80,40)}) end); craftBtn.MouseLeave:Connect(function() Tw(craftBtn,{BackgroundColor3=btnColor}) end)
+        craftBtn.BackgroundColor3=btnColor; craftBtn.BackgroundTransparency=0.15; craftBtn.Text="⚒  Jetzt Craften!"; craftBtn.TextColor3=txtColor; Stroke(craftBtn,txtColor,1.5,0)
+        craftBtn.MouseEnter:Connect(function() Tw(craftBtn,{BackgroundColor3=anyShop and Color3.fromRGB(32,58,34) or Color3.fromRGB(28,62,38),BackgroundTransparency=0.08}) end); craftBtn.MouseLeave:Connect(function() Tw(craftBtn,{BackgroundColor3=btnColor,BackgroundTransparency=0.15}) end)
     else
-        craftBtn.BackgroundColor3=Color3.fromRGB(18,22,38); craftBtn.Text="⚒  Craften"; craftBtn.TextColor3=D.TextLow; Stroke(craftBtn,D.TextLow,1,0.6)
+        craftBtn.BackgroundColor3=D.Input; craftBtn.BackgroundTransparency=D.GlassPane or 0.18; craftBtn.Text="⚒  Craften"; craftBtn.TextColor3=D.TextLow; Stroke(craftBtn,D.TextLow,1,0.6)
     end
 
     craftBtn.MouseButton1Click:Connect(function()
@@ -482,8 +484,8 @@ local function BuildRecipeCard(parent,itemName,recipeData,craftAmt)
 
     -- ★ Sammeln-Button: nur für Items die NICHT kaufbar sind und fehlen
     if not allMet then
-        local collectBtn=Instance.new("TextButton",btnRow); collectBtn.Size=UDim2.new(0.48,0,0,34); collectBtn.BackgroundColor3=Color3.fromRGB(30,10,60); collectBtn.Text="🤖 Sammeln"; collectBtn.TextColor3=D.Purple; collectBtn.TextSize=11; collectBtn.Font=Enum.Font.GothamBold; collectBtn.AutoButtonColor=false; collectBtn.BorderSizePixel=0; Corner(collectBtn,8); Stroke(collectBtn,D.Purple,1,0.3)
-        collectBtn.MouseEnter:Connect(function() Tw(collectBtn,{BackgroundColor3=Color3.fromRGB(55,18,100)}) end); collectBtn.MouseLeave:Connect(function() Tw(collectBtn,{BackgroundColor3=Color3.fromRGB(30,10,60)}) end)
+        local collectBtn=Instance.new("TextButton",btnRow); collectBtn.Size=UDim2.new(0.48,0,0,34); collectBtn.BackgroundColor3=D.CardHover; collectBtn.BackgroundTransparency=D.GlassPane or 0.18; collectBtn.Text="🤖 Sammeln"; collectBtn.TextColor3=D.Purple; collectBtn.TextSize=11; collectBtn.Font=Enum.Font.GothamBold; collectBtn.AutoButtonColor=false; collectBtn.BorderSizePixel=0; Corner(collectBtn,8); Stroke(collectBtn,D.Purple,1,0.3)
+        collectBtn.MouseEnter:Connect(function() Tw(collectBtn,{BackgroundColor3=D.TabActive,BackgroundTransparency=0.12}) end); collectBtn.MouseLeave:Connect(function() Tw(collectBtn,{BackgroundColor3=D.CardHover,BackgroundTransparency=D.GlassPane or 0.18}) end)
         collectBtn.MouseButton1Click:Connect(function()
             local added=0; local shopBought=0
             for _,ml in ipairs(matLines) do
@@ -518,7 +520,7 @@ local function BuildRecipeCard(parent,itemName,recipeData,craftAmt)
             if added>0 then table.insert(parts,"🤖 "..added.." in Queue") end
             if #parts>0 then SetStatus(table.concat(parts,"  |  "),D.Purple)
             else SetStatus("ℹ Alles erledigt.",D.Yellow) end
-            Tw(card,{BackgroundColor3=Color3.fromRGB(35,10,65)},TM); task.delay(0.4,function() Tw(card,{BackgroundColor3=allMet and Color3.fromRGB(0,28,16) or D.Card},TM) end)
+            Tw(card,{BackgroundColor3=D.RowSelect or D.TabActive,BackgroundTransparency=0.1},TM); task.delay(0.4,function() Tw(card,{BackgroundColor3=allMet and D.GreenDark or D.Card,BackgroundTransparency=allMet and 0.12 or (D.GlassPane or 0.18)},TM) end)
         end)
     end
     return card
@@ -584,7 +586,7 @@ local function RunCollector()
             if have>=cur.needed then task.wait(0.3); continue end
             if IsLobby() then
                 if not cur.chapId then SetStatus(string.format("⚠ Kein Chapter für '%s'",cur.matName),D.Orange); table.remove(Craft.Queue,1); pcall(UpdateQueueUI); task.wait(1); continue end
-                SetStatus(string.format("🚀 [%s] %s",cur.mode or "Story",cur.chapId),D.Cyan)
+                SetStatus(string.format("🚀 [%s] %s",cur.mode or "Story",cur.chapId),D.Accent or D.Cyan)
                 pcall(function()
                     local m=cur.mode or "Story"
                     if m=="Story" then Fire("Create"); task.wait(0.4); Fire("Change-World",{World=cur.worldId}); task.wait(0.4); Fire("Change-Chapter",{Chapter=cur.chapId}); task.wait(2); Fire("Submit"); task.wait(0.5); Fire("Start")
