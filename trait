@@ -123,7 +123,7 @@ local rollCard=Card(TraitPage,34); Pad(rollCard,4,14,4,14)
 local rollRow=Instance.new("Frame",rollCard); rollRow.Size=UDim2.new(1,0,1,0); rollRow.BackgroundTransparency=1
 TR.UI.Lbl.RollCount=Instance.new("TextLabel",rollRow)
 TR.UI.Lbl.RollCount.Size=UDim2.new(0.5,0,1,0); TR.UI.Lbl.RollCount.BackgroundTransparency=1
-TR.UI.Lbl.RollCount.Text="Rolls: 0"; TR.UI.Lbl.RollCount.TextColor3=D.Gold
+TR.UI.Lbl.RollCount.Text="Trait Reroll: –"; TR.UI.Lbl.RollCount.TextColor3=D.Gold
 TR.UI.Lbl.RollCount.TextSize=14; TR.UI.Lbl.RollCount.Font=Enum.Font.GothamBold
 TR.UI.Lbl.RollCount.TextXAlignment=Enum.TextXAlignment.Left
 TR.UI.Lbl.RollRate=Instance.new("TextLabel",rollRow)
@@ -478,16 +478,13 @@ end
 local function DoSingleReroll()
     if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!",D.Orange); return false end
     if not RerollRemote then SetStatus("⚠ RerollTrait Remote nicht gefunden!",D.Orange); return false end
-    pcall(function()
-        if TraitAckRemote then TraitAckRemote:FireServer() end
-    end)
+    local curMain, curSub = GetUnitTraits(TR.SelectedUnit)
+    curMain = curMain or ""
+    curSub = curSub or ""
     local ok = pcall(function()
-        RerollRemote:FireServer(TR.SelectedUnit, "Reroll", "Main", "Shards", {"",""})
+        RerollRemote:FireServer(TR.SelectedUnit, "Reroll", "Main", "Shards", {curMain, curSub})
     end)
-    if ok then
-        TR.RollCount = TR.RollCount + 1
-        pcall(function() TR.UI.Lbl.RollCount.Text = "Rolls: "..TR.RollCount end)
-    end
+    if ok then TR.RollCount = TR.RollCount + 1 end
     return ok
 end
 
@@ -536,6 +533,24 @@ stopRerollBtn.MouseButton1Click:Connect(function()
     TR.Rolling = false
     startRerollBtn.Text="🎲  Start Reroll"; startRerollBtn.TextColor3=D.Gold; Stroke(startRerollBtn,D.Gold,2,0)
     SetStatus("⏹ Auto-Reroll gestoppt.",D.TextMid)
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        local rr = "–"
+        pcall(function()
+            local items = RS:WaitForChild("Player_Data",3):WaitForChild(COLLECTION_OWNER,3):WaitForChild("Items",3)
+            local traitR = items:FindFirstChild("Trait Reroll")
+            if traitR then
+                local amt = traitR:FindFirstChild("Amount") or traitR:FindFirstChild("Value")
+                if amt then rr = tostring(amt.Value) end
+            end
+        end)
+        pcall(function()
+            TR.UI.Lbl.RollCount.Text = "Trait Reroll: " .. rr
+        end)
+    end
 end)
 
 -- ╔══════════════════════════════════════════════════════════╗
