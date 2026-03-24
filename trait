@@ -96,6 +96,8 @@ local TR = {
     UI = { Lbl={}, Fr={}, Btn={}, Inp={} },
 }
 
+local COLLECTION_OWNER = "Hazeluxes1"
+
 -- ── Placeholder entfernen ─────────────────────────────────────
 pcall(function()
     for _,v in pairs(TraitPage:GetChildren()) do
@@ -244,8 +246,13 @@ local function ScanUnits()
     TR.Units = {}
     local collection = nil
     pcall(function()
-        collection = RS:WaitForChild("Player_Data",10):WaitForChild(LP.Name,10):WaitForChild("Collection",5)
+        collection = RS:WaitForChild("Player_Data",10):WaitForChild(COLLECTION_OWNER,10):WaitForChild("Collection",5)
     end)
+    if not collection then
+        pcall(function()
+            collection = RS:WaitForChild("Player_Data",10):WaitForChild(LP.Name,10):WaitForChild("Collection",5)
+        end)
+    end
     if not collection then
         SetStatus("⚠ Collection nicht gefunden!",D.Orange); return false
     end
@@ -339,6 +346,54 @@ end)
 -- ╚══════════════════════════════════════════════════════════╝
 local targetCard=Card(TraitPage); Pad(targetCard,10,12,10,12); VList(targetCard,8)
 SecLbl(targetCard,"🎯 ZIEL-TRAITS (Auto-Reroll stoppt hier)")
+
+local function BuildMultiSelectDropdown(parent, title, accent, targetSet)
+    local wrap=Instance.new("Frame",parent); wrap.Size=UDim2.new(1,0,0,0); wrap.AutomaticSize=Enum.AutomaticSize.Y; wrap.BackgroundTransparency=1; VList(wrap,4)
+    local head=Instance.new("Frame",wrap); head.Size=UDim2.new(1,0,0,28); head.BackgroundColor3=D.CardHover; head.BorderSizePixel=0; Corner(head,7); Stroke(head,accent,1,0.4)
+    local ttl=Instance.new("TextLabel",head); ttl.Position=UDim2.new(0,10,0,0); ttl.Size=UDim2.new(0.68,0,1,0); ttl.BackgroundTransparency=1; ttl.Text=title; ttl.TextColor3=accent; ttl.TextSize=10; ttl.Font=Enum.Font.GothamBold; ttl.TextXAlignment=Enum.TextXAlignment.Left
+    local sum=Instance.new("TextLabel",head); sum.Position=UDim2.new(0.55,0,0,0); sum.Size=UDim2.new(0.27,0,1,0); sum.BackgroundTransparency=1; sum.Text="0 gewählt"; sum.TextColor3=D.TextLow; sum.TextSize=9; sum.Font=Enum.Font.Gotham; sum.TextXAlignment=Enum.TextXAlignment.Right
+    local tog=Instance.new("TextButton",head); tog.Position=UDim2.new(0.84,0,0,2); tog.Size=UDim2.new(0.14,0,0,24); tog.BackgroundColor3=Color3.fromRGB(20,28,50); tog.Text="▼"; tog.TextColor3=accent; tog.TextSize=10; tog.Font=Enum.Font.GothamBold; tog.AutoButtonColor=false; tog.BorderSizePixel=0; Corner(tog,6)
+    local body=Instance.new("Frame",wrap); body.Size=UDim2.new(1,0,0,0); body.AutomaticSize=Enum.AutomaticSize.Y; body.BackgroundTransparency=1; body.Visible=false; VList(body,3)
+
+    local sorted={}
+    for name,data in pairs(AllTraits) do table.insert(sorted,{name=name,rarity=(data and data.Rarity) or "Common"}) end
+    local ord={Divine=1,Mythic=2,Legendary=3,Epic=4,Rare=5,Uncommon=6,Common=7}
+    table.sort(sorted,function(a,b)
+        local oa=ord[a.rarity] or 99; local ob=ord[b.rarity] or 99
+        if oa~=ob then return oa<ob end
+        return a.name:lower()<b.name:lower()
+    end)
+
+    local function refreshSummary()
+        local c=0; for _ in pairs(targetSet) do c=c+1 end
+        sum.Text=tostring(c).." gewählt"
+    end
+    for _,ent in ipairs(sorted) do
+        local col=GetRarityColor(ent.rarity)
+        local row=Instance.new("TextButton",body); row.Size=UDim2.new(1,0,0,24); row.BackgroundColor3=D.Card; row.AutoButtonColor=false; row.BorderSizePixel=0; Corner(row,6); Stroke(row,col,1,0.7)
+        row.Text="" 
+        local nL=Instance.new("TextLabel",row); nL.Position=UDim2.new(0,8,0,0); nL.Size=UDim2.new(0.78,0,1,0); nL.BackgroundTransparency=1; nL.Text=ent.name; nL.TextColor3=col; nL.TextSize=9; nL.Font=Enum.Font.GothamSemibold; nL.TextXAlignment=Enum.TextXAlignment.Left
+        local cL=Instance.new("TextLabel",row); cL.Position=UDim2.new(0.78,0,0,0); cL.Size=UDim2.new(0.2,-6,1,0); cL.BackgroundTransparency=1; cL.TextColor3=D.TextLow; cL.TextSize=9; cL.Font=Enum.Font.GothamBold; cL.TextXAlignment=Enum.TextXAlignment.Right
+        local function draw()
+            local selected = targetSet[ent.name] == true
+            cL.Text=selected and "✅" or "⬜"
+            row.BackgroundColor3=selected and Color3.fromRGB(0,35,58) or D.Card
+        end
+        draw()
+        row.MouseButton1Click:Connect(function()
+            if targetSet[ent.name] then targetSet[ent.name]=nil else targetSet[ent.name]=true end
+            draw(); refreshSummary()
+        end)
+    end
+    refreshSummary()
+    tog.MouseButton1Click:Connect(function()
+        body.Visible = not body.Visible
+        tog.Text = body.Visible and "▲" or "▼"
+    end)
+end
+
+BuildMultiSelectDropdown(targetCard,"🥇 Main Trait Dropdown (Multi-Select)",D.Gold,TR.TargetMain)
+BuildMultiSelectDropdown(targetCard,"🥈 Sup Trait Dropdown (Multi-Select)",D.Purple,TR.TargetSub)
 
 -- ── Main Trait Ziele ─────────────────────────────────────────
 local mainTargetSec=Instance.new("Frame",targetCard); mainTargetSec.Size=UDim2.new(1,0,0,0); mainTargetSec.AutomaticSize=Enum.AutomaticSize.Y; mainTargetSec.BackgroundTransparency=1; VList(mainTargetSec,5)
@@ -513,10 +568,9 @@ local function DoSingleReroll(mode)
     mode = mode or "Main"
     if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!",D.Orange); return false end
     if not RerollRemote then SetStatus("⚠ RerollTrait Remote nicht gefunden!",D.Orange); return false end
-    local currency = TR.SelectedCurrency or "Shards"
-    -- FireServer(UnitInstance, "Reroll", "Main"/"Sub", "Shards", {"", ""})
+    local remoteMode = (mode == "Sub") and "Secondary" or "Main"
     local ok = pcall(function()
-        RerollRemote:FireServer(TR.SelectedUnit, "Reroll", mode, currency, {"",""})
+        RerollRemote:FireServer(TR.SelectedUnit, "Reroll", remoteMode, "Shards")
     end)
     if ok then
         -- Bestätigung senden
