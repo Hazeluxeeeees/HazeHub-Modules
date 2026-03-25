@@ -1,10 +1,10 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB V20 – Hauptskript  v20.0
+--  HazeHUB V20 – Hauptskript  v20.1
+--  FIXES v20.1:
+--    ✓ Session-Item-Liste ohne Gold/Exp/Gems (Dupplikat-Filter); Webhook: Status / Währungen / Items
+--    ✓ Ø Rundenzeit in Sekunden (UI + Webhook); Footer „Session Bericht • Zeit“ + Logo
+--    ✓ Logo im Top-Header; leichter Lighting-Blur; SecLbl → GothamMedium
 --  FIXES v20.0:
---    ✓ GlobalSession { CurrentRound, TotalTime, AllRewards } – eine Quelle für UI + Webhook
---    ✓ Runde + Zeit: „Update - EndedScreen“ (GameEndedUI); Belohnungen: „Rewards - Items“
---    ✓ Webhook nur Session-Status-Bericht (3 Felder); kein Auto-Webhook bei Lobby
---    ✓ Theme: transparentes Schwarz / neutrale Akzente (kein Blau)
 --  FIXES v19.9:
 --    ✓ CoreGui-Check via reines pcall
 --    ✓ Kein auto-rescan beim Start – nur DB laden
@@ -86,6 +86,15 @@ local Svc = Haze.Svc
 local GlobalSession = { CurrentRound = 0, TotalTime = 0, AllRewards = {} }
 GlobalSession.Items = GlobalSession.AllRewards
 _G.GlobalSession = GlobalSession
+
+-- Session: Währungen/XP (nicht in der Item-Drop-Liste / Webhook-Items)
+local _SessionCurrencyLower = { gem = true }
+for k in pairs(K.INFO) do _SessionCurrencyLower[string.lower(k)] = true end
+local function IsSessionCurrencyKey(name)
+    if name == nil or name == "" then return true end
+    if tonumber(name) ~= nil then return true end
+    return _SessionCurrencyLower[string.lower(tostring(name))] == true
+end
 
 -- CoreGui-Check via reines pcall
 local guiParent = Svc.Player.PlayerGui
@@ -266,8 +275,7 @@ task.spawn(function()
 end)
 
 -- ╔══════════════════════════════════════════════════════════╗
---  DESIGN – Glas-Schwarz (kein natives UI-Backdrop-Blur in Roblox:
---  Effekt = dunkle Flächen + BackgroundTransparency + dezente Ränder)
+--  DESIGN – Glas-Schwarz + leichter Lighting-Blur (HazeHUB_Blur)
 -- ╚══════════════════════════════════════════════════════════╝
 -- Logo: Emblem-PNG nach Roblox hochladen → LogoRbx setzen (GUI + Mobile).
 -- LogoHttps: gleiche Datei öffentlich hosten (z. B. raw.githubusercontent.com/.../haze_emblem_logo.png).
@@ -341,7 +349,7 @@ local function MkLbl(parent,text,size,color,bold,xa)
     l.TextScaled=false; l.RichText=true; l.TextStrokeTransparency=1
     l.Size=UDim2.new(1,0,0,(size or 14)+8); return l
 end
-local function SecLbl(p,t) local l=MkLbl(p,t,12,D.TextLow,true); l.Size=UDim2.new(1,0,0,16); return l end
+local function SecLbl(p,t) local l=MkLbl(p,t,12,D.TextLow,false); l.Size=UDim2.new(1,0,0,16); return l end
 local function Card(parent,fh,tGlass)
     local f=Instance.new("Frame",parent); f.BackgroundColor3=D.Card; f.BackgroundTransparency=tGlass or D.GlassPane; f.BorderSizePixel=0
     if fh then f.Size=UDim2.new(1,0,0,fh) else f.Size=UDim2.new(1,0,0,0); f.AutomaticSize=Enum.AutomaticSize.Y end
@@ -660,10 +668,19 @@ end
 --  SCREEN GUI  – AnchorPoint(0.5,0.5) → zentriert
 -- ╚══════════════════════════════════════════════════════════╝
 local ScreenGui=Instance.new("ScreenGui")
-ScreenGui.Name="HazeHUB_v200"; ScreenGui.ResetOnSpawn=false
+ScreenGui.Name="HazeHUB_v201"; ScreenGui.ResetOnSpawn=false
 ScreenGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
 ScreenGui.DisplayOrder=999; ScreenGui.IgnoreGuiInset=true
 ScreenGui.Parent=guiParent
+local LightingSvc = game:GetService("Lighting")
+local HazeHubBlur = Instance.new("BlurEffect")
+HazeHubBlur.Name = "HazeHUB_Blur"
+HazeHubBlur.Size = 5
+HazeHubBlur.Enabled = true
+HazeHubBlur.Parent = LightingSvc
+ScreenGui.AncestryChanged:Connect(function()
+    if not ScreenGui.Parent and HazeHubBlur and HazeHubBlur.Parent then pcall(function() HazeHubBlur:Destroy() end) end
+end)
 
 H.UI.Fr.Main=Instance.new("Frame",ScreenGui)
 H.UI.Fr.Main.Name="Main"
@@ -686,8 +703,12 @@ headerBottom.BackgroundColor3=D.Sidebar; headerBottom.BackgroundTransparency=0.3
 local headerLine=Instance.new("Frame",H.UI.Fr.Main)
 headerLine.Size=UDim2.new(1,0,0,1); headerLine.Position=UDim2.new(0,0,0,22)
 headerLine.BackgroundColor3=D.Border; headerLine.BackgroundTransparency=0.45; headerLine.BorderSizePixel=0
+local headerLogoSlot=Instance.new("Frame",headerStrip)
+headerLogoSlot.Size=UDim2.new(0,20,0,20); headerLogoSlot.Position=UDim2.new(0,6,0.5,-10)
+headerLogoSlot.BackgroundTransparency=1; headerLogoSlot.BorderSizePixel=0
+BuildMoonLogo(headerLogoSlot,18,0,0)
 local headerTimerLbl=Instance.new("TextLabel",headerStrip)
-headerTimerLbl.Size=UDim2.new(1,-10,1,0); headerTimerLbl.Position=UDim2.new(0,5,0,0)
+headerTimerLbl.Size=UDim2.new(1,-40,1,0); headerTimerLbl.Position=UDim2.new(0,32,0,0)
 headerTimerLbl.BackgroundTransparency=1; headerTimerLbl.Text="⏱  0m 00s"
 headerTimerLbl.TextColor3=D.TextLow; headerTimerLbl.TextSize=10; headerTimerLbl.Font=Enum.Font.GothamMedium
 headerTimerLbl.TextScaled=false; headerTimerLbl.RichText=true; headerTimerLbl.TextStrokeTransparency=1
@@ -849,42 +870,53 @@ end
 
 local UpdateGoalsUI; local UpdateSessionUI; local RebuildWorldList
 
--- ── Webhook (nur Gesamt-Session) ─────────────────────────────
+-- ── Webhook (Gesamt-Session, kumuliert) ───────────────────────
 local function SendWebhook(_a,_b,_c)
     if not S.WhEnabled then return end
     if not H.Config.WebhookURL or H.Config.WebhookURL=="" or not H.Config.WebhookURL:find("discord.com") then return end
     local gs = GlobalSession
-    local roundLabel = "Runde **" .. tostring(gs.CurrentRound) .. "**"
-    local avgMin = 0
-    if gs.CurrentRound > 0 then avgMin = (gs.TotalTime / 60) / gs.CurrentRound end
-    local avgStr = string.format("%.2f min", avgMin)
-    if gs.CurrentRound == 0 then avgStr = "– (noch keine abgeschlossene Runde)" end
-    local lines = {}
+    local cr = gs.CurrentRound
+    local avgSec = 0
+    if cr > 0 then avgSec = math.floor(gs.TotalTime / cr + 0.5) end
+    local avgStr = cr > 0 and (tostring(avgSec) .. " s") or "–"
+    local goldN = math.floor(tonumber(gs.AllRewards.Gold) or 0)
+    local gemsN = math.floor(tonumber(gs.AllRewards.Gems) or tonumber(gs.AllRewards.Gem) or 0)
+    local expN = math.floor(tonumber(gs.AllRewards.Exp) or 0)
+    local currencyBlock = string.format(
+        "```\n🟡 Gold  %s\n💎 Gems  %s\n✨ Exp   %s\n```",
+        FmtNum(goldN), FmtNum(gemsN), FmtNum(expN)
+    )
+    local itemLines = {}
     local sorted = {}
-    for name, amt in pairs(gs.AllRewards) do table.insert(sorted, { name = name, total = amt }) end
+    for name, amt in pairs(gs.AllRewards) do
+        if not IsSessionCurrencyKey(name) then table.insert(sorted, { name = name, total = amt }) end
+    end
     table.sort(sorted, function(a, b) return a.total > b.total end)
     for i, it in ipairs(sorted) do
-        if i > 24 then table.insert(lines, "… +" .. tostring(#sorted - 24) .. " weitere"); break end
-        table.insert(lines, string.format("• **%s** × %s", it.name, FmtNum(it.total)))
+        if i > 28 then table.insert(itemLines, "… +" .. tostring(#sorted - 28) .. " weitere"); break end
+        table.insert(itemLines, string.format("▸ **%s** · `%s`", it.name, FmtNum(math.floor(tonumber(it.total) or 0))))
     end
-    local rewardsTxt = #lines > 0 and table.concat(lines, "\n") or "> *Keine Belohnungen erfasst.*"
-    rewardsTxt = rewardsTxt:sub(1, 3500)
+    local itemsTxt = #itemLines > 0 and table.concat(itemLines, "\n") or "> *Keine Item-Drops in dieser Session erfasst.*"
+    itemsTxt = itemsTxt:sub(1, 3200)
     local ava = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(Svc.Player.UserId) .. "&width=150&height=150&format=png"
     local logoOk = HAZE_ASSETS.LogoHttps and #HAZE_ASSETS.LogoHttps > 12 and HAZE_ASSETS.LogoHttps:find("^https?://")
     local whAvatar = logoOk and HAZE_ASSETS.LogoHttps or ava
     local thumbUrl = logoOk and HAZE_ASSETS.LogoHttps or ava
+    local tsFooter = os.date("%Y-%m-%d %H:%M:%S")
     local embed = {
-        color = 0x1a1a1c,
-        title = "Session Status Bericht",
-        description = string.format("**%s** · Sitzung seit %s", Svc.Player.Name, FmtDur(os.time() - S.SessStart)),
+        color = 0x1a1a1a,
+        title = "Session Status",
+        description = string.format("**%s** · kumulierte Sitzungsdaten", Svc.Player.Name),
         thumbnail = { url = thumbUrl },
         fields = {
-            { name = "Aktuelle Runde", value = roundLabel, inline = true },
-            { name = "Durchschnittliche Rundenzeit", value = "`" .. avgStr .. "`", inline = true },
-            { name = "Gesammelte Belohnungen (Gesamt)", value = rewardsTxt, inline = false },
+            { name = "📌 Status", value = "**Runde:** `" .. tostring(cr) .. "`", inline = true },
+            { name = "⏱ Ø Zeit", value = "**Ø Runde:** `" .. avgStr .. "`", inline = true },
+            { name = "💰 Währungen & XP (Session)", value = currencyBlock, inline = false },
+            { name = "📦 Items (Session)", value = itemsTxt, inline = false },
         },
     }
-    embed.footer = logoOk and { text = "Haze Hub · v20.0", icon_url = HAZE_ASSETS.LogoHttps } or { text = "Haze Hub · v20.0" }
+    embed.footer = logoOk and { text = "Session Bericht • " .. tsFooter, icon_url = HAZE_ASSETS.LogoHttps }
+        or { text = "Session Bericht • " .. tsFooter }
     task.spawn(function()
         pcall(function()
             local fn = request or http_request or (syn and syn.request)
@@ -1175,8 +1207,8 @@ local infoRow=Instance.new("Frame",infoCard); infoRow.Size=UDim2.new(1,0,0,0); i
 H.UI.Lbl.InfoVals={}
 for _,iname in ipairs({"Exp","Gems","Gold"}) do
     local iF=Instance.new("Frame",infoRow); iF.Size=UDim2.new(0.31,0,0,44); iF.BackgroundColor3=Color3.fromRGB(20,20,22); iF.BorderSizePixel=0; Corner(iF,8); Stroke(iF,D.Border,1,0.55)
-    local iN=Instance.new("TextLabel",iF); iN.Size=UDim2.new(1,0,0.45,0); iN.BackgroundTransparency=1; iN.Text=iname; iN.TextColor3=D.TextMid; iN.TextSize=10; iN.Font=Enum.Font.GothamSemibold; iN.TextXAlignment=Enum.TextXAlignment.Center
-    local iV=Instance.new("TextLabel",iF); iV.Size=UDim2.new(1,0,0.55,0); iV.Position=UDim2.new(0,0,0.45,0); iV.BackgroundTransparency=1; iV.Text="0"; iV.TextColor3=D.TextHi; iV.TextSize=14; iV.Font=Enum.Font.GothamBold; iV.TextXAlignment=Enum.TextXAlignment.Center
+    local iN=Instance.new("TextLabel",iF); iN.Size=UDim2.new(1,0,0.45,0); iN.BackgroundTransparency=1; iN.Text=iname; iN.TextColor3=D.TextMid; iN.TextSize=10; iN.Font=Enum.Font.GothamMedium; iN.RichText=true; iN.TextStrokeTransparency=1; iN.TextXAlignment=Enum.TextXAlignment.Center
+    local iV=Instance.new("TextLabel",iF); iV.Size=UDim2.new(1,0,0.55,0); iV.Position=UDim2.new(0,0,0.45,0); iV.BackgroundTransparency=1; iV.Text="0"; iV.TextColor3=D.TextHi; iV.TextSize=14; iV.Font=Enum.Font.GothamMedium; iV.RichText=true; iV.TextStrokeTransparency=1; iV.TextXAlignment=Enum.TextXAlignment.Center
     H.UI.Lbl.InfoVals[iname]=iV
 end
 local goalsCard=Card(SessPage); Pad(goalsCard,10,10,10,10); VList(goalsCard,8); SecLbl(goalsCard,"🎯  ZIELE  (AutoSave)")
@@ -1230,8 +1262,8 @@ UpdateSessionUI=function()
     local gs = GlobalSession
     H.UI.Lbl.Rounds.Text = "Abgeschlossene Runden: " .. tostring(gs.CurrentRound)
     if gs.CurrentRound > 0 then
-        local avgMin = (gs.TotalTime / 60) / gs.CurrentRound
-        H.UI.Lbl.ItemCount.Text = string.format("Ø Rundenzeit: %.2f min", avgMin)
+        local avgSec = math.floor(gs.TotalTime / gs.CurrentRound + 0.5)
+        H.UI.Lbl.ItemCount.Text = string.format("Ø Rundenzeit: %d s", avgSec)
     else
         H.UI.Lbl.ItemCount.Text = "Ø Rundenzeit: –"
     end
@@ -1239,6 +1271,7 @@ UpdateSessionUI=function()
     for _, v in pairs(H.UI.Fr.SessList:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
     local total, count = 0, 0
     for name, amt in pairs(gs.AllRewards) do
+        if IsSessionCurrencyKey(name) then continue end
         total = total + amt
         count = count + 1
         local isRare = K.RARE[name] == true
@@ -1608,6 +1641,7 @@ NeonBtn(SettPage,"⏏  GUI vollständig entladen",D.Red,34).MouseButton1Click:Co
     S.Running=false; S.WhEnabled=false; H.Config.AutoFarm=false; SaveSettings()
     if S.ChildConn then pcall(function() S.ChildConn:Disconnect() end) end
     if _G.HazeShared and _G.HazeShared.StopFarm then pcall(_G.HazeShared.StopFarm) end
+    pcall(function() if HazeHubBlur and HazeHubBlur.Parent then HazeHubBlur:Destroy() end end)
     pcall(function() ScreenGui:Destroy() end); pcall(function() H.UI.Fr.MiniBtn:Destroy() end)
 end)
 end) -- end pcall Settings Tab
