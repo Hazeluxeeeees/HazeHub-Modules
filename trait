@@ -161,6 +161,7 @@ unitScroll.BackgroundTransparency = 1
 unitScroll.BorderSizePixel = 0
 unitScroll.ScrollBarThickness = 4
 unitScroll.ScrollBarImageColor3 = D.CyanDim
+unitScroll.ScrollingEnabled = true
 unitScroll.ScrollingDirection = Enum.ScrollingDirection.Y
 unitScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 unitScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
@@ -231,12 +232,22 @@ local function GetUnitTraits(unitInstance)
     return main, sub
 end
 
-local STAT_NAMES = {
+-- Potentials in der Unit-Model-Struktur
+local STAT_POTENTIAL_NAMES = {
     "AttackCooldownPotential",
     "DamagePotential",
     "HealthPotential",
     "RangePotential",
     "SpeedPotential",
+}
+
+-- Exakte Remote-Strings, die dein Gambling-Remote erwartet
+local STAT_SEND_NAMES = {
+    AttackCooldownPotential = "AttackCooldown",
+    DamagePotential        = "Damage",
+    HealthPotential        = "Health",
+    RangePotential         = "Range",
+    SpeedPotential         = "Speed",
 }
 local STAT_RANK_VALUE = {
     ["C"] = 1, ["C+"] = 2,
@@ -279,7 +290,7 @@ local function GetPotentialObject(unitInstance, statName)
 end
 local function GetStatRatings(unitInstance)
     local out = {}
-    for _, statName in ipairs(STAT_NAMES) do
+    for _, statName in ipairs(STAT_POTENTIAL_NAMES) do
         local obj = GetPotentialObject(unitInstance, statName)
         local raw = obj and obj.Value or nil
         out[statName] = { raw = raw, rating = ToRankString(raw), obj = obj }
@@ -824,7 +835,7 @@ TR.UI.Lbl.PerfectStatKeyCount = MkLbl(statKeyRow, "Perfect Stats Key: –", 13, 
 
 local statList = Instance.new("Frame", rerollCard); statList.Size = UDim2.new(1, 0, 0, 0); statList.AutomaticSize = Enum.AutomaticSize.Y; statList.BackgroundTransparency = 1; VList(statList, 3)
 TR.UI.Fr.StatRows = {}
-for _, statName in ipairs(STAT_NAMES) do
+for _, statName in ipairs(STAT_POTENTIAL_NAMES) do
     local row = Instance.new("Frame", statList); row.Size = UDim2.new(1, 0, 0, 24); row.BackgroundColor3 = D.Card; row.BackgroundTransparency = D.GlassPane or 0.18; row.BorderSizePixel = 0; Corner(row, 6); Stroke(row, D.Border, 1, 0.45)
     local nL = Instance.new("TextLabel", row); nL.Name = "StatNameLabel"; nL.Position = UDim2.new(0, 8, 0, 0); nL.Size = UDim2.new(0.72, 0, 1, 0); nL.BackgroundTransparency = 1
     nL.Text = statName; nL.TextColor3 = D.TextMid; nL.TextSize = 11; nL.Font = Enum.Font.GothamMedium; nL.TextScaled = true; nL.RichText = true; nL.TextStrokeTransparency = 1; nL.TextXAlignment = Enum.TextXAlignment.Left; nL.TextWrapped = true; nL.TextTruncate = Enum.TextTruncate.None
@@ -849,7 +860,7 @@ end
 local allBtn = Instance.new("TextButton", statModeGrid); allBtn.BackgroundColor3 = D.CardHover; allBtn.Text = "All"; allBtn.TextColor3 = D.Cyan; allBtn.TextSize = 12; allBtn.Font = Enum.Font.GothamBold; allBtn.TextScaled = false; allBtn.RichText = true; allBtn.TextStrokeTransparency = 1; allBtn.AutoButtonColor = false; allBtn.BorderSizePixel = 0; Corner(allBtn, 6); Stroke(allBtn, D.Cyan, 1, 0.2)
 TR.UI.Btn.StatMode["All"] = allBtn
 allBtn.MouseButton1Click:Connect(function() SetStatMode("All") end)
-for _, statName in ipairs(STAT_NAMES) do
+for _, statName in ipairs(STAT_POTENTIAL_NAMES) do
     local b = Instance.new("TextButton", statModeGrid)
     b.BackgroundColor3 = D.CardHover; b.Text = statName; b.TextColor3 = D.TextMid; b.TextSize = 11; b.Font = Enum.Font.GothamMedium; b.TextScaled = false; b.RichText = true; b.TextStrokeTransparency = 1; b.AutoButtonColor = false; b.BorderSizePixel = 0
     b.TextTruncate = Enum.TextTruncate.AtEnd
@@ -956,8 +967,15 @@ local function DoSingleStatReroll()
     if not statRemote then SetStatus("⚠ RerollPotential Remote nicht gefunden!", D.Orange); return false end
     if not HasAnyStatKeyForMode() then SetStatus("⚠ Keine Keys mehr für den ausgewählten Modus.", D.Orange); return false end
 
-    if not TR.SelectedUnitTagValue then
-        TR.SelectedUnitTagValue = GetUnitTagValue(TR.SelectedUnitName or TR.SelectedUnit.Name)
+    if TR.SelectedUnitTagValue == nil then
+        local tagUnitName = TR.SelectedUnitName or (TR.SelectedUnit and TR.SelectedUnit.Name) or nil
+        local tagVal = GetUnitTagValue(tagUnitName)
+        if tagVal == nil then
+            SetStatus("⏳ TagValue wird aktualisiert...", D.Yellow)
+            task.wait(0.5)
+            tagVal = GetUnitTagValue(tagUnitName)
+        end
+        TR.SelectedUnitTagValue = tagVal
     end
     if TR.SelectedUnitTagValue == nil then
         SetStatus("⚠ TagValue nicht gefunden!", D.Orange)
@@ -970,7 +988,8 @@ local function DoSingleStatReroll()
             statRemote:FireServer("All", TR.SelectedUnitTagValue, "All")
         else
             -- Remote-Signatur: FireServer('StatName', TagValue, 'Selective')
-            statRemote:FireServer(TR.SelectedStatMode, TR.SelectedUnitTagValue, "Selective")
+            local sendName = STAT_SEND_NAMES[TR.SelectedStatMode] or TR.SelectedStatMode
+            statRemote:FireServer(sendName, TR.SelectedUnitTagValue, "Selective")
         end
     end)
     if ok then TR.StatRollCount = TR.StatRollCount + 1 end
@@ -1097,8 +1116,18 @@ local function AutoStatRerollLoop()
     TR.StatRollCount = 0
     TR.UI.Btn.StartStat.Text = "⏳ Rollt..."; TR.UI.Btn.StartStat.TextColor3 = D.Yellow; Stroke(TR.UI.Btn.StartStat, D.Yellow, 2, 0.15)
     SetStatus("🎯 Auto-Stat-Reroll läuft...", D.Gold)
+    print("[HazeHub-Trait] AutoStatRerollLoop started",
+        "unit=" .. tostring(TR.SelectedUnit and TR.SelectedUnit.Name),
+        "statMode=" .. tostring(TR.SelectedStatMode),
+        "target=" .. tostring(TR.TargetStatRating))
     local t0 = os.clock()
+    local iter = 0
     while TR.StatRolling do
+        iter = iter + 1
+        if iter == 1 then
+            local reached, bestStatName, bestRank = StatGoalReached()
+            print("[HazeHub-Trait] First iteration: reached=" .. tostring(reached) .. ", best=" .. tostring(bestStatName) .. ", rank=" .. tostring(bestRank))
+        end
         if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!", D.Orange); break end
         local reached, bestStatName, bestRank = StatGoalReached()
         if reached then
@@ -1129,8 +1158,32 @@ local function AutoStatRerollLoop()
 end
 
 TR.UI.Btn.StartStat.MouseButton1Click:Connect(function()
-    if TR.StatRolling then SetStatus("⚠ Stat-Reroll läuft bereits.", D.Yellow); return end
-    if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!", D.Orange); return end
+    print("[HazeHub-Trait] Start Stat-Reroll clicked")
+    if TR.StatRolling then
+        SetStatus("⚠ Stat-Reroll läuft bereits.", D.Yellow)
+        return
+    end
+    if not TR.SelectedUnit then
+        SetStatus("⚠ Keine Einheit ausgewählt.", D.Orange)
+        print("[HazeHub-Trait] Start denied: no unit selected")
+        return
+    end
+    if not HasAnyStatKeyForMode() then
+        SetStatus("⛔ Keine Keys für diesen Modus.", D.Orange)
+        print("[HazeHub-Trait] Start denied: no keys (mode=" .. tostring(TR.SelectedStatMode) .. ")")
+        return
+    end
+    local reached, bestStatName, bestRank = StatGoalReached()
+    if reached then
+        SetStatus("🎯 Ziel bereits erreicht (" .. tostring(bestRank) .. ").", D.GreenBright)
+        print("[HazeHub-Trait] Start denied: already reached target", bestRank, bestStatName)
+        return
+    end
+
+    print("[HazeHub-Trait] Starting AutoStatRerollLoop",
+        "unit=" .. tostring(TR.SelectedUnit and TR.SelectedUnit.Name),
+        "mode=" .. tostring(TR.SelectedStatMode),
+        "target=" .. tostring(TR.TargetStatRating))
     task.spawn(AutoStatRerollLoop)
 end)
 TR.UI.Btn.StopStat.MouseButton1Click:Connect(function()
