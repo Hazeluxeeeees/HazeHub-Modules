@@ -297,14 +297,44 @@ end
 
 -- TagValue steckt pro Einheit im Collection-Ordner (Collection.[UnitName].Tag.Value).
 local function GetUnitTagValue(unitName)
-    local collection = GetCollection()
-    if not collection then return nil end
-    local unitFolder = collection:FindFirstChild(unitName)
-    if not unitFolder then return nil end
-    local tagObj = unitFolder:FindFirstChild("Tag") or unitFolder:FindFirstChild("Tags")
-    if not tagObj then return nil end
-    local vObj = tagObj:FindFirstChild("Value") or tagObj
-    return vObj and vObj.Value or nil
+    -- REQUIRED Pfad: ReplicatedStorage.Player_Data[LP.Name].Collection[UnitName].Tag.Value
+    local uName = unitName and tostring(unitName) or nil
+    if not uName or uName == "" then return nil end
+
+    local ok, tagValue = pcall(function()
+        local playerData = RS:WaitForChild("Player_Data", 10)
+        local accountFolder = playerData:WaitForChild(LP.Name, 10)
+        local collection = accountFolder:WaitForChild("Collection", 5)
+
+        -- exakter Child-Name
+        local unitFolder = collection:FindFirstChild(uName)
+
+        -- fallback: case-insensitive match
+        if not unitFolder then
+            for _, ch in ipairs(collection:GetChildren()) do
+                if string.lower(ch.Name) == string.lower(uName) then
+                    unitFolder = ch
+                    break
+                end
+            end
+        end
+        if not unitFolder then return nil end
+
+        local tagObj = unitFolder:FindFirstChild("Tag") or unitFolder:FindFirstChild("Tags")
+        if not tagObj then return nil end
+
+        local vObj = tagObj:FindFirstChild("Value")
+        if vObj then
+            return vObj.Value
+        end
+
+        -- falls Tag direkt ein Value-Obj ist (fallback)
+        if tagObj.Value ~= nil then return tagObj.Value end
+        return nil
+    end)
+
+    if not ok then return nil end
+    return tagValue
 end
 
 local function UpdateLiveTraitDisplay()
@@ -1082,6 +1112,8 @@ local function AutoStatRerollLoop()
             SetStatus("⛔ Keys leer. Stop.", D.Orange)
             break
         end
+        -- kleine Entlastung, damit während Tag-Update keine Request-Explosion entsteht
+        task.wait(0.1)
         local ok = DoSingleStatReroll()
         if not ok then SetStatus("❌ Stat-Reroll fehlgeschlagen.", D.Red); break end
         local dt = os.clock() - t0
