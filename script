@@ -34,6 +34,11 @@ local _earlyAutoFarm = false
 -- ★ Account-spezifische Dynamik (für Multi-Account korrekt)
 local LP = game.Players.LocalPlayer
 
+-- ★ CRITICAL: GUI Duplication Guard (Anti-Loop)
+if LP and LP:FindFirstChild("PlayerGui") and LP.PlayerGui:FindFirstChild("HazHub_Main") then
+    return
+end
+
 -- ── Haupttabelle ──────────────────────────────────────────────
 local Haze = {
     UI   = { Fr={}, Lbl={}, Btn={}, Inp={} },
@@ -715,7 +720,7 @@ end
 --  SCREEN GUI  – AnchorPoint(0.5,0.5) → zentriert
 -- ╚══════════════════════════════════════════════════════════╝
 local ScreenGui=Instance.new("ScreenGui")
-ScreenGui.Name="HazeHUB_v204"; ScreenGui.ResetOnSpawn=false
+ScreenGui.Name="HazHub_Main"; ScreenGui.ResetOnSpawn=false
 ScreenGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
 ScreenGui.DisplayOrder=999; ScreenGui.IgnoreGuiInset=true
 ScreenGui.Parent=guiParent
