@@ -31,13 +31,27 @@
 -- ── Früh-Flag (AutoFarm aus account-spezifischer settings-Datei, siehe nach Services) ──
 local _earlyAutoFarm = false
 
+-- ★ Globaler Anti-Spam / Anti-Reenter (Priorität)
+-- verhindert, dass das komplette Hauptskript tausende Male neu initialisiert wird
+if _G.HazHubLoaded then return end
+_G.HazHubLoaded = true
+
 -- ★ Account-spezifische Dynamik (für Multi-Account korrekt)
 local LP = game.Players.LocalPlayer
 
 -- ★ CRITICAL: GUI Duplication Guard (Anti-Loop)
-if LP and LP:FindFirstChild("PlayerGui") and LP.PlayerGui:FindFirstChild("HazHub_Main") then
-    return
+local function HazHubMainExists()
+    -- je nach Setup kann ScreenGui in PlayerGui oder CoreGui liegen
+    if LP and LP.PlayerGui and LP.PlayerGui:FindFirstChild("HazHub_Main") then
+        return true
+    end
+    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok and cg and cg:FindFirstChild("HazHub_Main") then
+        return true
+    end
+    return false
 end
+if HazHubMainExists() then return end
 
 -- ── Haupttabelle ──────────────────────────────────────────────
 local Haze = {
@@ -815,6 +829,7 @@ local function MakeTab(name,icon)
     local P=Instance.new("ScrollingFrame",H.UI.Fr.Content)
     P.Name=name; P.Size=UDim2.new(1,0,1,0); P.Visible=false
     P.BackgroundTransparency=1; P.ScrollBarThickness=3
+    P.ScrollingEnabled=true
     P.ScrollBarImageColor3=D.CyanDim; P.AutomaticCanvasSize=Enum.AutomaticSize.Y
     P.BorderSizePixel=0; VList(P,8); Pad(P,10,10,10,10)
     H.Tabs[name]=P; H.TBtns[name]=B; B.MouseButton1Click:Connect(function() SelectTab(name) end)
@@ -863,6 +878,7 @@ local function MakeTraitsTab(name, icon)
     TraitScroll.BackgroundTransparency = 1
     TraitScroll.BorderSizePixel = 0
     TraitScroll.ScrollBarThickness = 4
+    TraitScroll.ScrollingEnabled = true
     TraitScroll.ScrollBarImageColor3 = D.CyanDim
     TraitScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
     TraitScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
