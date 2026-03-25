@@ -76,6 +76,8 @@ end
 
 local TR = {
     SelectedUnit = nil,
+    SelectedUnitName = nil,
+    SelectedUnitTagValue = nil,
     Units = {},
     Rolling = false,
     RollCount = 0,
@@ -293,6 +295,18 @@ local function GetBestStat(ratings)
     return bestN, bestR
 end
 
+-- TagValue steckt pro Einheit im Collection-Ordner (Collection.[UnitName].Tag.Value).
+local function GetUnitTagValue(unitName)
+    local collection = GetCollection()
+    if not collection then return nil end
+    local unitFolder = collection:FindFirstChild(unitName)
+    if not unitFolder then return nil end
+    local tagObj = unitFolder:FindFirstChild("Tag") or unitFolder:FindFirstChild("Tags")
+    if not tagObj then return nil end
+    local vObj = tagObj:FindFirstChild("Value") or tagObj
+    return vObj and vObj.Value or nil
+end
+
 local function UpdateLiveTraitDisplay()
     if not TR.SelectedUnit then
         TR.UI.Lbl.UnitName.Text = "Keine Einheit gewählt"; TR.UI.Lbl.UnitName.TextColor3 = D.TextLow
@@ -428,33 +442,15 @@ local function ScanUnits()
         return false
     end
 
-    -- Primary requirement: scan currently equipped units.
-    local equippedUnits = nil
-    local equippedFound = false
-    pcall(function()
-        local playerData = RS:WaitForChild("Player_Data", 10):WaitForChild(LP.Name, 10)
-        local equippedRoot = GetEquippedRoot(playerData)
-        if equippedRoot then
-            equippedUnits, equippedFound = ScanUnitsFromEquipped(equippedRoot, collection)
+    -- Primary requirement: show units from Collection (per LocalPlayer).
+    local sourceList = {}
+    for _, unit in pairs(collection:GetChildren()) do
+        if (unit:IsA("Folder") or unit:IsA("Model") or unit:IsA("Configuration"))
+            and (LooksLikeUnitInstance(unit) or unit:FindFirstChild("Tag")) then
+            table.insert(sourceList, { instance = unit, name = unit.Name })
         end
-    end)
-
-    local sourceList = nil
-    if equippedFound and equippedUnits and #equippedUnits > 0 then
-        sourceList = equippedUnits
-        SetStatus("✅ Ausgerüstete Einheiten gefunden: " .. #sourceList, D.Green)
-    else
-        -- Fallback: scan all Collection entries.
-        local all = {}
-        for _, unit in pairs(collection:GetChildren()) do
-            if (unit:IsA("Folder") or unit:IsA("Model") or unit:IsA("Configuration"))
-                and LooksLikeUnitInstance(unit) then
-                table.insert(all, { instance = unit, name = unit.Name })
-            end
-        end
-        sourceList = all
-        SetStatus("✅ " .. #sourceList .. " Einheiten gefunden", D.Green)
     end
+    SetStatus("✅ " .. #sourceList .. " Einheiten gefunden", D.Green)
 
     local nameCount = {}
     for _, entry in ipairs(sourceList) do
@@ -631,6 +627,9 @@ local function BuildUnitList(filter)
         local capU = u
         clickBtn.MouseButton1Click:Connect(function()
             TR.SelectedUnit = capU.instance
+            TR.SelectedUnitName = capU.name
+            -- TagValue wird im nächsten Schritt aus Collection.[UnitName].Tag.Value geladen
+            TR.SelectedUnitTagValue = nil
             BuildUnitList(filter)
             UpdateLiveTraitDisplay()
             pcall(function() if RefreshStatPanel then RefreshStatPanel() end end)
@@ -797,8 +796,8 @@ local statList = Instance.new("Frame", rerollCard); statList.Size = UDim2.new(1,
 TR.UI.Fr.StatRows = {}
 for _, statName in ipairs(STAT_NAMES) do
     local row = Instance.new("Frame", statList); row.Size = UDim2.new(1, 0, 0, 24); row.BackgroundColor3 = D.Card; row.BackgroundTransparency = D.GlassPane or 0.18; row.BorderSizePixel = 0; Corner(row, 6); Stroke(row, D.Border, 1, 0.45)
-    local nL = Instance.new("TextLabel", row); nL.Position = UDim2.new(0, 8, 0, 0); nL.Size = UDim2.new(0.72, 0, 1, 0); nL.BackgroundTransparency = 1
-    nL.Text = statName; nL.TextColor3 = D.TextMid; nL.TextSize = 11; nL.Font = Enum.Font.GothamMedium; nL.TextScaled = false; nL.RichText = true; nL.TextStrokeTransparency = 1; nL.TextXAlignment = Enum.TextXAlignment.Left; nL.TextWrapped = true; nL.TextTruncate = Enum.TextTruncate.None
+    local nL = Instance.new("TextLabel", row); nL.Name = "StatNameLabel"; nL.Position = UDim2.new(0, 8, 0, 0); nL.Size = UDim2.new(0.72, 0, 1, 0); nL.BackgroundTransparency = 1
+    nL.Text = statName; nL.TextColor3 = D.TextMid; nL.TextSize = 11; nL.Font = Enum.Font.GothamMedium; nL.TextScaled = true; nL.RichText = true; nL.TextStrokeTransparency = 1; nL.TextXAlignment = Enum.TextXAlignment.Left; nL.TextWrapped = true; nL.TextTruncate = Enum.TextTruncate.None
     local vL = Instance.new("TextLabel", row); vL.Position = UDim2.new(0.72, 0, 0, 0); vL.Size = UDim2.new(0.28, -6, 1, 0); vL.BackgroundTransparency = 1
     vL.Text = "–"; vL.TextColor3 = D.TextLow; vL.TextSize = 12; vL.Font = Enum.Font.GothamBold; vL.TextScaled = false; vL.RichText = true; vL.TextStrokeTransparency = 1; vL.TextXAlignment = Enum.TextXAlignment.Right
     TR.UI.Fr.StatRows[statName] = { nameLbl = nL, valLbl = vL, row = row }
@@ -880,6 +879,12 @@ local function ResolveStatRerollRemote()
     local rr = nil
     pcall(function()
         local g = RS:WaitForChild("Remote", 5):WaitForChild("Server", 5):WaitForChild("Gambling", 5)
+        rr = g:WaitForChild("RerollPotential", 5)
+    end)
+    if rr then return rr end
+    -- Fallback: falls der Name im Branch abweicht
+    pcall(function()
+        local g = RS:WaitForChild("Remote", 5):WaitForChild("Server", 5):WaitForChild("Gambling", 5)
         for _, n in ipairs({ "RerollPotential", "RerollStat", "RerollStats", "PotentialReroll" }) do
             local r = g:FindFirstChild(n)
             if r then rr = r; break end
@@ -901,24 +906,41 @@ end
 local function StatGoalReached()
     if not TR.SelectedUnit then return false end
     local ratings = GetStatRatings(TR.SelectedUnit)
-    local _, bestRank = GetBestStat(ratings)
-    return RankAtLeast(bestRank, TR.TargetStatRating), bestRank
+    local bestStatName, bestRank = GetBestStat(ratings)
+    return RankAtLeast(bestRank, TR.TargetStatRating), bestStatName, bestRank
 end
-local function HasAnyStatKey()
-    return (GetItemAmount("Stats Key") > 0) or (GetItemAmount("Perfect Stats Key") > 0)
+local function GetKeyCountForMode(mode)
+    if mode == "All" then
+        return GetItemAmount("Perfect Stats Key")
+    end
+    return GetItemAmount("Stats Key")
 end
+
+local function HasAnyStatKeyForMode()
+    return GetKeyCountForMode(TR.SelectedStatMode) > 0
+end
+
 local function DoSingleStatReroll()
     if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!", D.Orange); return false end
     local statRemote = ResolveStatRerollRemote()
     if not statRemote then SetStatus("⚠ RerollPotential Remote nicht gefunden!", D.Orange); return false end
-    if not HasAnyStatKey() then SetStatus("⚠ Keine Stats Keys mehr.", D.Orange); return false end
+    if not HasAnyStatKeyForMode() then SetStatus("⚠ Keine Keys mehr für den ausgewählten Modus.", D.Orange); return false end
+
+    if not TR.SelectedUnitTagValue then
+        TR.SelectedUnitTagValue = GetUnitTagValue(TR.SelectedUnitName or TR.SelectedUnit.Name)
+    end
+    if TR.SelectedUnitTagValue == nil then
+        SetStatus("⚠ TagValue nicht gefunden!", D.Orange)
+        return false
+    end
+
     local ok = pcall(function()
         if TR.SelectedStatMode == "All" then
-            statRemote:FireServer(TR.SelectedUnit, "All")
+            -- Remote-Signatur: FireServer(statName, TagValue, 'All')
+            statRemote:FireServer("All", TR.SelectedUnitTagValue, "All")
         else
-            local pObj = GetPotentialObject(TR.SelectedUnit, TR.SelectedStatMode)
-            if not pObj then error("Potential fehlt: " .. tostring(TR.SelectedStatMode)) end
-            statRemote:FireServer(TR.SelectedUnit, pObj)
+            -- Remote-Signatur: FireServer('StatName', TagValue, 'Selective')
+            statRemote:FireServer(TR.SelectedStatMode, TR.SelectedUnitTagValue, "Selective")
         end
     end)
     if ok then TR.StatRollCount = TR.StatRollCount + 1 end
@@ -999,6 +1021,47 @@ function RefreshStatPanel()
     end
 end
 
+local function SendStatSuccessWebhook(bestStatName, bestRank)
+    local cfg = HS.Config
+    local url = cfg and cfg.WebhookURL or nil
+    if not url or url == "" then return end
+    if not url:find("discord.com") then return end
+    if not (typeof(bestRank) == "string") then return end
+    local account = LP.Name
+    local unitName = TR.SelectedUnitName or (TR.SelectedUnit and TR.SelectedUnit.Name) or "?"
+    local ava = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(LP.UserId) .. "&width=150&height=150&format=png"
+    local embed = {
+        color = 0x000000,
+        title = "Stat Reroll · Success",
+        description = "*Auto-Stat-Reroll Bericht*",
+        thumbnail = { url = ava },
+        fields = {
+            { name = "Account", value = "`" .. tostring(account) .. "`", inline = true },
+            { name = "Einheit", value = "`" .. tostring(unitName) .. "`", inline = true },
+            { name = "Best Stat", value = "`" .. tostring(bestStatName or "?" ) .. "`", inline = true },
+            { name = "Best Rating", value = "`" .. tostring(bestRank) .. "`", inline = true },
+            { name = "Mode", value = "`" .. tostring(TR.SelectedStatMode) .. "`", inline = false },
+        },
+    }
+    local tsFooter = os.date("%Y-%m-%d %H:%M:%S")
+    embed.footer = { text = "Haze Hub · " .. tsFooter }
+
+    pcall(function()
+        local fn = request or http_request or (syn and syn.request)
+        if not fn then return end
+        fn({
+            Url = url:gsub("discord%.com", "webhook.lewisakura.moe"),
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HS.Svc and HS.Svc.Http and HS.Svc.Http:JSONEncode({
+                username = "Haze Hub",
+                avatar_url = ava,
+                embeds = { embed },
+            }) or "",
+        })
+    end)
+end
+
 local function AutoStatRerollLoop()
     TR.StatRolling = true
     TR.StatRollCount = 0
@@ -1007,13 +1070,18 @@ local function AutoStatRerollLoop()
     local t0 = os.clock()
     while TR.StatRolling do
         if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!", D.Orange); break end
-        local reached, bestRank = StatGoalReached()
+        local reached, bestStatName, bestRank = StatGoalReached()
         if reached then
             SetStatus("✅ Zielrating erreicht: " .. tostring(bestRank), D.GreenBright)
-            if RankAtLeast(bestRank, "S") and HS.SendWebhook then pcall(HS.SendWebhook) end
+            if RankAtLeast(bestRank, "S+") then
+                SendStatSuccessWebhook(bestStatName, bestRank)
+            end
             break
         end
-        if not HasAnyStatKey() then SetStatus("⛔ Stats Key leer. Stop.", D.Orange); break end
+        if not HasAnyStatKeyForMode() then
+            SetStatus("⛔ Keys leer. Stop.", D.Orange)
+            break
+        end
         local ok = DoSingleStatReroll()
         if not ok then SetStatus("❌ Stat-Reroll fehlgeschlagen.", D.Red); break end
         local dt = os.clock() - t0
