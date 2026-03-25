@@ -56,8 +56,8 @@ end
 local Players          = game:GetService("Players")
 local VirtualUser      = game:GetService("VirtualUser")
 local TeleportService  = game:GetService("TeleportService")
--- ★ LP immer dynamisch – niemals hardcoded
-local LP               = Players.LocalPlayer
+-- REQUIRED: Account-spezifisch via LocalPlayer
+local LP               = game.Players.LocalPlayer
 local RS               = game:GetService("ReplicatedStorage")
 local WS               = game:GetService("Workspace")
 
@@ -65,10 +65,11 @@ local WS               = game:GetService("Workspace")
 --  DATEIPFADE
 -- ============================================================
 local FOLDER        = "HazeHUB"
-local DB_FILE       = "HazeHUB/HazeHUB_RewardDB.json"
-local QUEUE_FILE    = "HazeHUB/HazeHUB_Queue.json"
-local STATE_FILE    = "HazeHUB/HazeHUB_State.json"
-local SETTINGS_FILE = "HazeHUB/HazeHUB_Settings.json"
+local saveFile     = LP.Name .. "_settings.json"
+local DB_FILE       = FOLDER .. "/" .. LP.Name .. "_RewardDB.json"
+local QUEUE_FILE    = FOLDER .. "/" .. LP.Name .. "_Queue.json"
+local STATE_FILE    = FOLDER .. "/" .. LP.Name .. "_State.json"
+local SETTINGS_FILE = FOLDER .. "/" .. saveFile
 
 if makefolder then pcall(function() makefolder(FOLDER) end) end
 
