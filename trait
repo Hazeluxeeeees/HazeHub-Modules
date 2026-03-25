@@ -1,13 +1,15 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – trait.lua  v2.3.1
+--  HazeHUB – trait.lua  v2.3.2
 --
+--  v2.3.2:
+--    ✓ Session/Webhook: nach manuellem Roll → RecordSessionTrait (Main/Sub)
 --  v2.3.1:
 --    ✓ Typografie: GothamMedium/Bold, feste TextSize, RichText, kein TextStroke-Glow
 --    ✓ Reroll: Start/Stop in „Reroll Einstellungen“; Währung fest Shards
 --    ✓ (v2.2) Grid 150×180, TraitSticky nur Trait-Reroll-Anzeige
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "2.3.1"
+local VERSION = "2.3.2"
 
 local _w = 0
 while not (_G.HazeShared and _G.HazeShared.D and _G.HazeShared.Card and _G.HazeShared.TraitPage) do
@@ -40,9 +42,8 @@ pcall(function()
     end
 end)
 
-local Players = game:GetService("Players")
 local RS      = game:GetService("ReplicatedStorage")
-local LP      = Players.LocalPlayer
+local LP      = game.Players.LocalPlayer
 
 local TraitData, DivineTraitData = nil, nil
 pcall(function() TraitData       = require(RS.Shared.Info.Trait) end)
@@ -81,8 +82,6 @@ local TR = {
     TargetTraits = {},
     UI = { Lbl = {}, Fr = {}, Btn = {}, Inp = {} },
 }
-
-local COLLECTION_OWNER = "Hazeluxes1"
 
 pcall(function()
     for _, v in pairs(TraitPage:GetChildren()) do
@@ -266,41 +265,146 @@ local function UpdateLiveTraitDisplay()
     TR.UI.Lbl.TraitInfo.Text = #infoLines > 0 and table.concat(infoLines, "\n") or ""
 end
 
-local function ScanUnits()
-    TR.Units = {}
+local function LooksLikeUnitInstance(obj)
+    if not obj then return false end
+    -- Units in this game usually expose their traits via a "Traits"/"Trait" container,
+    -- but we also accept direct Primary/Secondary values for robustness.
+    local tf = obj:FindFirstChild("Traits") or obj:FindFirstChild("Trait")
+    if tf then
+        if tf:FindFirstChild("PrimaryTrait") or tf:FindFirstChild("Primary") then return true end
+        if tf:FindFirstChild("SecondaryTrait") or tf:FindFirstChild("Secondary") or tf:FindFirstChild("SubTrait") then return true end
+    end
+    if obj:FindFirstChild("PrimaryTrait") or obj:FindFirstChild("Primary") then return true end
+    if obj:FindFirstChild("SecondaryTrait") or obj:FindFirstChild("Secondary") or obj:FindFirstChild("SubTrait") then return true end
+    return false
+end
+
+local function GetCollection()
     local collection = nil
     pcall(function()
-        collection = RS:WaitForChild("Player_Data", 10):WaitForChild(COLLECTION_OWNER, 10):WaitForChild("Collection", 5)
+        collection = RS:WaitForChild("Player_Data", 10):WaitForChild(LP.Name, 10):WaitForChild("Collection", 5)
     end)
-    if not collection then
+    return collection
+end
+
+local function GetEquippedRoot(playerData)
+    -- Different accounts/versions can store "equipped" in different containers.
+    for _, key in ipairs({ "EquippedUnits", "Equipped", "Loadout", "UnitSlots", "ActiveUnits", "SelectedUnits" }) do
+        local f = playerData and playerData:FindFirstChild(key)
+        if f then return f end
+    end
+    return nil
+end
+
+local function ScanUnitsFromEquipped(equippedRoot, collection)
+    local units = {}
+    local seen = {}
+
+    local function addUnit(inst, overrideName)
+        if not inst then return end
+        local key = (inst.GetFullName and inst:GetFullName()) or tostring(inst)
+        if seen[key] then return end
+        if not overrideName then overrideName = inst.Name end
+        seen[key] = true
+        table.insert(units, { instance = inst, name = tostring(overrideName) })
+    end
+
+    local foundAny = false
+    pcall(function()
+        -- 1) Prefer direct children that look like unit instances.
+        for _, ch in ipairs(equippedRoot:GetChildren()) do
+            if LooksLikeUnitInstance(ch) then
+                foundAny = true
+                addUnit(ch)
+            elseif ch:IsA("StringValue") or ch:IsA("IntValue") or ch:IsA("NumberValue") then
+                -- 2) If it stores a unit name, resolve into Collection.
+                local vName = tostring(ch.Value)
+                local resolved = collection and collection:FindFirstChild(vName)
+                if resolved and LooksLikeUnitInstance(resolved) then
+                    foundAny = true
+                    addUnit(resolved, vName)
+                end
+            end
+        end
+    end)
+
+    -- 3) Fallback: try to resolve any matching value from descendants.
+    if not foundAny and collection then
         pcall(function()
-            collection = RS:WaitForChild("Player_Data", 10):WaitForChild(LP.Name, 10):WaitForChild("Collection", 5)
+            local colByName = {}
+            for _, u in ipairs(collection:GetChildren()) do
+                colByName[u.Name] = u
+            end
+            for _, vObj in ipairs(equippedRoot:GetDescendants()) do
+                if vObj:IsA("StringValue") or vObj:IsA("IntValue") or vObj:IsA("NumberValue") then
+                    local vName = tostring(vObj.Value)
+                    local resolved = colByName[vName]
+                    if resolved and LooksLikeUnitInstance(resolved) then
+                        foundAny = true
+                        addUnit(resolved, vName)
+                    end
+                end
+            end
         end)
     end
+
+    return units, foundAny
+end
+
+local function ScanUnits()
+    TR.Units = {}
+
+    local collection = GetCollection()
     if not collection then
         SetStatus("⚠ Collection nicht gefunden!", D.Orange)
         return false
     end
+
+    -- Primary requirement: scan currently equipped units.
+    local equippedUnits = nil
+    local equippedFound = false
+    pcall(function()
+        local playerData = RS:WaitForChild("Player_Data", 10):WaitForChild(LP.Name, 10)
+        local equippedRoot = GetEquippedRoot(playerData)
+        if equippedRoot then
+            equippedUnits, equippedFound = ScanUnitsFromEquipped(equippedRoot, collection)
+        end
+    end)
+
+    local sourceList = nil
+    if equippedFound and equippedUnits and #equippedUnits > 0 then
+        sourceList = equippedUnits
+        SetStatus("✅ Ausgerüstete Einheiten gefunden: " .. #sourceList, D.Green)
+    else
+        -- Fallback: scan all Collection entries.
+        local all = {}
+        for _, unit in pairs(collection:GetChildren()) do
+            if (unit:IsA("Folder") or unit:IsA("Model") or unit:IsA("Configuration"))
+                and LooksLikeUnitInstance(unit) then
+                table.insert(all, { instance = unit, name = unit.Name })
+            end
+        end
+        sourceList = all
+        SetStatus("✅ " .. #sourceList .. " Einheiten gefunden", D.Green)
+    end
+
     local nameCount = {}
-    for _, unit in pairs(collection:GetChildren()) do
-        if unit:IsA("Folder") or unit:IsA("Model") or unit:IsA("Configuration") or unit:IsA("StringValue") or unit:IsA("IntValue") then
-            local n = unit.Name
-            nameCount[n] = (nameCount[n] or 0) + 1
-        end
+    for _, entry in ipairs(sourceList) do
+        local n = entry.name
+        nameCount[n] = (nameCount[n] or 0) + 1
     end
+
     local nameSeen = {}
-    for _, unit in pairs(collection:GetChildren()) do
-        if unit:IsA("Folder") or unit:IsA("Model") or unit:IsA("Configuration") or unit:IsA("StringValue") or unit:IsA("IntValue") then
-            local n = unit.Name
-            nameSeen[n] = (nameSeen[n] or 0) + 1
-            local displayName = n
-            if nameCount[n] > 1 then displayName = n .. " #" .. nameSeen[n] end
-            table.insert(TR.Units, { instance = unit, name = n, index = nameSeen[n], displayName = displayName })
-        end
+    for _, entry in ipairs(sourceList) do
+        local n = entry.name
+        nameSeen[n] = (nameSeen[n] or 0) + 1
+        local displayName = n
+        if nameCount[n] > 1 then displayName = n .. " #" .. nameSeen[n] end
+        table.insert(TR.Units, { instance = entry.instance, name = n, index = nameSeen[n], displayName = displayName })
     end
+
     table.sort(TR.Units, function(a, b) return a.displayName:lower() < b.displayName:lower() end)
-    SetStatus("✅ " .. #TR.Units .. " Einheiten gefunden", D.Green)
-    return true
+    return #TR.Units > 0
 end
 
 local UnitModelsRoot = nil
@@ -641,6 +745,14 @@ end
 singleRollBtn.MouseButton1Click:Connect(function()
     DoSingleReroll()
     task.wait(0.3); UpdateLiveTraitDisplay()
+    pcall(function()
+        if TR.SelectedUnit and _G.HazeShared and _G.HazeShared.RecordSessionTrait then
+            local m, su = GetUnitTraits(TR.SelectedUnit)
+            if m and m ~= "" then
+                _G.HazeShared.RecordSessionTrait(su and su ~= "" and (m .. " / " .. su) or m)
+            end
+        end
+    end)
 end)
 
 local function AutoRerollLoop()
@@ -687,7 +799,7 @@ task.spawn(function()
         task.wait(1)
         local rr = "–"
         pcall(function()
-            local items = RS:WaitForChild("Player_Data", 3):WaitForChild(COLLECTION_OWNER, 3):WaitForChild("Items", 3)
+            local items = RS:WaitForChild("Player_Data", 3):WaitForChild(LP.Name, 3):WaitForChild("Items", 3)
             local traitR = items:FindFirstChild("Trait Reroll")
             if traitR then
                 local amt = traitR:FindFirstChild("Amount") or traitR:FindFirstChild("Value")
