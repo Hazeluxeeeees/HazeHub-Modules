@@ -1,5 +1,9 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB V19 – Hauptskript  v19.8
+--  HazeHUB V19 – Hauptskript  v19.9
+--  FIXES v19.9:
+--    ✓ Session-Loot: Inventar ChildAdded + Value-Tracking + Data (Gold/Gems/Exp)
+--    ✓ Remote „Rewards“: auch Tabellen-Format (item/amount), Instances optional
+--    ✓ Webhook: deutsche Embed-Felder, Logo avatar + thumbnail, Lobby-Ende
 --  FIXES v19.8:
 --    ✓ CoreGui-Check via reines pcall
 --    ✓ Kein auto-rescan beim Start – nur DB laden
@@ -38,6 +42,8 @@ local Haze = {
         KeyConn=nil, ActiveTab=nil, SelMode="Story",
         SelWorld=nil, SelChap=nil, WorldData={}, WorldIds={},
         ScanDone=false, ChapFolderRef=nil, ChildConn=nil, DBReady=false,
+        SessionWatchActive=false, InvLastVals={}, SessionTraits={},
+        LastLobbyWebhookTs=0, SessionInvPrimary=true, MergeRemoteInstances=false,
     },
     K = {
         INFO          = { Exp=true, Gems=true, Gold=true },
@@ -76,6 +82,8 @@ local H   = Haze
 local S   = Haze.S
 local K   = Haze.K
 local Svc = Haze.Svc
+-- Zentrale Session-Tabelle (gleiche Referenzen wie S.* – Live-Updates)
+local SessionData = { Items = S.SessTotals, Info = S.InfoTotals, Traits = S.SessionTraits }
 
 -- CoreGui-Check via reines pcall
 local guiParent = Svc.Player.PlayerGui
@@ -852,15 +860,24 @@ local function SendWebhook(rewardTable,goalItem,goalAmt)
     end
     local sItems,sTotal={},0; for name,t in pairs(S.SessTotals) do sTotal=sTotal+t; table.insert(sItems,{name=name,total=t}) end
     table.sort(sItems,function(a,b) return a.total>b.total end)
-    local rTxt=#rReal==0 and "> *Kein Loot*" or ""
-    for _,i in ipairs(rReal) do rTxt=rTxt..string.format("%s**%s** `×%d`\n",i.rare and "💎 " or "› ",i.name,i.amt) end
-    local sTxt=""
+    local dropTxt=#rReal==0 and "> *Keine separaten Drop-Einträge (siehe Gesammelte Items)*" or ""
+    for _,i in ipairs(rReal) do dropTxt=dropTxt..string.format("%s**%s** `×%d`\n",i.rare and "💎 " or "› ",i.name,i.amt) end
+    local itemsTxt=""
     for i,it in ipairs(sItems) do
-        if i>8 then sTxt=sTxt..string.format("\n*+%d weitere*",#sItems-8); break end
+        if i>12 then itemsTxt=itemsTxt..string.format("\n*+%d weitere*",#sItems-12); break end
         local fill=math.min(8,math.ceil(it.total/math.max(1,sTotal/40)))
-        sTxt=sTxt..string.format("`%s%s`  **%s** %d\n",("█"):rep(fill),("░"):rep(8-fill),it.name,it.total)
+        itemsTxt=itemsTxt..string.format("`%s%s`  **%s** ×%d\n",("█"):rep(fill),("░"):rep(8-fill),it.name,it.total)
     end
-    if sTxt=="" then sTxt="> *–*" end
+    if itemsTxt=="" then itemsTxt="> *– noch keine Items in dieser Session –*" end
+    local infoParts={}
+    for _,k in ipairs({"Gold","Gems","Exp"}) do
+        local v=S.InfoTotals[k]; if v and v~=0 then table.insert(infoParts,string.format("**%s** +%s",k,FmtNum(v))) end
+    end
+    if #infoParts==0 then for k,v in pairs(S.InfoTotals) do if v and v~=0 then table.insert(infoParts,string.format("**%s** +%s",k,FmtNum(v))) end end end
+    local curTxt=#infoParts>0 and table.concat(infoParts," · ") or "> *–*"
+    local traitLines={}
+    for _,t in ipairs(S.SessionTraits or {}) do table.insert(traitLines,tostring(t)) end
+    local traitTxt=#traitLines>0 and table.concat(traitLines,", "):sub(1,900) or "–"
     local dur=FmtDur(os.time()-S.SessStart); local isGoal=goalItem~=nil
     local ava="https://www.roblox.com/headshot-thumbnail/image?userId="..tostring(Svc.Player.UserId).."&width=150&height=150&format=png"
     local logoOk = HAZE_ASSETS.LogoHttps and #HAZE_ASSETS.LogoHttps > 12 and HAZE_ASSETS.LogoHttps:find("^https?://")
@@ -873,15 +890,16 @@ local function SendWebhook(rewardTable,goalItem,goalAmt)
         fields={
             {name="👤 Spieler",value="```"..Svc.Player.Name.."```",inline=true},
             {name="🔢 Runde",value="```#"..S.RoundCount.."```",inline=true},
-            {name="⏱ Session",value="`"..dur.."`",inline=true},
-            {name="🎁 Loot",value=rTxt,inline=false},
-            {name="📊 Gesamt",value=sTxt,inline=false}
+            {name="⏱ Dauer der Session",value="`"..dur.."`",inline=true},
+            {name="📦 Gesammelte Items",value=itemsTxt:sub(1,1020),inline=false},
+            {name="🎁 Drops (Remote)",value=dropTxt:sub(1,800),inline=false},
+            {name="💎 Traits / Währung",value=(curTxt.."\n**Traits:** "..traitTxt):sub(1,1020),inline=false},
         },
     }
     if logoOk then
-        embed.footer={text="Haze Hub · V19.8 · "..dur,icon_url=HAZE_ASSETS.LogoHttps}
+        embed.footer={text="Haze Hub · V19.9 · "..dur,icon_url=HAZE_ASSETS.LogoHttps}
     else
-        embed.footer={text="Haze Hub · V19.8 · "..dur}
+        embed.footer={text="Haze Hub · V19.9 · "..dur}
     end
     if isGoal then table.insert(embed.fields,2,{name="🎯 Ziel",value=string.format("**%s** `%d/%d` ✅",goalItem,goalAmt,goalAmt),inline=false}) end
     task.spawn(function() pcall(function()
@@ -1207,8 +1225,9 @@ local function SetGoalFromInventory(itemName)
     task.delay(2.5,function() Stroke(gItemOuter,D.Border,1,0.2); Stroke(gAmtOuter,D.Border,1,0.2) end)
 end
 _G._SetGoalFromInventory=SetGoalFromInventory
+SecLbl(SessPage,"📦  GEGENSTÄNDE ERHALTEN (diese Session)")
 H.UI.Fr.SessList=Card(SessPage); Pad(H.UI.Fr.SessList,6,8,6,8); VList(H.UI.Fr.SessList,4)
-H.UI.Lbl.SessEmpty=MkLbl(H.UI.Fr.SessList,"Noch keine Items...",12,D.TextLow); H.UI.Lbl.SessEmpty.Size=UDim2.new(1,0,0,30); H.UI.Lbl.SessEmpty.TextXAlignment=Enum.TextXAlignment.Center
+H.UI.Lbl.SessEmpty=MkLbl(H.UI.Fr.SessList,"Noch keine Items – warte auf Drops oder Inventar-Updates.",12,D.TextLow); H.UI.Lbl.SessEmpty.Size=UDim2.new(1,0,0,30); H.UI.Lbl.SessEmpty.TextXAlignment=Enum.TextXAlignment.Center
 local sTotCard=Card(SessPage,34); Pad(sTotCard,0,12,0,12); local sTotRow=Instance.new("Frame",sTotCard); sTotRow.Size=UDim2.new(1,0,1,0); sTotRow.BackgroundTransparency=1
 H.UI.Lbl.SessTotal=MkLbl(sTotRow,"Gesamt: 0 Items",12,D.TextMid); H.UI.Lbl.SessTotal.Size=UDim2.new(1,0,1,0); H.UI.Lbl.SessTotal.TextXAlignment=Enum.TextXAlignment.Right
 UpdateSessionUI=function()
@@ -1228,10 +1247,146 @@ UpdateSessionUI=function()
     if UpdateGoalsUI then pcall(UpdateGoalsUI) end
 end
 NeonBtn(SessPage,"🗑  Session zurücksetzen",D.Red,34).MouseButton1Click:Connect(function()
-    S.SessTotals={}; S.InfoTotals={}; S.RoundCount=0; S.SessStart=os.time()
-    for _,g in ipairs(S.Goals) do g.reached=false end; S.GoalsNotified={}; UpdateSessionUI()
+    local function clearTab(t) if table.clear then table.clear(t) else for k in pairs(t) do t[k]=nil end end end
+    clearTab(S.SessTotals); clearTab(S.InfoTotals); clearTab(S.InvLastVals); clearTab(S.SessionTraits)
+    S.RoundCount=0; S.SessStart=os.time()
+    for _,g in ipairs(S.Goals) do g.reached=false end; S.GoalsNotified={}
+    pcall(DisconnectSessionInvListeners)
+    if not IsInLobby() then S.SessionWatchActive=true; pcall(ConnectSessionInvListeners) end
+    UpdateSessionUI()
 end)
 end) -- end pcall Session Tab
+
+-- ╔══════════════════════════════════════════════════════════╗
+--  SESSION – Inventar / Data Live-Tracking (nach UpdateSessionUI)
+-- ╚══════════════════════════════════════════════════════════╝
+local SessionInvConns = {}
+local ItemsChildAddedConn = nil
+
+local function ApplySessionItemGain(itemName, delta)
+    delta = math.floor(tonumber(delta) or 0)
+    if delta <= 0 or not itemName or itemName == "" then return end
+    if K.INFO[itemName] then
+        S.InfoTotals[itemName] = (S.InfoTotals[itemName] or 0) + delta
+    else
+        S.SessTotals[itemName] = (S.SessTotals[itemName] or 0) + delta
+    end
+    if UpdateSessionUI then pcall(UpdateSessionUI) end
+    pcall(CheckAllGoals)
+end
+
+function DisconnectSessionInvListeners()
+    for _, c in ipairs(SessionInvConns) do
+        pcall(function() if c and c.Disconnect then c:Disconnect() end end)
+    end
+    SessionInvConns = {}
+    pcall(function() if ItemsChildAddedConn then ItemsChildAddedConn:Disconnect() end end)
+    ItemsChildAddedConn = nil
+end
+
+local function shouldTrackInvItem(inst)
+    if not inst then return false end
+    if inst:IsA("UIGridLayout") or inst:IsA("UIListLayout") or inst:IsA("UIPadding") then return false end
+    return (inst:FindFirstChild("Value") or inst:FindFirstChild("Amount"))
+        or inst:IsA("IntValue") or inst:IsA("NumberValue")
+end
+
+local function readInvItemQty(inst)
+    local v = inst:FindFirstChild("Value") or inst:FindFirstChild("Amount")
+    if v then return tonumber(v.Value) or 0 end
+    if inst:IsA("IntValue") or inst:IsA("NumberValue") then return tonumber(inst.Value) or 0 end
+    return 0
+end
+
+function ConnectSessionInvListeners()
+    DisconnectSessionInvListeners()
+    local itemsFolder, dataFolder
+    pcall(function()
+        local pd = Svc.RS:WaitForChild("Player_Data", 8):WaitForChild(Svc.Player.Name, 8)
+        itemsFolder = pd:FindFirstChild("Items") or pd:WaitForChild("Items", 5)
+        dataFolder = pd:FindFirstChild("Data")
+    end)
+    if not itemsFolder then return end
+
+    local function bindItem(inst)
+        if not shouldTrackInvItem(inst) then return end
+        local name = inst.Name
+        S.InvLastVals[name] = readInvItemQty(inst)
+        local valInst = inst:FindFirstChild("Value") or inst:FindFirstChild("Amount")
+        local function onChanged()
+            if not S.SessionWatchActive then return end
+            local now = readInvItemQty(inst)
+            local prev = S.InvLastVals[name] or 0
+            if now > prev then ApplySessionItemGain(name, now - prev) end
+            S.InvLastVals[name] = now
+        end
+        if valInst then
+            table.insert(SessionInvConns, valInst:GetPropertyChangedSignal("Value"):Connect(onChanged))
+        elseif inst:IsA("IntValue") or inst:IsA("NumberValue") then
+            table.insert(SessionInvConns, inst:GetPropertyChangedSignal("Value"):Connect(onChanged))
+        end
+    end
+
+    for _, ch in ipairs(itemsFolder:GetChildren()) do bindItem(ch) end
+    ItemsChildAddedConn = itemsFolder.ChildAdded:Connect(function(ch)
+        task.defer(function() bindItem(ch) end)
+    end)
+
+    if dataFolder then
+        for key in pairs(K.INFO) do
+            local v = dataFolder:FindFirstChild(key)
+            if v and v:IsA("ValueBase") then
+                local storageKey = "__data_" .. key
+                S.InvLastVals[storageKey] = tonumber(v.Value) or 0
+                table.insert(SessionInvConns, v:GetPropertyChangedSignal("Value"):Connect(function()
+                    if not S.SessionWatchActive then return end
+                    local now = tonumber(v.Value) or 0
+                    local prev = S.InvLastVals[storageKey] or 0
+                    if now > prev then ApplySessionItemGain(key, now - prev) end
+                    S.InvLastVals[storageKey] = now
+                end))
+            end
+        end
+    end
+end
+
+local function ProcessRemoteRewardsPayload(data)
+    if not data then return end
+    if S.SessionInvPrimary then
+        for _, item in pairs(data) do
+            if typeof(item) ~= "Instance" and type(item) == "table" then
+                local n = item.item or item.Item or item.Name or item.name or item.ItemName
+                local a = tonumber(item.amount or item.Amount or item.count or item.Count or item.qty or 1) or 1
+                if type(n) == "string" and n ~= "" then ApplySessionItemGain(n, a) end
+            end
+        end
+        if S.MergeRemoteInstances then
+            for _, item in pairs(data) do
+                if typeof(item) == "Instance" then
+                    local v = item:FindFirstChild("Amount") or item:FindFirstChild("Value")
+                    local amt = v and tonumber(v.Value) or 1
+                    if K.INFO[item.Name] then S.InfoTotals[item.Name] = (S.InfoTotals[item.Name] or 0) + amt
+                    else S.SessTotals[item.Name] = (S.SessTotals[item.Name] or 0) + amt end
+                end
+            end
+        end
+        return
+    end
+    for _, item in pairs(data) do
+        if typeof(item) == "Instance" then
+            local v = item:FindFirstChild("Amount") or item:FindFirstChild("Value")
+            local amt = v and tonumber(v.Value) or 1
+            if K.INFO[item.Name] then S.InfoTotals[item.Name] = (S.InfoTotals[item.Name] or 0) + amt
+            else S.SessTotals[item.Name] = (S.SessTotals[item.Name] or 0) + amt end
+        elseif type(item) == "table" then
+            local n = item.item or item.Item or item.Name or item.name
+            local a = tonumber(item.amount or item.Amount or item.count or 1) or 1
+            if type(n) == "string" and n ~= "" then ApplySessionItemGain(n, a) end
+        end
+    end
+    if UpdateSessionUI then pcall(UpdateSessionUI) end
+    pcall(CheckAllGoals)
+end
 
 -- ╔══════════════════════════════════════════════════════════╗
 --  INVENTORY TAB – ImageLabel (Texture) + ViewportFrame Fallback
@@ -1528,8 +1683,9 @@ whBox.Focused:Connect(function() Stroke(whOuter,D.Cyan,1,0.2); Tw(wLine,{Size=UD
 whBox.FocusLost:Connect(function() H.Config.WebhookURL=whBox.Text; SaveConfig(); Stroke(whOuter,D.Border,1,0.2); Tw(wLine,{Size=UDim2.new(0,0,0,2)},TM) end)
 NeonBtn(whCard,"📤  Test senden",D.CyanDim,34).MouseButton1Click:Connect(function() SendWebhook({},nil,nil) end)
 NeonBtn(SettPage,"⏏  GUI vollständig entladen",D.Red,34).MouseButton1Click:Connect(function()
-    S.Running=false; S.WhEnabled=false; H.Config.AutoFarm=false; SaveSettings()
+    S.Running=false; S.WhEnabled=false; S.SessionWatchActive=false; H.Config.AutoFarm=false; SaveSettings()
     if S.ChildConn then pcall(function() S.ChildConn:Disconnect() end) end
+    pcall(DisconnectSessionInvListeners)
     if _G.HazeShared and _G.HazeShared.StopFarm then pcall(_G.HazeShared.StopFarm) end
     pcall(function() ScreenGui:Destroy() end); pcall(function() H.UI.Fr.MiniBtn:Destroy() end)
 end)
@@ -1563,16 +1719,39 @@ if R.Remote then
         if cat=="GameEnded_TextAnimation" and data=="Won" then if H.Config.AutoRetry then FireVoteRetry() end; return end
         if cat=="Rewards - Items" then
             S.RoundCount=S.RoundCount+1
-            for _,item in pairs(data) do
-                if typeof(item)=="Instance" then
-                    local v=item:FindFirstChild("Amount") or item:FindFirstChild("Value"); local amt=v and tonumber(v.Value) or 1
-                    if K.INFO[item.Name] then S.InfoTotals[item.Name]=(S.InfoTotals[item.Name] or 0)+amt else S.SessTotals[item.Name]=(S.SessTotals[item.Name] or 0)+amt end
-                end
-            end
-            if UpdateSessionUI then pcall(UpdateSessionUI) end; CheckAllGoals(); SendWebhook(data,nil,nil)
+            ProcessRemoteRewardsPayload(data)
+            if UpdateSessionUI then pcall(UpdateSessionUI) end
+            pcall(CheckAllGoals)
+            SendWebhook(data,nil,nil)
         end
     end)
 end
+
+-- Lobby ↔ Runde: Tracking starten/stoppen, Webhook bei Rundenende (Lobby)
+task.spawn(function()
+    local wasLobby = IsInLobby()
+    if not wasLobby then
+        S.SessionWatchActive = true
+        pcall(ConnectSessionInvListeners)
+    end
+    while S.Running do
+        task.wait(0.45)
+        local lobby = IsInLobby()
+        if wasLobby and not lobby then
+            S.SessionWatchActive = true
+            pcall(ConnectSessionInvListeners)
+        elseif not wasLobby and lobby then
+            S.SessionWatchActive = false
+            pcall(DisconnectSessionInvListeners)
+            local now = os.time()
+            if now - (S.LastLobbyWebhookTs or 0) >= 15 then
+                S.LastLobbyWebhookTs = now
+                task.spawn(function() pcall(function() SendWebhook({}, nil, nil) end) end)
+            end
+        end
+        wasLobby = lobby
+    end
+end)
 ScreenGui.AncestryChanged:Connect(function() if not ScreenGui.Parent then S.WhEnabled=false end end)
 ScreenGui.DescendantAdded:Connect(function(ch)
     task.defer(function() ApplySharpTypography(ch) end)
@@ -1593,6 +1772,13 @@ _G.HazeShared.TeleportToLobby    = TeleportToLobby
 _G.HazeShared.SaveConfig         = SaveConfig
 _G.HazeShared.SaveSettings       = SaveSettings
 _G.HazeShared.SendWebhook        = SendWebhook
+_G.HazeShared.SessionData        = SessionData
+_G.HazeShared.RecordSessionTrait = function(name)
+    if not name or name == "" then return end
+    table.insert(S.SessionTraits, tostring(name))
+    if #S.SessionTraits > 48 then table.remove(S.SessionTraits, 1) end
+    if UpdateSessionUI then pcall(UpdateSessionUI) end
+end
 _G.HazeShared.UpdateSessionUI    = function() if UpdateSessionUI then pcall(UpdateSessionUI) end end
 _G.HazeShared.UpdateGoalsUI      = function() if UpdateGoalsUI   then pcall(UpdateGoalsUI)   end end
 _G.HazeShared.GetWorldData       = function() return S.WorldData end
