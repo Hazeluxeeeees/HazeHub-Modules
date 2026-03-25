@@ -1,5 +1,8 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB V20 – Hauptskript  v20.3
+--  HazeHUB V20 – Hauptskript  v20.4
+--  FIXES v20.4:
+--    ✓ Mobile-Toggle: runder Button links mittig (UDim2 0,10 / 0.5,-25); Logo PNG zentriert
+--    ✓ MainFrame.Visible = not MainFrame.Visible; Blur folgt Sichtbarkeit; GuiVisible im Autosave
 --  FIXES v20.3:
 --    ✓ Settings + AutoSave pro LocalPlayer (…/Spielername_settings.json, …_autosave.json)
 --    ✓ Früh-Load AutoFarm liest dieselbe account-spezifische Datei (kein Überschreiben zwischen Accounts)
@@ -33,7 +36,7 @@ local Haze = {
     UI   = { Fr={}, Lbl={}, Btn={}, Inp={} },
     Svc  = {},
     Tabs = {}, TBtns = {},
-    Config = { WebhookURL="", UISize="PC", ToggleKey="F4", AutoRetry=false, SavedGoals={}, AutoFarm=false },
+    Config = { WebhookURL="", UISize="PC", ToggleKey="F4", AutoRetry=false, SavedGoals={}, AutoFarm=false, GuiVisible=true },
     S = {
         Goals={}, GoalsNotified={},
         SessStart=os.time(), Running=true, RoundWallStart=nil,
@@ -169,6 +172,7 @@ end
 
 -- ── Save / Load ──────────────────────────────────────────────
 local function SaveConfig()
+    H.Config.GuiVisible = S.GuiVisible
     H.Config.SavedGoals={}
     for _,g in ipairs(S.Goals) do table.insert(H.Config.SavedGoals,{item=g.item,amount=g.amount}) end
     if writefile then pcall(function() writefile(GetAutoSaveFilePath(), Svc.Http:JSONEncode(H.Config)) end) end
@@ -184,6 +188,7 @@ local function LoadConfig()
     if data.ToggleKey~=nil  then C.ToggleKey=data.ToggleKey   end
     if data.AutoRetry~=nil  then C.AutoRetry=data.AutoRetry   end
     if data.AutoFarm~=nil   then C.AutoFarm=data.AutoFarm     end
+    if data.GuiVisible~=nil then S.GuiVisible=data.GuiVisible==true; C.GuiVisible=S.GuiVisible end
     if data.SavedGoals and type(data.SavedGoals)=="table" then
         for _,g in ipairs(data.SavedGoals) do
             if g.item and tonumber(g.amount) then
@@ -705,7 +710,7 @@ end
 --  SCREEN GUI  – AnchorPoint(0.5,0.5) → zentriert
 -- ╚══════════════════════════════════════════════════════════╝
 local ScreenGui=Instance.new("ScreenGui")
-ScreenGui.Name="HazeHUB_v203"; ScreenGui.ResetOnSpawn=false
+ScreenGui.Name="HazeHUB_v204"; ScreenGui.ResetOnSpawn=false
 ScreenGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
 ScreenGui.DisplayOrder=999; ScreenGui.IgnoreGuiInset=true
 ScreenGui.Parent=guiParent
@@ -720,24 +725,25 @@ ScreenGui.AncestryChanged:Connect(function()
 end)
 
 H.UI.Fr.Main=Instance.new("Frame",ScreenGui)
-H.UI.Fr.Main.Name="Main"
-H.UI.Fr.Main.Size=UDim2.new(0,580,0,450)
-H.UI.Fr.Main.AnchorPoint=Vector2.new(0.5,0.5)
-H.UI.Fr.Main.Position=UDim2.new(0.5,0,0.5,0)
-H.UI.Fr.Main.BackgroundColor3=D.BG
-H.UI.Fr.Main.BackgroundTransparency=0.18
-H.UI.Fr.Main.BorderSizePixel=0
-Corner(H.UI.Fr.Main,12)
-Stroke(H.UI.Fr.Main,D.Border,1.5,0.45)
+H.UI.Fr.Main.Name="MainFrame"
+local MainFrame=H.UI.Fr.Main
+MainFrame.Size=UDim2.new(0,580,0,450)
+MainFrame.AnchorPoint=Vector2.new(0.5,0.5)
+MainFrame.Position=UDim2.new(0.5,0,0.5,0)
+MainFrame.BackgroundColor3=D.BG
+MainFrame.BackgroundTransparency=0.18
+MainFrame.BorderSizePixel=0
+Corner(MainFrame,12)
+Stroke(MainFrame,D.Border,1.5,0.45)
 
-local headerStrip=Instance.new("Frame",H.UI.Fr.Main)
+local headerStrip=Instance.new("Frame",MainFrame)
 headerStrip.Size=UDim2.new(1,0,0,22); headerStrip.Position=UDim2.new(0,0,0,0)
 headerStrip.BackgroundColor3=D.Sidebar; headerStrip.BackgroundTransparency=0.35
 headerStrip.BorderSizePixel=0; Corner(headerStrip,12)
-local headerBottom=Instance.new("Frame",H.UI.Fr.Main)
+local headerBottom=Instance.new("Frame",MainFrame)
 headerBottom.Size=UDim2.new(1,0,0,11); headerBottom.Position=UDim2.new(0,0,0,11)
 headerBottom.BackgroundColor3=D.Sidebar; headerBottom.BackgroundTransparency=0.35; headerBottom.BorderSizePixel=0
-local headerLine=Instance.new("Frame",H.UI.Fr.Main)
+local headerLine=Instance.new("Frame",MainFrame)
 headerLine.Size=UDim2.new(1,0,0,1); headerLine.Position=UDim2.new(0,0,0,22)
 headerLine.BackgroundColor3=D.Border; headerLine.BackgroundTransparency=0.45; headerLine.BorderSizePixel=0
 local headerLogoSlot=Instance.new("Frame",headerStrip)
@@ -753,11 +759,11 @@ headerTimerLbl.TextScaled=false; headerTimerLbl.RichText=true; headerTimerLbl.Te
 headerTimerLbl.TextXAlignment=Enum.TextXAlignment.Right; H.UI.Lbl.HeaderTimer=headerTimerLbl
 task.spawn(function() while S.Running do task.wait(1); pcall(function() H.UI.Lbl.HeaderTimer.Text="⏱  Session: "..formatTime(os.time()-S.SessStart) end) end end)
 
-local glow=Instance.new("Frame",H.UI.Fr.Main)
+local glow=Instance.new("Frame",MainFrame)
 glow.Size=UDim2.new(1,0,0.35,0); glow.BackgroundColor3=Color3.fromRGB(255,255,255); glow.BackgroundTransparency=0.965; glow.BorderSizePixel=0; Corner(glow,12)
 Instance.new("UIGradient",glow).Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(200,210,215)),ColorSequenceKeypoint.new(1,Color3.fromRGB(0,0,0))})
 
-H.UI.Fr.Sidebar=Instance.new("Frame",H.UI.Fr.Main)
+H.UI.Fr.Sidebar=Instance.new("Frame",MainFrame)
 H.UI.Fr.Sidebar.Name="Sidebar"; H.UI.Fr.Sidebar.BackgroundColor3=D.Sidebar
 H.UI.Fr.Sidebar.BackgroundTransparency=0.14; H.UI.Fr.Sidebar.BorderSizePixel=0; Corner(H.UI.Fr.Sidebar,10)
 local sStripe=Instance.new("Frame",H.UI.Fr.Sidebar)
@@ -770,7 +776,7 @@ local sl=BuildMoonLogo(lf,32,0,7); sl.AnchorPoint=Vector2.new(0.5,0); sl.Positio
 H.UI.Fr.TabHolder=Instance.new("Frame",H.UI.Fr.Sidebar)
 H.UI.Fr.TabHolder.Position=UDim2.new(0,0,0,52); H.UI.Fr.TabHolder.Size=UDim2.new(1,0,1,-56)
 H.UI.Fr.TabHolder.BackgroundTransparency=1; VList(H.UI.Fr.TabHolder,3); Pad(H.UI.Fr.TabHolder,3,5,3,5)
-H.UI.Fr.Content=Instance.new("Frame",H.UI.Fr.Main); H.UI.Fr.Content.Name="Content"; H.UI.Fr.Content.BackgroundTransparency=1
+H.UI.Fr.Content=Instance.new("Frame",MainFrame); H.UI.Fr.Content.Name="Content"; H.UI.Fr.Content.BackgroundTransparency=1
 
 -- ── Tab-System ────────────────────────────────────────────────
 local function SelectTab(name)
@@ -896,11 +902,11 @@ _G.HazeShared.TraitPageRoot = TraitRoot
 local function SetGUISize(mode)
     H.Config.UISize=mode; SaveConfig()
     if mode=="Mobile" then
-        H.UI.Fr.Main.Size=UDim2.new(0,370,0,340)
+        MainFrame.Size=UDim2.new(0,370,0,340)
         H.UI.Fr.Sidebar.Size=UDim2.new(0,92,1,0); H.UI.Fr.Sidebar.Position=UDim2.new(0,0,0,0)
         H.UI.Fr.Content.Position=UDim2.new(0,100,0,25); H.UI.Fr.Content.Size=UDim2.new(1,-108,1,-33)
     else
-        H.UI.Fr.Main.Size=UDim2.new(0,580,0,450)
+        MainFrame.Size=UDim2.new(0,580,0,450)
         H.UI.Fr.Sidebar.Size=UDim2.new(0,130,1,0); H.UI.Fr.Sidebar.Position=UDim2.new(0,0,0,0)
         H.UI.Fr.Content.Position=UDim2.new(0,138,0,25); H.UI.Fr.Content.Size=UDim2.new(1,-148,1,-33)
     end
@@ -1700,25 +1706,35 @@ NeonBtn(SettPage,"⏏  GUI vollständig entladen",D.Red,34).MouseButton1Click:Co
 end)
 end) -- end pcall Settings Tab
 
--- ── Mobile Button (rund, oben rechts, Mond-Logo) ──────────────
+-- ── Mobile Button (rund, links mittig, Haze-Logo PNG zentriert) ──────────────
 H.UI.Fr.MiniBtn=Instance.new("TextButton",ScreenGui)
-H.UI.Fr.MiniBtn.Name="MiniBtn"; H.UI.Fr.MiniBtn.Size=UDim2.new(0,52,0,52)
-H.UI.Fr.MiniBtn.AnchorPoint=Vector2.new(1,0); H.UI.Fr.MiniBtn.Position=UDim2.new(1,-14,0,14)
+H.UI.Fr.MiniBtn.Name="MiniBtn"; H.UI.Fr.MiniBtn.Size=UDim2.new(0,50,0,50)
+H.UI.Fr.MiniBtn.AnchorPoint=Vector2.new(0,0.5); H.UI.Fr.MiniBtn.Position=UDim2.new(0,10,0.5,-25)
 H.UI.Fr.MiniBtn.BackgroundColor3=D.BG; H.UI.Fr.MiniBtn.BackgroundTransparency=0.2
 H.UI.Fr.MiniBtn.Text=""; H.UI.Fr.MiniBtn.AutoButtonColor=false; H.UI.Fr.MiniBtn.BorderSizePixel=0; Corner(H.UI.Fr.MiniBtn,99)
 local MBRing=Instance.new("Frame",H.UI.Fr.MiniBtn); MBRing.Size=UDim2.new(1,10,1,10); MBRing.Position=UDim2.new(0.5,0,0.5,0); MBRing.AnchorPoint=Vector2.new(0.5,0.5)
 MBRing.BackgroundTransparency=1; MBRing.BorderSizePixel=0; MBRing.ZIndex=0; Corner(MBRing,99); Stroke(MBRing,D.Border,1.5,0.45)
-local mbLogo=BuildMoonLogo(H.UI.Fr.MiniBtn,30,0,0); mbLogo.AnchorPoint=Vector2.new(0.5,0.5); mbLogo.Position=UDim2.new(0.5,0,0.5,0); mbLogo.ZIndex=2
+local mbLogo=Instance.new("ImageLabel",H.UI.Fr.MiniBtn); mbLogo.Name="HubLogo"; mbLogo.BackgroundTransparency=1
+mbLogo.Size=UDim2.new(0.72,0,0.72,0); mbLogo.Position=UDim2.new(0.5,0,0.5,0); mbLogo.AnchorPoint=Vector2.new(0.5,0.5)
+mbLogo.Image=HAZE_ASSETS.LogoRbx; mbLogo.ScaleType=Enum.ScaleType.Fit; mbLogo.ZIndex=2
+local function SyncBlurToGui() pcall(function() if HazeHubBlur and HazeHubBlur.Parent then HazeHubBlur.Enabled=MainFrame.Visible end end) end
+local function ToggleHubGui()
+    MainFrame.Visible=not MainFrame.Visible
+    S.GuiVisible=MainFrame.Visible
+    H.Config.GuiVisible=S.GuiVisible
+    SyncBlurToGui()
+    SaveConfig()
+end
 H.UI.Fr.MiniBtn.MouseEnter:Connect(function() Tw(H.UI.Fr.MiniBtn,{BackgroundTransparency=0.08},TM); Stroke(MBRing,D.Accent,2,0.25) end)
 H.UI.Fr.MiniBtn.MouseLeave:Connect(function() Tw(H.UI.Fr.MiniBtn,{BackgroundTransparency=0.2},TM); Stroke(MBRing,D.Border,1.5,0.45) end)
-H.UI.Fr.MiniBtn.MouseButton1Down:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0,46,0,46)},TF) end)
-H.UI.Fr.MiniBtn.MouseButton1Up:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0,52,0,52)},TF) end)
-H.UI.Fr.MiniBtn.MouseButton1Click:Connect(function() S.GuiVisible=not S.GuiVisible; H.UI.Fr.Main.Visible=S.GuiVisible end)
-MakeDraggable(H.UI.Fr.MiniBtn,H.UI.Fr.MiniBtn); MakeDraggable(H.UI.Fr.Main,H.UI.Fr.Main)
+H.UI.Fr.MiniBtn.MouseButton1Down:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0,44,0,44)},TF) end)
+H.UI.Fr.MiniBtn.MouseButton1Up:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0,50,0,50)},TF) end)
+H.UI.Fr.MiniBtn.MouseButton1Click:Connect(ToggleHubGui)
+MakeDraggable(H.UI.Fr.Main,MainFrame)
 Svc.Input.InputBegan:Connect(function(inp,processed)
     if processed then return end; if S.KeyListening then return end
     if inp.UserInputType==Enum.UserInputType.Keyboard and inp.KeyCode.Name==H.Config.ToggleKey then
-        S.GuiVisible=not S.GuiVisible; H.UI.Fr.Main.Visible=S.GuiVisible
+        ToggleHubGui()
     end
 end)
 
@@ -1843,6 +1859,10 @@ if H.Config.AutoRetry==nil  then H.Config.AutoRetry  = false  end
 if not H.Config.WebhookURL  then H.Config.WebhookURL = ""     end
 if not H.Config.UISize      then H.Config.UISize     = "PC"   end
 if H.Config.AutoFarm==nil   then H.Config.AutoFarm   = false  end
+if H.Config.GuiVisible==nil then H.Config.GuiVisible = true   end
+S.GuiVisible=H.Config.GuiVisible==true
+MainFrame.Visible=S.GuiVisible
+pcall(function() if HazeHubBlur and HazeHubBlur.Parent then HazeHubBlur.Enabled=S.GuiVisible end end)
 if _earlyAutoFarm then H.Config.AutoFarm=true end
 if _G._SetKeyDisplay        then _G._SetKeyDisplay(H.Config.ToggleKey) end
 if _G._UpdateAutoRetryUI    then _G._UpdateAutoRetryUI() end
