@@ -1,5 +1,15 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB V20 – Hauptskript  v20.4
+--  HazeHUB V20 – Hauptskript  v20.5
+--  FIXES v20.5:
+--    ✓ Multi-Selection Stat-Reroll: Checkboxen für alle Ratings
+--      (C-, C, C+, B-, B, B+, A-, A, A+, S-, S, S+, SS, SSS, O-, O, O+)
+--    ✓ AutoStatRerollLoop stoppt bei übereinstimmendem Rating (Multi-Match)
+--    ✓ Stat-Reroll nutzt ...Collection[UnitName].Tag.Value als Security-Key
+--    ✓ Neues Modul: Team Manager (Teams-Tab)
+--      - Save/Load Loadouts (6 Slots) per LP.Name .. "_teams.json"
+--      - Equip / UnEquip Remotes + AutoUpgradeConfig-Remote
+--    ✓ Teams-Tab vollständig scrollbar (AutomaticCanvasSize)
+--    ✓ Alle Hazeluxe1-Referenzen → LP.Name
 --  FIXES v20.4:
 --    ✓ Mobile-Toggle: runder Button links mittig (UDim2 0,10 / 0.5,-25); Logo PNG zentriert
 --    ✓ MainFrame.Visible = not MainFrame.Visible; Blur folgt Sichtbarkeit; GuiVisible im Autosave
@@ -86,6 +96,7 @@ local Haze = {
         SHOP_URL      = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/Shops",
         CRAFT_URL     = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/craft",
         TRAIT_URL     = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/trait",
+        TEAMS_URL     = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/teams",
     },
 }
 
@@ -929,6 +940,7 @@ local TraitRoot, TraitSticky, TraitScroll = MakeTraitsTab("Traits", "✦")
 local TraitPage = TraitScroll
 local ShopPage  = MakeTab("Shops","▤")
 local CraftPage = MakeTab("Crafting","⚒")
+local TeamsPage = MakeTab("Teams","⚔")
 local SettPage  = MakeTab("Settings","⛭")
 
 -- Sofort setzen für Module
@@ -937,6 +949,7 @@ _G.HazeShared.CraftPage     = CraftPage
 _G.HazeShared.TraitPage     = TraitPage
 _G.HazeShared.TraitSticky   = TraitSticky
 _G.HazeShared.TraitPageRoot = TraitRoot
+_G.HazeShared.TeamsPage     = TeamsPage
 
 -- ── GUI-Resize ────────────────────────────────────────────────
 local function SetGUISize(mode)
@@ -1698,6 +1711,15 @@ do
     local craftWaitLbl=MkLbl(CraftPage,"⏳ Craft-Modul wird geladen...",11,D.Yellow)
     craftWaitLbl.Size=UDim2.new(1,0,0,20)
     _G._CraftWaitLbl=craftWaitLbl
+end
+
+-- ╔══════════════════════════════════════════════════════════╗
+--  TEAMS TAB – Placeholder (teams.lua lädt hier rein)
+-- ╚══════════════════════════════════════════════════════════╝
+do
+    local teamsWaitLbl=MkLbl(TeamsPage,"⏳ Team-Manager wird geladen...",11,D.Yellow)
+    teamsWaitLbl.Size=UDim2.new(1,0,0,20)
+    _G._TeamsWaitLbl=teamsWaitLbl
 end
 
 -- ╔══════════════════════════════════════════════════════════╗
