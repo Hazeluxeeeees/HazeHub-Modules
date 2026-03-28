@@ -797,6 +797,10 @@ MainFrame.BorderSizePixel=0
 Corner(MainFrame,12)
 Stroke(MainFrame,D.Border,1.5,0.45)
 
+local MainUIScale = Instance.new("UIScale", MainFrame)
+MainUIScale.Name = "MainUIScale"
+MainUIScale.Scale = 1
+
 local headerStrip=Instance.new("Frame",MainFrame)
 headerStrip.Size=UDim2.new(1,0,0,22); headerStrip.Position=UDim2.new(0,0,0,0)
 headerStrip.BackgroundColor3=D.Sidebar; headerStrip.BackgroundTransparency=0.35
@@ -913,19 +917,36 @@ local function MakeTraitsTab(name, icon)
     Stroke(B, D.Accent, 1, 1)
     B.MouseEnter:Connect(function() if S.ActiveTab ~= name then Tw(B, { BackgroundColor3 = D.CardHover }) end end)
     B.MouseLeave:Connect(function() if S.ActiveTab ~= name then Tw(B, { BackgroundColor3 = D.TabInactive }) end end)
-    local TraitRoot = Instance.new("Frame", H.UI.Fr.Content)
+    -- Ein äußeres ScrollingFrame: gesamter Trait-Tab (Sticky + Inhalt) vertikal, AutomaticCanvasSize Y
+    local TraitRoot = Instance.new("ScrollingFrame", H.UI.Fr.Content)
     TraitRoot.Name = name
     TraitRoot.Size = UDim2.new(1, 0, 1, 0)
     TraitRoot.Visible = false
     TraitRoot.BackgroundTransparency = 1
     TraitRoot.BorderSizePixel = 0
     TraitRoot.ClipsDescendants = true
-    local rootList = Instance.new("UIListLayout", TraitRoot)
+    TraitRoot.ScrollingDirection = Enum.ScrollingDirection.Y
+    TraitRoot.ScrollBarThickness = 0
+    TraitRoot.ScrollBarImageColor3 = D.CyanDim
+    TraitRoot.ScrollingEnabled = true
+    TraitRoot.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    TraitRoot.CanvasSize = UDim2.new(0, 0, 0, 0)
+    TraitRoot.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
+
+    local TraitContent = Instance.new("Frame", TraitRoot)
+    TraitContent.Name = "TraitContent"
+    TraitContent.Size = UDim2.new(1, 0, 0, 0)
+    TraitContent.AutomaticSize = Enum.AutomaticSize.Y
+    TraitContent.BackgroundTransparency = 1
+    TraitContent.BorderSizePixel = 0
+
+    local rootList = Instance.new("UIListLayout", TraitContent)
     rootList.FillDirection = Enum.FillDirection.Vertical
     rootList.SortOrder = Enum.SortOrder.LayoutOrder
     rootList.Padding = UDim.new(0, 6)
     rootList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    local TraitSticky = Instance.new("Frame", TraitRoot)
+
+    local TraitSticky = Instance.new("Frame", TraitContent)
     TraitSticky.Name = "TraitSticky"
     TraitSticky.Size = UDim2.new(1, 0, 0, 0)
     TraitSticky.AutomaticSize = Enum.AutomaticSize.Y
@@ -933,38 +954,21 @@ local function MakeTraitsTab(name, icon)
     TraitSticky.LayoutOrder = 1
     VList(TraitSticky, 6)
     Pad(TraitSticky, 4, 10, 4, 10)
-    local TraitScroll = Instance.new("ScrollingFrame", TraitRoot)
-    TraitScroll.Name = "TraitScroll"
-    TraitScroll.Size = UDim2.new(1, 0, 0, 200)
-    TraitScroll.BackgroundTransparency = 1
-    TraitScroll.BorderSizePixel = 0
-    TraitScroll.ScrollBarThickness = 0
-    TraitScroll.ScrollingEnabled = true
-    TraitScroll.ScrollBarImageColor3 = D.CyanDim
-    TraitScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    TraitScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    TraitScroll.ClipsDescendants = true
-    TraitScroll.ScrollingDirection = Enum.ScrollingDirection.Y
-    TraitScroll.LayoutOrder = 2
-    VList(TraitScroll, 8)
-    Pad(TraitScroll, 10, 10, 10, 10)
-    local function syncTraitScrollH()
-        local h = TraitRoot.AbsoluteSize.Y
-        local sh = TraitSticky.AbsoluteSize.Y
-        local gap = 12
-        if h > 40 and sh > 0 and h > sh + gap + 40 then
-            TraitScroll.Size = UDim2.new(1, 0, 0, h - sh - gap)
-        else
-            TraitScroll.Size = UDim2.new(1, 0, 0, math.max(140, h * 0.5))
-        end
-    end
-    TraitRoot:GetPropertyChangedSignal("AbsoluteSize"):Connect(syncTraitScrollH)
-    TraitSticky:GetPropertyChangedSignal("AbsoluteSize"):Connect(syncTraitScrollH)
-    task.defer(syncTraitScrollH)
+
+    local TraitPage = Instance.new("Frame", TraitContent)
+    TraitPage.Name = "TraitPage"
+    TraitPage.Size = UDim2.new(1, 0, 0, 0)
+    TraitPage.AutomaticSize = Enum.AutomaticSize.Y
+    TraitPage.BackgroundTransparency = 1
+    TraitPage.BorderSizePixel = 0
+    TraitPage.LayoutOrder = 2
+    VList(TraitPage, 8)
+    Pad(TraitPage, 10, 10, 10, 10)
+
     H.Tabs[name] = TraitRoot
     H.TBtns[name] = B
     B.MouseButton1Click:Connect(function() SelectTab(name) end)
-    return TraitRoot, TraitSticky, TraitScroll
+    return TraitRoot, TraitSticky, TraitPage
 end
 
 local GamePage  = MakeTab("Game","◈")
@@ -972,8 +976,7 @@ local MiscPage  = MakeTab("Misc","◇")
 local SessPage  = MakeTab("Session","◎")
 local InvPage   = MakeTab("Inventory","▣")
 local QuestPage = MakeTab("Quests","≡")
-local TraitRoot, TraitSticky, TraitScroll = MakeTraitsTab("Traits", "✦")
-local TraitPage = TraitScroll
+local TraitRoot, TraitSticky, TraitPage = MakeTraitsTab("Traits", "✦")
 local ShopPage  = MakeTab("Shops","▤")
 local CraftPage = MakeTab("Crafting","⚒")
 local TeamsPage = MakeTab("Teams","⚔")
@@ -993,29 +996,50 @@ local function UpdateLayoutForMobile()
     H._isTouchClient = touch
     _G.HazeShared._isTouchClient = touch
     pcall(SyncTabScrollCanvas)
+    pcall(function()
+        local traitsTab = H.UI.Fr.Content:FindFirstChild("Traits")
+        if traitsTab and traitsTab:IsA("ScrollingFrame") then
+            traitsTab.ScrollBarThickness = touch and 6 or 0
+            traitsTab.ScrollingEnabled = true
+            traitsTab.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        end
+    end)
     if _G.HazeShared._ApplyTraitResponsiveLayout then
         task.defer(function() pcall(_G.HazeShared._ApplyTraitResponsiveLayout) end)
     end
 end
 
 -- ── GUI-Resize ────────────────────────────────────────────────
+-- Kompakt: 70%/80% der PC-Scale (kleiner als Desktop); UIScale nur bei Touch
+local PC_FRAME_SCALE_X, PC_FRAME_SCALE_Y = 0.40, 0.48
+local MOBILE_FRAME = UDim2.new(PC_FRAME_SCALE_X * 0.7, 0, PC_FRAME_SCALE_Y * 0.8, 0)
+local TOUCH_MAIN_UI_SCALE = 0.85
+
 local function SetGUISize(mode)
     H.Config.UISize=mode; SaveConfig()
     local ma = MainFrame:FindFirstChild("MainAspect")
+    local us = MainFrame:FindFirstChildOfClass("UIScale")
+    if not us then
+        us = Instance.new("UIScale", MainFrame)
+        us.Name = "MainUIScale"
+    end
+    local touch = Svc.Input.TouchEnabled
+    local useCompact = (mode == "Mobile" or touch)
     H.UI.Fr.Sidebar.Position=UDim2.new(0,0,0,0)
-    if mode=="Mobile" then
-        MainFrame.Size=UDim2.fromScale(0.54, 0.60)
-        if ma then ma.AspectRatio = 0.95 end
+    if useCompact then
+        MainFrame.Size = MOBILE_FRAME
+        if ma then ma.AspectRatio = (PC_FRAME_SCALE_X * 0.7) / (PC_FRAME_SCALE_Y * 0.8) end
         H.UI.Fr.Sidebar.Size=UDim2.new(0.28, 0, 1, 0)
         H.UI.Fr.Content.Position=UDim2.new(0.28, 4, 0, 25)
         H.UI.Fr.Content.Size=UDim2.new(0.72, -6, 1, -33)
     else
-        MainFrame.Size=UDim2.fromScale(0.40, 0.48)
+        MainFrame.Size=UDim2.fromScale(PC_FRAME_SCALE_X, PC_FRAME_SCALE_Y)
         if ma then ma.AspectRatio = 580 / 450 end
         H.UI.Fr.Sidebar.Size=UDim2.new(0.22, 0, 1, 0)
         H.UI.Fr.Content.Position=UDim2.new(0.22, 6, 0, 25)
         H.UI.Fr.Content.Size=UDim2.new(0.78, -8, 1, -33)
     end
+    us.Scale = touch and TOUCH_MAIN_UI_SCALE or 1
     UpdateLayoutForMobile()
 end
 
@@ -1745,7 +1769,7 @@ end) -- end pcall Quests Tab
 --  TRAITS TAB  – Placeholder (trait.lua lädt hier rein)
 -- ╚══════════════════════════════════════════════════════════╝
 do
-    local traitWaitLbl=MkLbl(TraitScroll,"⏳ Trait-Modul wird geladen...",11,D.Yellow)
+    local traitWaitLbl=MkLbl(TraitPage,"⏳ Trait-Modul wird geladen...",11,D.Yellow)
     traitWaitLbl.Size=UDim2.new(1,0,0,20)
     _G._TraitWaitLbl=traitWaitLbl
 end
