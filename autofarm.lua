@@ -836,7 +836,7 @@ local function ScanAllRewards(onProgress)
         local col = ok and D.Green or D.Orange
         AF.UI.Lbl.ScanProgress.Text=msg; AF.UI.Lbl.ScanProgress.TextColor3=col
         Tw(AF.UI.Fr.ScanBarFill, { Size=UDim2.new(ok and 1 or 0,0,1,0), BackgroundColor3=col }, TM)
-        AF.UI.Lbl.DBStatus.Text=msg; AF.UI.Lbl.DBStatus.TextColor3=col
+        pcall(function() AF.UI.Lbl.DBStatus.Text=msg; AF.UI.Lbl.DBStatus.TextColor3=col end)
         if AF.UI.Btn.ForceRescan then AF.UI.Btn.ForceRescan.Text="DATENBANK NEU SCANNEN"; AF.UI.Btn.ForceRescan.TextColor3=Color3.new(1,1,1) end
         if AF.UI.Btn.UpdateDB   then AF.UI.Btn.UpdateDB.Text="Update Database";           AF.UI.Btn.UpdateDB.TextColor3=D.Accent or D.Cyan             end
     end)
@@ -1087,8 +1087,6 @@ local function RunScanTask(forceDelete, thenStartFarm)
     task.spawn(function()
         if forceDelete then ClearDB() end
         pcall(function()
-            AF.UI.Fr.ScanBar.Visible=true; AF.UI.Fr.ScanBarFill.Size=UDim2.new(0,0,1,0)
-            AF.UI.Fr.ScanBarFill.BackgroundColor3=D.Purple
             AF.UI.Lbl.ScanProgress.Text="Deep-Scan startet..."; AF.UI.Lbl.ScanProgress.TextColor3=D.Yellow
             if AF.UI.Btn.ForceRescan then AF.UI.Btn.ForceRescan.Text="Scannt..."; AF.UI.Btn.ForceRescan.TextColor3=D.Yellow end
         end)
@@ -1211,45 +1209,7 @@ task.spawn(function()
     end) end
 end)
 
--- DB-KARTE
-local dbCard=Card(Container); Pad(dbCard,10,10,10,10); VList(dbCard,7)
-SecLbl(dbCard,"REWARD-DATENBANK")
-AF.UI.Lbl.DBStatus=MkLbl(dbCard,"Keine DB geladen.",11,D.TextLow); AF.UI.Lbl.DBStatus.Size=UDim2.new(1,0,0,18)
-local spLbl=Instance.new("TextLabel",dbCard); spLbl.Size=UDim2.new(1,0,0,16); spLbl.BackgroundTransparency=1
-spLbl.Text=""; spLbl.TextColor3=D.Yellow; spLbl.TextSize=10; spLbl.Font=Enum.Font.Gotham
-spLbl.TextXAlignment=Enum.TextXAlignment.Left; spLbl.TextTruncate=Enum.TextTruncate.AtEnd; AF.UI.Lbl.ScanProgress=spLbl
-local barBg=Instance.new("Frame",dbCard); barBg.Size=UDim2.new(1,0,0,7); barBg.BackgroundColor3=D.Input; barBg.BackgroundTransparency=D.GlassPane or 0.18; barBg.BorderSizePixel=0; barBg.Visible=false; Corner(barBg,3); AF.UI.Fr.ScanBar=barBg
-local barFill=Instance.new("Frame",barBg); barFill.Size=UDim2.new(0,0,1,0); barFill.BackgroundColor3=D.Purple; barFill.BorderSizePixel=0; Corner(barFill,3); AF.UI.Fr.ScanBarFill=barFill
-
--- DB LADEN
-local loadDbBtn=Instance.new("TextButton",dbCard); loadDbBtn.Size=UDim2.new(1,0,0,28); loadDbBtn.BackgroundColor3=D.CardHover; loadDbBtn.BackgroundTransparency=D.GlassPane or 0.18; loadDbBtn.Text="DB laden"; loadDbBtn.TextColor3=D.CyanDim; loadDbBtn.TextSize=11; loadDbBtn.Font=Enum.Font.GothamBold; loadDbBtn.AutoButtonColor=false; loadDbBtn.BorderSizePixel=0; Corner(loadDbBtn,8); Stroke(loadDbBtn,D.CyanDim,1,0.3)
-loadDbBtn.MouseEnter:Connect(function() Tw(loadDbBtn,{BackgroundColor3=D.TabActive}) end)
-loadDbBtn.MouseLeave:Connect(function() Tw(loadDbBtn,{BackgroundColor3=D.CardHover}) end)
-loadDbBtn.MouseButton1Click:Connect(function()
-    if LoadDB() or BuildDBFromModuleData() then
-        local c=DBCount(); AF.UI.Lbl.DBStatus.Text=string.format("✅ DB: %d Chapters",c); AF.UI.Lbl.DBStatus.TextColor3=D.Green
-        _G.HazeHUB_Database = AF.RewardDatabase
-        NotifyDBReady(c,string.format("Datenbank geladen! (%d Chapters)",c))
-    else AF.UI.Lbl.DBStatus.Text="Keine gültige DB."; AF.UI.Lbl.DBStatus.TextColor3=D.Orange end
-end)
-
--- UPDATE DATABASE
-local updateDbBtn=Instance.new("TextButton",dbCard); updateDbBtn.Size=UDim2.new(1,0,0,34); updateDbBtn.BackgroundColor3=D.CardHover; updateDbBtn.BackgroundTransparency=D.GlassPane or 0.18; updateDbBtn.Text="Update Database"; updateDbBtn.TextColor3=D.Accent or D.Cyan; updateDbBtn.TextSize=12; updateDbBtn.Font=Enum.Font.GothamBold; updateDbBtn.AutoButtonColor=false; updateDbBtn.BorderSizePixel=0; Corner(updateDbBtn,8); Stroke(updateDbBtn,D.Accent or D.Cyan,1.5,0.2); AF.UI.Btn.UpdateDB=updateDbBtn
-updateDbBtn.MouseEnter:Connect(function() Tw(updateDbBtn,{BackgroundColor3=D.TabActive}) end)
-updateDbBtn.MouseLeave:Connect(function() Tw(updateDbBtn,{BackgroundColor3=D.CardHover}) end)
-updateDbBtn.MouseButton1Click:Connect(function()
-    if not CheckIsLobby() then SetStatus("Update DB: Nur in Lobby!",D.Orange); Tw(updateDbBtn,{BackgroundColor3=D.RedDark}); task.wait(0.5); Tw(updateDbBtn,{BackgroundColor3=D.CardHover}); return end
-    if AF.Scanning then SetStatus("Scan läuft!",D.Yellow); return end
-    updateDbBtn.Text="Scannt..."; updateDbBtn.TextColor3=D.Yellow; RunScanTask(true,false)
-end)
-
--- FORCE RESCAN
-local forceBtn=Instance.new("TextButton",dbCard); forceBtn.Size=UDim2.new(1,0,0,40); forceBtn.BackgroundColor3=Color3.fromRGB(68,10,108); forceBtn.Text="DATENBANK NEU SCANNEN"; forceBtn.TextColor3=Color3.new(1,1,1); forceBtn.TextSize=13; forceBtn.Font=Enum.Font.GothamBold; forceBtn.AutoButtonColor=false; forceBtn.BorderSizePixel=0; Corner(forceBtn,9); Stroke(forceBtn,Color3.fromRGB(180,80,255),2,0); AF.UI.Btn.ForceRescan=forceBtn
-forceBtn.MouseEnter:Connect(function()   Tw(forceBtn,{BackgroundColor3=Color3.fromRGB(110,22,170)}) end)
-forceBtn.MouseLeave:Connect(function()   Tw(forceBtn,{BackgroundColor3=Color3.fromRGB(68,10,108)})  end)
-forceBtn.MouseButton1Down:Connect(function() Tw(forceBtn,{BackgroundColor3=Color3.fromRGB(40,5,72)}) end)
-forceBtn.MouseButton1Up:Connect(function()   Tw(forceBtn,{BackgroundColor3=Color3.fromRGB(110,22,170)}) end)
-forceBtn.MouseButton1Click:Connect(function() RunScanTask(true,false) end)
+-- DB-KARTE wurde entfernt - Status wird jetzt im Header angezeigt
 
 -- QUEUE-KARTE
 local qCard=Card(Container); Pad(qCard,10,10,10,10); VList(qCard,8); SecLbl(qCard,"AUTO-FARM QUEUE")
