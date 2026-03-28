@@ -313,8 +313,19 @@ local unitEmptyLbl = MkLbl(unitListFrame, "Keine Einheiten gefunden.", 11, D.Tex
 unitEmptyLbl.Size = UDim2.new(1, 0, 0, 26)
 TR.UI.Lbl.UnitEmpty = unitEmptyLbl
 
--- ── Aktueller Trait (Live) ─────────────────────────────────────
-local currentTraitCard = Card(TraitPage); Pad(currentTraitCard, 10, 12, 10, 12); VList(currentTraitCard, 8)
+-- ── Aktueller Trait & Ziel-Traits (2-spaltig) ───────────────────────
+local traitsRow = Instance.new("Frame", TraitPage)
+traitsRow.Size = UDim2.new(1, 0, 0, 0)
+traitsRow.AutomaticSize = Enum.AutomaticSize.Y
+traitsRow.BackgroundTransparency = 1
+HList(traitsRow, 8)
+
+-- Aktueller Trait (Live) - linke Spalte
+local currentTraitCard = Card(traitsRow)
+currentTraitCard.Size = UDim2.new(0.5, -4, 0, 0)
+currentTraitCard.AutomaticSize = Enum.AutomaticSize.Y
+Pad(currentTraitCard, 10, 12, 10, 12)
+VList(currentTraitCard, 8)
 SecLbl(currentTraitCard, "🔍 AKTUELLER TRAIT (Live)")
 
 TR.UI.Lbl.UnitName = MkLbl(currentTraitCard, "Keine Einheit gewählt", 16, D.TextHi, true)
@@ -791,9 +802,13 @@ task.spawn(function()
 end)
 
 -- ╔══════════════════════════════════════════════════════════╓
---  ZIEL-TRAITS (Multi-Select Dropdown)
+--  ZIEL-TRAITS (Multi-Select Dropdown) - rechte Spalte
 -- ╚══════════════════════════════════════════════════════════╝
-local targetCard = Card(TraitPage); Pad(targetCard, 10, 12, 10, 12); VList(targetCard, 8)
+local targetCard = Card(traitsRow)
+targetCard.Size = UDim2.new(0.5, -4, 0, 0)
+targetCard.AutomaticSize = Enum.AutomaticSize.Y
+Pad(targetCard, 10, 12, 10, 12)
+VList(targetCard, 8)
 SecLbl(targetCard, "🎯 ZIEL-TRAITS (Auto-Reroll stoppt hier)")
 
 local function BuildMultiSelectDropdown(parent, title, accent, targetSet)
@@ -917,9 +932,20 @@ BuildMultiSelectDropdown(targetCard, "Main-Trait", D.Gold,   TR.TargetTraits)
 BuildMultiSelectDropdown(targetCard, "Sub-Trait",  D.Purple, TR.TargetTraits)
 
 -- ╔══════════════════════════════════════════════════════════╗
---  REROLL-KARTE
+--  REROLL & STATS EINSTELLUNGEN (2-spaltig)
 -- ╚══════════════════════════════════════════════════════════╝
-local rerollCard = Card(TraitPage); Pad(rerollCard, 10, 12, 10, 12); VList(rerollCard, 8)
+local settingsRow = Instance.new("Frame", TraitPage)
+settingsRow.Size = UDim2.new(1, 0, 0, 0)
+settingsRow.AutomaticSize = Enum.AutomaticSize.Y
+settingsRow.BackgroundTransparency = 1
+HList(settingsRow, 8)
+
+-- REROLL-KARTE - linke Spalte
+local rerollCard = Card(settingsRow)
+rerollCard.Size = UDim2.new(0.5, -4, 0, 0)
+rerollCard.AutomaticSize = Enum.AutomaticSize.Y
+Pad(rerollCard, 10, 12, 10, 12)
+VList(rerollCard, 8)
 SecLbl(rerollCard, "🎲 REROLL EINSTELLUNGEN")
 
 local TR_SELECTED_CURRENCY = "Shards"
@@ -1083,7 +1109,7 @@ SetStatMode("All")
 --  ★ MULTI-SELECTION RATING-CHECKBOXEN (v2.4.0)
 --  17 Ratings als scrollbare Checkbox-Grid
 -- ╚══════════════════════════════════════════════════════════╝
-local ratingCard = Card(rerollCard); Pad(ratingCard, 8, 12, 8, 12); VList(ratingCard, 6)
+local ratingCard = Card(statsCard); Pad(ratingCard, 8, 12, 8, 12); VList(ratingCard, 6)
 SecLbl(ratingCard, "🎯 ZIEL-RATINGS (Multi-Select, Stop bei Treffer)")
 
 TR.UI.Lbl.SelectedRatingsInfo = MkLbl(ratingCard, "Kein Rating gewählt → kein Auto-Stop", 11, D.TextLow)
