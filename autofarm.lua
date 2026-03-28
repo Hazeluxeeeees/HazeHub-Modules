@@ -822,11 +822,19 @@ local function LobbyActionLoop(delaySeconds)
     if not useChapId then SetStatus("Kein Level für '"..q.item.."'!", D.Orange); RemoveFromQueue(q.item); pcall(UpdateQueueUI); return true end
     SetStatus(string.format("LOBBY: [%s] '%s' → %s", mode or "?", q.item, useChapId), D.Cyan)
     task.spawn(function()
-    -- ★ Nil-Check VOR jedem FireServer
-    if not useChapId or useChapId == "" then
-        warn("[HazeHub] LobbyAction: useChapId ist nil – überspringe.")
-        return
+-- ★ Nil-Check aller Variablen VOR dem Starten
+if not useChapId or useChapId == "" then
+    warn("[HazeHub] LobbyAction: useChapId nil – Schleife pausiert.")
+    task.wait(5)
+    continue  -- zurück zum nächsten Loop-Durchlauf
+end
+if mode == "Story" or mode == "Ranger" then
+    if not worldId or worldId == "" then
+        warn("[HazeHub] LobbyAction: worldId nil für Modus " .. mode)
+        task.wait(5)
+        continue
     end
+end
 
     local ok, err = pcall(function()
         if mode == "Story" then
