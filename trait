@@ -1,6 +1,9 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – trait.lua  v2.5.0
+--  HazeHUB – trait.lua  v2.5.1
 --
+--  v2.5.1:
+--    ✓ Mobile: quadratische Unit-Kacheln (AspectRatio + dynamische CellSize), kompakteres Padding / VList-Abstand
+--    ✓ Unit-/Rating-Scroll: CanvasSize via Layout, ElasticBehavior Never, Touch ScrollBar 3
 --  v2.5.0:
 --    ✓ ApplyTraitResponsiveLayout: Touch / HS._isTouchClient → schmale Spalten, Unit-Grid 1 Kachel/Zeile
 --    ✓ Rating-Grid + Stat-Mode: Mobile vs. PC (FillDirection / MaxCells)
@@ -17,7 +20,7 @@
 --    ✓ Session/Webhook: nach manuellem Roll → RecordSessionTrait (Main/Sub)
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "2.5.0"
+local VERSION = "2.5.1"
 
 -- ── Warten bis HazeShared bereit ──────────────────────────────
 local _w = 0
@@ -264,8 +267,9 @@ unitScroll.ScrollBarThickness   = 0
 unitScroll.ScrollBarImageColor3 = D.CyanDim
 unitScroll.ScrollingEnabled     = true
 unitScroll.ScrollingDirection   = Enum.ScrollingDirection.Y
+unitScroll.ElasticBehavior      = Enum.ElasticBehavior.Never
 unitScroll.CanvasSize           = UDim2.new(0, 0, 0, 0)
-unitScroll.AutomaticCanvasSize  = Enum.AutomaticSize.Y
+unitScroll.AutomaticCanvasSize  = Enum.AutomaticSize.None
 unitScroll.ClipsDescendants     = true
 
 local unitListFrame = Instance.new("Frame", unitScroll)
@@ -284,8 +288,25 @@ unitGrid.SortOrder             = Enum.SortOrder.LayoutOrder
 local function refreshUnitScrollCanvas()
     local y = unitGrid.AbsoluteContentSize.Y
     unitListFrame.Size = UDim2.new(1, 0, 0, y)
+    pcall(function()
+        unitScroll.CanvasSize = UDim2.new(0, 0, 0, y + 6)
+    end)
 end
 unitGrid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(refreshUnitScrollCanvas)
+
+local function syncMobileUnitTileCell()
+    local touch = (HS._isTouchClient == true) or UserInputService.TouchEnabled
+    if not touch then return end
+    local w = unitListFrame.AbsoluteSize.X
+    if w <= 0 then return end
+    local inset = 12
+    unitGrid.CellSize = UDim2.new(1, -inset, 0, math.max(96, math.floor(w - inset)))
+    refreshUnitScrollCanvas()
+end
+unitListFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+    task.defer(syncMobileUnitTileCell)
+end)
+
 TR.UI.Fr.UnitList = unitListFrame
 
 local unitEmptyLbl = MkLbl(unitListFrame, "Keine Einheiten gefunden.", 11, D.TextLow)
@@ -658,6 +679,12 @@ local function BuildUnitList(filter)
         row.Size          = UDim2.new(0, 150, 0, 180)
         row.BorderSizePixel = 0
         Corner(row, 8)
+        if (HS._isTouchClient == true) or UserInputService.TouchEnabled then
+            local ar = Instance.new("UIAspectRatioConstraint", row)
+            ar.Name = "UnitSquareAspect"
+            ar.AspectRatio = 1
+            ar.DominantAxis = Enum.DominantAxis.Width
+        end
         if isSelected then
             row.BackgroundColor3 = D.RowSelect or Color3.fromRGB(48, 50, 58)
             Stroke(row, D.Accent or D.Cyan, 1.5, 0)
@@ -1080,7 +1107,8 @@ end
 local ratingScroll = Instance.new("ScrollingFrame", ratingCard)
 ratingScroll.Size                = UDim2.new(1, 0, 0, 120)
 ratingScroll.CanvasSize          = UDim2.new(0, 0, 0, 0)
-ratingScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+ratingScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+ratingScroll.ElasticBehavior     = Enum.ElasticBehavior.Never
 ratingScroll.BackgroundTransparency = 1
 ratingScroll.BorderSizePixel     = 0
 ratingScroll.ScrollBarThickness  = 0
@@ -1099,6 +1127,15 @@ ratingGridLayout.CellPadding         = UDim2.new(0, 4, 0, 4)
 ratingGridLayout.FillDirection       = Enum.FillDirection.Horizontal
 ratingGridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 ratingGridLayout.SortOrder           = Enum.SortOrder.LayoutOrder
+
+local function refreshRatingScrollCanvas()
+    pcall(function()
+        local y = ratingGridLayout.AbsoluteContentSize.Y
+        ratingScroll.CanvasSize = UDim2.new(0, 0, 0, y + 8)
+    end)
+end
+ratingGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(refreshRatingScrollCanvas)
+task.defer(refreshRatingScrollCanvas)
 
 -- Farben pro Rating
 local RATING_COLORS = {
@@ -1588,16 +1625,33 @@ trListFrame.AutomaticSize         = Enum.AutomaticSize.Y
 trListFrame.BackgroundTransparency = 1
 VList(trListFrame, 3)
 
+local function traitSetFramePad(fr, top, right, bottom, left)
+    if not fr then return end
+    local p = fr:FindFirstChildOfClass("UIPadding")
+    if p then
+        p.PaddingTop = UDim.new(0, top)
+        p.PaddingRight = UDim.new(0, right)
+        p.PaddingBottom = UDim.new(0, bottom)
+        p.PaddingLeft = UDim.new(0, left)
+    end
+end
+local function traitSetVListGap(fr, gap)
+    if not fr then return end
+    local lay = fr:FindFirstChildOfClass("UIListLayout")
+    if lay then lay.Padding = UDim.new(0, gap) end
+end
+
 local function ApplyTraitResponsiveLayout()
     local touch = (HS._isTouchClient == true) or UserInputService.TouchEnabled
     if touch then
         unitGrid.FillDirection = Enum.FillDirection.Horizontal
         unitGrid.FillDirectionMaxCells = 1
-        unitGrid.CellSize = UDim2.new(1, -12, 0, 76)
-        unitGrid.CellPadding = UDim2.new(0, 6, 0, 8)
-        -- Einheiten-Liste: volle Breite, etwas höher; Scrollbar sichtbar für Touch
+        unitGrid.CellPadding = UDim2.new(0, 4, 0, 5)
+        syncMobileUnitTileCell()
+        -- Einheiten-Liste: volle Breite; Scrollbar dünn für haptisches Feedback
         unitScroll.Size = UDim2.new(1, 0, 0, 268)
-        unitScroll.ScrollBarThickness = 6
+        unitScroll.ScrollBarThickness = 3
+        unitScroll.ElasticBehavior = Enum.ElasticBehavior.Never
         unitCard.Size = UDim2.new(1, 0, 0, 0)
         unitCard.AutomaticSize = Enum.AutomaticSize.Y
         overviewCard.Size = UDim2.new(1, 0, 0, 0)
@@ -1605,10 +1659,26 @@ local function ApplyTraitResponsiveLayout()
         ratingGridLayout.FillDirection = Enum.FillDirection.Horizontal
         ratingGridLayout.FillDirectionMaxCells = 2
         ratingGridLayout.CellSize = UDim2.new(0.48, -4, 0, 30)
+        ratingScroll.ScrollBarThickness = 3
+        ratingScroll.ElasticBehavior = Enum.ElasticBehavior.Never
         if statModeLayout then
             statModeLayout.FillDirection = Enum.FillDirection.Vertical
             statModeLayout.CellSize = UDim2.new(1, -4, 0, 28)
+            statModeLayout.CellPadding = UDim2.new(0, 5, 0, 5)
         end
+        traitSetFramePad(unitCard, 6, 8, 6, 8)
+        traitSetFramePad(currentTraitCard, 6, 8, 6, 8)
+        traitSetFramePad(targetCard, 6, 8, 6, 8)
+        traitSetFramePad(rerollCard, 6, 8, 6, 8)
+        traitSetFramePad(overviewCard, 6, 8, 6, 8)
+        traitSetFramePad(ratingCard, 6, 8, 6, 8)
+        traitSetVListGap(unitCard, 4)
+        traitSetVListGap(currentTraitCard, 5)
+        traitSetVListGap(targetCard, 5)
+        traitSetVListGap(rerollCard, 5)
+        traitSetVListGap(overviewCard, 3)
+        traitSetVListGap(TraitPage, 5)
+        traitSetVListGap(ratingCard, 4)
     else
         unitGrid.FillDirection = Enum.FillDirection.Horizontal
         unitGrid.FillDirectionMaxCells = 0
@@ -1616,6 +1686,7 @@ local function ApplyTraitResponsiveLayout()
         unitGrid.CellPadding = UDim2.new(0, 6, 0, 8)
         unitScroll.Size = UDim2.new(1, 0, 0, 240)
         unitScroll.ScrollBarThickness = 0
+        unitScroll.ElasticBehavior = Enum.ElasticBehavior.Never
         unitCard.Size = UDim2.new(1, 0, 0, 0)
         unitCard.AutomaticSize = Enum.AutomaticSize.Y
         overviewCard.Size = UDim2.new(1, 0, 0, 0)
@@ -1623,13 +1694,30 @@ local function ApplyTraitResponsiveLayout()
         ratingGridLayout.FillDirection = Enum.FillDirection.Horizontal
         ratingGridLayout.FillDirectionMaxCells = 3
         ratingGridLayout.CellSize = UDim2.new(0.33, -4, 0, 28)
+        ratingScroll.ScrollBarThickness = 0
+        ratingScroll.ElasticBehavior = Enum.ElasticBehavior.Never
         if statModeLayout then
             statModeLayout.FillDirection = Enum.FillDirection.Horizontal
             statModeLayout.CellSize = UDim2.new(0.49, 0, 0, 26)
+            statModeLayout.CellPadding = UDim2.new(0, 6, 0, 6)
         end
+        traitSetFramePad(unitCard, 10, 12, 10, 12)
+        traitSetFramePad(currentTraitCard, 10, 12, 10, 12)
+        traitSetFramePad(targetCard, 10, 12, 10, 12)
+        traitSetFramePad(rerollCard, 10, 12, 10, 12)
+        traitSetFramePad(overviewCard, 10, 12, 10, 12)
+        traitSetFramePad(ratingCard, 8, 12, 8, 12)
+        traitSetVListGap(unitCard, 7)
+        traitSetVListGap(currentTraitCard, 8)
+        traitSetVListGap(targetCard, 8)
+        traitSetVListGap(rerollCard, 8)
+        traitSetVListGap(overviewCard, 6)
+        traitSetVListGap(TraitPage, 8)
+        traitSetVListGap(ratingCard, 6)
     end
     task.defer(function()
         pcall(refreshUnitScrollCanvas)
+        pcall(refreshRatingScrollCanvas)
     end)
 end
 _G.HazeShared._ApplyTraitResponsiveLayout = ApplyTraitResponsiveLayout
