@@ -22,50 +22,38 @@ local LOBBY_ID   = 111446873000464
 local MAIN_URL   = "https://raw.githubusercontent.com/Hazeluxeeeees/Tap-Sim/refs/heads/main/script"
 
 -- ============================================================
---  WARTEN BIS SHARED BEREIT (max 10s)
+--  WARTEN BIS HAZEHUB BEREIT (max 10s)
 -- ============================================================
 -- FIX: Sicherer Start & Pfad-Check
 local LP = game:GetService("Players").LocalPlayer
 local RS = game:GetService("ReplicatedStorage")
 
--- Ersetze den direkten Aufruf durch diesen sicheren Block:
-local function SafeStart()
-    local RS = game:GetService("ReplicatedStorage")
-    local remote = RS:WaitForChild("Remote", 3):WaitForChild("Server", 3):WaitForChild("PlayRoom", 3):WaitForChild("Event", 3)
-    
-    if remote then
-        local success, err = pcall(function()
-            -- Hier werden die Werte gesendet
-            remote:FireServer("Create", {["CreateChallengeRoom"] = true})
-        end)
-        if not success then warn("Start-Fehler abgefangen: " .. tostring(err)) end
-    else
-        warn("[HazeHUB] Fehler :1999 verhindert: PlayRoom Remote ist NIL!")
-    end
-end
+-- Warte bis das Hauptskript vollständig geladen ist
+repeat task.wait(1) until _G.HazeHUB_Ready == true
 
 -- ============================================================
---  SHARED ALIASE
+--  GLOBALE HAZEHUB REFERENZEN
 -- ============================================================
-local HS          = _G.HazeShared
+local HH = _G.HazeHUB
+local HS = _G.HazeShared
 local CFG         = HS.Config
 local ST          = HS.State
 local D           = HS.D
-local TF          = HS.TF;  local TM = HS.TM;  local Tw = HS.Tw
+local TF          = HS.TF;  local TM = HS.TM;  local Tw = HH.Tw
 local Svc         = HS.Svc
-local Card        = HS.Card;    local NeonBtn  = HS.NeonBtn
-local MkLbl       = HS.MkLbl;  local SecLbl   = HS.SecLbl
-local MkInput     = HS.MkInput; local VList    = HS.VList
-local HList       = HS.HList;   local Pad      = HS.Pad
-local Corner      = HS.Corner;  local Stroke   = HS.Stroke
+local Card        = HH.Card;    local NeonBtn  = HH.NeonBtn
+local MkLbl       = HH.MkLbl;  local SecLbl   = HH.SecLbl
+local MkInput     = HH.MkInput; local VList    = HH.VList
+local HList       = HH.HList;   local Pad      = HH.Pad
+local Corner      = HH.Corner;  local Stroke   = HH.Stroke
 local PR          = HS.PR
-local SaveConfig  = HS.SaveConfig
-local SaveSettings = HS.SaveSettings
+local SaveConfig  = HH.SaveConfig
+local SaveSettings = HH.SaveSettings
 local SendWebhook = HS.SendWebhook
 local Container   = HS.Container
 
--- ★ TeleportToLobby aus Main (falls schon gesetzt), sonst lokal
-local TeleportToLobby = HS.TeleportToLobby or function()
+-- ★ TeleportToLobby aus HazeHUB (falls schon gesetzt), sonst lokal
+local TeleportToLobby = HH.TeleportToLobby or function()
     pcall(function() game:GetService("TeleportService"):Teleport(LOBBY_ID) end)
 end
 
