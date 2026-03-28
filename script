@@ -856,17 +856,19 @@ lobbyText.TextSize=9; lobbyText.Font=Enum.Font.GothamBold; lobbyText.TextXAlignm
 -- Update lobby status function
 local function UpdateLobbyStatus()
     pcall(function()
-        local inLobby = game.PlaceId == K.LOBBY_ID
-        if inLobby then
-            lobbyText.Text = "LOBBY"
-            lobbyIcon.BackgroundColor3 = D.Green
-            lobbyText.TextColor3 = D.Green
-            Stroke(H.UI.Lbl.LobbyStatus,D.Green,1,0.3)
-        else
-            lobbyText.Text = "RUNDE"
-            lobbyIcon.BackgroundColor3 = D.Orange
-            lobbyText.TextColor3 = D.Orange
-            Stroke(H.UI.Lbl.LobbyStatus,D.Orange,1,0.3)
+        local inLobby = game.PlaceId and game.PlaceId == K.LOBBY_ID
+        if H.UI.Lbl.LobbyStatus and lobbyText and lobbyIcon then
+            if inLobby then
+                lobbyText.Text = "LOBBY"
+                lobbyIcon.BackgroundColor3 = D.Green
+                lobbyText.TextColor3 = D.Green
+                Stroke(H.UI.Lbl.LobbyStatus,D.Green,1,0.3)
+            else
+                lobbyText.Text = "RUNDE"
+                lobbyIcon.BackgroundColor3 = D.Orange
+                lobbyText.TextColor3 = D.Orange
+                Stroke(H.UI.Lbl.LobbyStatus,D.Orange,1,0.3)
+            end
         end
     end)
 end
@@ -2268,9 +2270,6 @@ _G.HazeShared.SetModuleLoaded=function(version)
             local hasDb = false
             if _G.HazeShared and type(_G.HazeShared._AutoFarm_RewardDB) == "table" then
                 hasDb = next(_G.HazeShared._AutoFarm_RewardDB) ~= nil
-            end
-            if _G.HazeHUB_Database and type(_G.HazeHUB_Database) == "table" then
-                hasDb = hasDb or (next(_G.HazeHUB_Database) ~= nil)
             end
             H.UI.Lbl.ModulStatus.Text = string.format("🟢  Autofarm-Modul v%s [Datenbank: %s]", _G.HazeShared.Version, hasDb and "GELADEN" or "FEHLT")
             H.UI.Lbl.ModulStatus.TextColor3 = hasDb and D.GreenBright or D.Orange
