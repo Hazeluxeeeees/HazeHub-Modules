@@ -552,58 +552,68 @@ end
 _G._RebuildTeamsList = RebuildTeamsList
 
 -- ── Team laden (Equip-Logik) ──────────────────────────────────
-loadTeamBtn.MouseButton1Click:Connect(function()
-    local idx = TM_State.SelIdx
-    if not idx or not TM_State.Teams[idx] then
-        loadFeedback.Text       = "⚠ Kein Team ausgewählt!"
-        loadFeedback.TextColor3 = D.Orange
-        return
-    end
-    local team = TM_State.Teams[idx]
-    loadFeedback.Text       = "⏳ UnEquip alle..."
-    loadFeedback.TextColor3 = D.Yellow
-    loadTeamBtn.Text        = "⏳ Lade..."
-    loadTeamBtn.TextColor3  = D.Yellow
-    SetTMStatus("⏳ Lade Team '" .. team.name .. "'...", D.Yellow)
-
-    task.spawn(function()
-    -- 1) Zuerst alles ausziehen (UnEquipAll nutzen!)
-    local unequipRemote = RS.Remote.Server.Units:FindFirstChild("UnEquipAll")
-    if unequipRemote then
-    unequipRemote:FireServer()
-    task.wait(0.5) -- Warten, damit der Server die Slots leert
-end
-
--- 2) Einheiten nacheinander anziehen (Equip mit Name statt Tag)
-    for slotIndex, savedTag in pairs(team.units) do
-    local unitName = GetUnitNameByTag(savedTag)
-    if unitName then
-        local unitObj = RS.Player_Data[LP.Name].Collection:FindFirstChild(unitName)
-        if unitObj then
-            RS.Remote.Server.Units.Equip:FireServer(unitObj)
-            task.wait(0.2) -- Kleiner Delay für Stabilität
+-- ── 1) Hilfsfunktion: Findet den echten Namen zum Tag (Oben in teams.txt einfügen) ──
+local function GetUnitNameByTag(targetTag)
+    local collection = game:GetService("ReplicatedStorage").Player_Data[game.Players.LocalPlayer.Name].Collection
+    for _, unitFolder in ipairs(collection:GetChildren()) do
+        local tagObj = unitFolder:FindFirstChild("Tag")
+        if tagObj and tagObj.Value == targetTag then
+            return unitFolder.Name -- Gibt z.B. "BlackBeard" zurück
         end
     end
-        task.wait(0.3)
+    return nil
+end
 
-        -- 3) AutoUpgradeConfig feuern (Slot 1 → 6)
+-- ── 2) Der korrigierte Lade-Ablauf (In MouseButton1Click einfügen) ──
+loadTeamBtn.MouseButton1Click:Connect(function()
+    task.spawn(function()
+        loadFeedback.Text = "⏳ Setze Team zurück..."
+        loadFeedback.TextColor3 = D.Yellow
+
+        -- SCHRITT 1: Alles ausziehen (UnEquipAll)
+        local unequipRemote = game:GetService("ReplicatedStorage").Remote.Server.Units:FindFirstChild("UnEquipAll")
+        if unequipRemote then
+            pcall(function() unequipRemote:FireServer() end)
+            task.wait(0.6) -- Wichtig: Dem Server Zeit geben
+        end
+
+        -- SCHRITT 2: Einheiten mit ECHTEM NAMEN anziehen
+        loadFeedback.Text = "⏳ Equippe Einheiten..."
+        for slotIndex = 1, 6 do
+            local savedTag = team.units and team.units[slotIndex]
+            if savedTag and savedTag ~= "" then
+                local realName = GetUnitNameByTag(savedTag)
+                if realName then
+                    local unitObj = game:GetService("ReplicatedStorage").Player_Data[game.Players.LocalPlayer.Name].Collection:FindFirstChild(realName)
+                    local equipRemote = game:GetService("ReplicatedStorage").Remote.Server.Units:FindFirstChild("Equip")
+                    
+                    if equipRemote and unitObj then
+                        pcall(function() equipRemote:FireServer(unitObj) end)
+                        task.wait(0.2)
+                    end
+                end
+            end
+        end
+
+        -- SCHRITT 3: AutoUpgradeConfig laden (Deine neue Funktion)
         loadFeedback.Text = "⏳ Setze AutoUpgrade-Konfiguration..."
         for i = 1, 6 do
             local auVal = team.autoUpgrade and team.autoUpgrade[i]
             if auVal ~= nil then
-                pcall(function() FireAutoUpgrade(i, auVal) end)
+                -- Sicherer Aufruf (verhindert Nil-Fehler in Zeile 1999)
+                pcall(function() 
+                    if FireAutoUpgrade then 
+                        FireAutoUpgrade(i, auVal) 
+                    end 
+                end)
                 task.wait(0.15)
             end
         end
 
-        loadFeedback.Text       = "✅ Team '" .. team.name .. "' geladen!"
+        -- Fertigstellung
+        loadFeedback.Text = "✅ Team '" .. team.name .. "' geladen!"
         loadFeedback.TextColor3 = D.GreenBright
-        loadTeamBtn.Text        = "⚡  Team laden (Equip)"
-        loadTeamBtn.TextColor3  = Color3.new(1, 1, 1)
-        SetTMStatus("✅ Team '" .. team.name .. "' aktiv.", D.Green)
-        task.delay(5, function()
-            pcall(function() loadFeedback.Text = "" end)
-        end)
+        task.delay(4, function() pcall(function() loadFeedback.Text = "" end) end)
     end)
 end)
 
@@ -628,3 +638,9 @@ pcall(function()
         _G.HazeShared.SetModuleLoaded(VERSION)
     end
 end)
+
+-- Am Ende der Datei (NACH allen Funktionen):
+if _G.HazeShared and _G.HazeShared.SetModuleLoaded then
+    _G.HazeShared.SetModuleLoaded(VERSION)
+end
+return TM -- (Oder TM für Teams)
