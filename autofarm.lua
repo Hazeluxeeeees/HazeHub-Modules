@@ -237,11 +237,44 @@ local function SyncInventoryWithQueue()
         local q = AF.Queue[i]
         if not q.done then
             local cur = GetLiveInvAmt(q.item)
-            if cur >= q.amount then table.remove(AF.Queue, i); changed = true end
+            if cur >= q.amount then
+    print(string.format("[HazeHub] ZIEL ERREICHT: '%s' %d/%d", q.item, cur, q.amount))
+    task.spawn(function() pcall(function() SendWebhook({}, q.item, cur) end) end)
+    RemoveFromQueue(q.item); pcall(UpdateQueueUI)
+    SetStatus(string.format("✅ '%s' erreicht!", q.item), D.GreenBright)
+    SaveState()
+
+    -- ★ Direkter Queue-Wechsel: nächstes Item ohne Lobby-Teleport
+    local nextQ = GetNextItem()
+    if nextQ and AF.Running then
+        -- Warten bis aktuelle Runde endet (Lobby-Erkennung)
+        SetStatus(string.format("⏳ Warte auf Rundenende → nächstes: '%s'", nextQ.item), D.Yellow)
+        local waitDeadline = os.time() + 600
+        while AF.Running and not CheckIsLobby() and os.time() < waitDeadline do
+            task.wait(3)
         end
+        -- Jetzt in Lobby oder Timeout: nächste Runde starten
+        if CheckIsLobby() and AF.Running then
+            task.wait(2)
+            return true   -- LobbyActionLoop übernimmt das nächste Item
+        end
+        -- Nicht in Lobby nach Timeout → klassischer Teleport-Fallback
+        DoTeleportToLobby(true)
+        local w = 0
+        while AF.Running and not CheckIsLobby() and w < 15 do
+            task.wait(1); w = w + 1
+        end
+        return true
+    else
+        -- Queue leer → Lobby-Teleport
+        SetStatus("Queue leer – Teleportiere zur Lobby.", D.Orange)
+        DoTeleportToLobby(false)
+        local w = 0
+        while AF.Running and not CheckIsLobby() and w < 15 do
+            task.wait(1); w = w + 1
+        end
+        return true
     end
-    if changed then SaveQueueFile() end
-    return changed
 end
 
 -- ============================================================
@@ -1202,6 +1235,260 @@ end)
 chalStopBtn.MouseButton1Click:Connect(function()
     AF_Challenge.Active = false; AF_Challenge.Running = false
     SetStatus("⏹ Challenge gestoppt.", D.TextMid)
+end)
+
+-- ============================================================
+--  ★ RAID FUNCTION (Esper & JJK)
+-- ============================================================
+local RAID_DEFS = {
+    {
+        id        = "EsperRaid",
+        label     = "🔮 Esper Raid",
+        world     = "EsperRaid",
+        chapters  = {
+            { id = "Esper_Raid_Chapter1", label = "Chapter 1", modes = {"Normal","Nightmare"} },
+        },
+        scanPath  = "ChapterLevels",
+        itemsPath = "PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList",
+        accent    = Color3.fromRGB(160, 80, 255),
+    },
+    {
+        id        = "JJKRaid",
+        label     = "🌀 JJK Raid",
+        world     = "JJKRaid",
+        chapters  = {
+            { id = "JJK_Raid_Chapter1", label = "Chapter 1", modes = {"Normal"} },
+            { id = "JJK_Raid_Chapter2", label = "Chapter 2", modes = {"Normal"} },
+        },
+        scanPath  = "ChapterLevels",
+        itemsPath = "PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList",
+        accent    = Color3.fromRGB(80, 140, 255),
+    },
+}
+
+local RaidState = {
+    Active   = false,
+    Running  = false,
+    SelRaid  = nil,   -- RAID_DEFS index
+    SelChap  = nil,   -- chapter index
+    SelMode  = "Normal",
+    BestChap = nil,   -- auto-detected
+    BestMode = nil,
+}
+
+-- Scanne Drop-Daten aus dem PlayRoom GUI
+local function ScanRaidDrops(raidId)
+    local results = {}
+    pcall(function()
+        local itemsList = LP.PlayerGui.PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList
+        for _, item in ipairs(itemsList:GetChildren()) do
+            if item:IsA("UIGridLayout") or item:IsA("UIListLayout") then continue end
+            local iname   = item.Name
+            local dropAmt = 0
+            local dropRate = 0
+            pcall(function()
+                local frame     = item:FindFirstChild("Frame")
+                local itemFrame = frame and frame:FindFirstChild("ItemFrame")
+                local info      = itemFrame and itemFrame:FindFirstChild("Info")
+                if info then
+                    local da = info:FindFirstChild("DropAmonut") -- note: typo in game
+                              or info:FindFirstChild("DropAmount")
+                    local dr = info:FindFirstChild("DropRate")
+                    if da then dropAmt  = tonumber(da.Text or da.Value or 0) or 0 end
+                    if dr then dropRate = tonumber(dr.Text or dr.Value or 0) or 0 end
+                end
+            end)
+            if iname ~= "" then
+                results[iname] = { dropAmount = dropAmt, dropRate = dropRate }
+            end
+        end
+    end)
+    return results
+end
+
+-- Wählt beste Chap+Mode-Kombi anhand DropRate × DropAmount
+local function FindBestRaidOption(raidDef)
+    local bestScore = -1
+    local bestChapIdx, bestMode = 1, "Normal"
+    -- Wir müssen für jeden Chap+Mode die Drops scannen
+    -- Da wir den GUI-Scan nur im laufenden Spiel nutzen können,
+    -- geben wir hier die erste verfügbare Option zurück und
+    -- lassen den Live-Scan im Loop entscheiden
+    for ci, chap in ipairs(raidDef.chapters) do
+        for _, mode in ipairs(chap.modes) do
+            -- Fallback-Score: Chapter 1 Normal zuerst
+            local score = (ci == 1 and mode == "Normal") and 1 or 0
+            if score > bestScore then
+                bestScore = score; bestChapIdx = ci; bestMode = mode
+            end
+        end
+    end
+    return bestChapIdx, bestMode
+end
+
+local function FireStartRaid(raidDef, chapDef, mode)
+    pcall(function()
+        Fire("Create")
+        task.wait(0.4)
+        Fire("Change-World", { World = raidDef.world })
+        task.wait(0.4)
+        Fire("Change-Chapter", { Chapter = chapDef.id })
+        task.wait(0.4)
+        if mode == "Nightmare" then
+            Fire("Change-Difficulty", { Difficulty = "Nightmare" })
+            task.wait(0.35)
+        end
+        Fire("Submit")
+        task.wait(0.5)
+        Fire("Start")
+    end)
+end
+
+local function StartRaidLoop()
+    if RaidState.Active then return end
+    local raidDef = RaidState.SelRaid and RAID_DEFS[RaidState.SelRaid]
+    if not raidDef then SetStatus("⚠ Kein Raid gewählt!", D.Orange); return end
+    local chapIdx, mode = RaidState.SelChap or 1, RaidState.SelMode or "Normal"
+    local chapDef = raidDef.chapters[chapIdx]
+    if not chapDef then SetStatus("⚠ Chapter nicht gefunden!", D.Orange); return end
+
+    RaidState.Active = true; RaidState.Running = true
+    SetStatus(string.format("⚔ Raid: %s %s (%s)", raidDef.label, chapDef.label, mode), D.Cyan)
+
+    task.spawn(function()
+        while RaidState.Running do
+            if CheckIsLobby() then
+                SetStatus(string.format("🚀 Starte %s %s", raidDef.label, chapDef.label), D.Yellow)
+                FireStartRaid(raidDef, chapDef, mode)
+                -- Warten bis Spiel startet
+                local ws = os.clock()
+                while CheckIsLobby() and os.clock() - ws < 30 and RaidState.Running do
+                    task.wait(1)
+                end
+            else
+                -- In Runde: Live-Drop-Scan für Optimierung
+                local drops = ScanRaidDrops(raidDef.id)
+                local dropInfo = ""
+                for iname, d in pairs(drops) do
+                    dropInfo = dropInfo .. string.format("%s: %.1f%% ×%d  ", iname, d.dropRate, d.dropAmount)
+                end
+                SetStatus(string.format("⚔ Raid läuft | %s", #dropInfo > 0 and dropInfo or "..."), D.Cyan)
+                -- Warten bis Lobby
+                local deadline = os.time() + 600
+                while not CheckIsLobby() and os.time() < deadline and RaidState.Running do
+                    task.wait(3)
+                end
+                task.wait(2)
+            end
+        end
+        RaidState.Active = false
+        SetStatus("⏹ Raid gestoppt.", D.TextMid)
+    end)
+end
+
+-- ── Raid UI ───────────────────────────────────────────────────
+local raidCard = Card(Container)
+Pad(raidCard, 10, 10, 10, 10); VList(raidCard, 8)
+SecLbl(raidCard, "⚔  RAID FARM")
+
+-- Raid-Auswahl
+local raidSelRow = Instance.new("Frame", raidCard)
+raidSelRow.Size = UDim2.new(1, 0, 0, 0)
+raidSelRow.AutomaticSize = Enum.AutomaticSize.Y
+raidSelRow.BackgroundTransparency = 1
+VList(raidSelRow, 4)
+
+for ri, rdef in ipairs(RAID_DEFS) do
+    local rRow = Instance.new("Frame", raidSelRow)
+    rRow.Size = UDim2.new(1, 0, 0, 0)
+    rRow.AutomaticSize = Enum.AutomaticSize.Y
+    rRow.BackgroundTransparency = 1
+    VList(rRow, 3)
+
+    local rHdr = Instance.new("TextButton", rRow)
+    rHdr.Size = UDim2.new(1, 0, 0, 28)
+    rHdr.BackgroundColor3 = D.CardHover; rHdr.BackgroundTransparency = 0.3
+    rHdr.Text = rdef.label; rHdr.TextColor3 = rdef.accent
+    rHdr.TextSize = 12; rHdr.Font = Enum.Font.GothamBold
+    rHdr.AutoButtonColor = false; rHdr.BorderSizePixel = 0
+    Corner(rHdr, 7); Stroke(rHdr, rdef.accent, 1, 0.4)
+
+    -- Chapter + Mode Buttons
+    local chapModeRow = Instance.new("Frame", rRow)
+    chapModeRow.Size = UDim2.new(1, 0, 0, 0)
+    chapModeRow.AutomaticSize = Enum.AutomaticSize.Y
+    chapModeRow.BackgroundTransparency = 1
+    chapModeRow.Visible = false
+    VList(chapModeRow, 3)
+
+    local capRi = ri
+    rHdr.MouseButton1Click:Connect(function()
+        RaidState.SelRaid = capRi
+        chapModeRow.Visible = not chapModeRow.Visible
+        Stroke(rHdr, rdef.accent, 1.5, chapModeRow.Visible and 0 or 0.4)
+    end)
+
+    for ci, chap in ipairs(rdef.chapters) do
+        local chapRow = Instance.new("Frame", chapModeRow)
+        chapRow.Size = UDim2.new(1, 0, 0, 26)
+        chapRow.BackgroundTransparency = 1
+        HList(chapRow, 4)
+
+        local chapLbl = Instance.new("TextLabel", chapRow)
+        chapLbl.Size = UDim2.new(0.35, 0, 1, 0); chapLbl.BackgroundTransparency = 1
+        chapLbl.Text = chap.label; chapLbl.TextColor3 = D.TextMid
+        chapLbl.TextSize = 10; chapLbl.Font = Enum.Font.GothamSemibold
+        chapLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        for _, modeStr in ipairs(chap.modes) do
+            local mb = Instance.new("TextButton", chapRow)
+            mb.Size = UDim2.new(0, 70, 1, 0)
+            mb.BackgroundColor3 = D.CardHover; mb.BackgroundTransparency = 0.4
+            mb.Text = modeStr
+            mb.TextColor3 = modeStr == "Nightmare" and D.Red or D.Green
+            mb.TextSize = 10; mb.Font = Enum.Font.GothamBold
+            mb.AutoButtonColor = false; mb.BorderSizePixel = 0
+            Corner(mb, 6); Stroke(mb, modeStr == "Nightmare" and D.Red or D.Green, 1, 0.4)
+            local capCi, capMode, capR = ci, modeStr, ri
+            mb.MouseButton1Click:Connect(function()
+                RaidState.SelRaid = capR
+                RaidState.SelChap = capCi
+                RaidState.SelMode = capMode
+                -- Visuelles Feedback
+                mb.BackgroundColor3 = modeStr == "Nightmare" and D.RedDark or D.GreenDark
+                local s = mb:FindFirstChildOfClass("UIStroke"); if s then s.Transparency = 0 end
+                SetStatus(string.format("✔ Gewählt: %s %s (%s)", rdef.label, chap.label, modeStr), D.Cyan)
+            end)
+        end
+    end
+end
+
+local raidCtrlRow = Instance.new("Frame", raidCard)
+raidCtrlRow.Size = UDim2.new(1, 0, 0, 32); raidCtrlRow.BackgroundTransparency = 1
+HList(raidCtrlRow, 8)
+
+local raidStartBtn = Instance.new("TextButton", raidCtrlRow)
+raidStartBtn.Size = UDim2.new(0.58, 0, 0, 32)
+raidStartBtn.BackgroundColor3 = D.Green; raidStartBtn.Text = "▶ Start Raid"
+raidStartBtn.TextColor3 = Color3.new(1,1,1); raidStartBtn.TextSize = 11
+raidStartBtn.Font = Enum.Font.GothamBold; raidStartBtn.AutoButtonColor = false
+raidStartBtn.BorderSizePixel = 0; Corner(raidStartBtn, 8); Stroke(raidStartBtn, D.Green, 1, 0.2)
+
+local raidStopBtn = Instance.new("TextButton", raidCtrlRow)
+raidStopBtn.Size = UDim2.new(0.38, 0, 0, 32)
+raidStopBtn.BackgroundColor3 = D.RedDark; raidStopBtn.Text = "■ Stop"
+raidStopBtn.TextColor3 = D.Red; raidStopBtn.TextSize = 11
+raidStopBtn.Font = Enum.Font.GothamBold; raidStopBtn.AutoButtonColor = false
+raidStopBtn.BorderSizePixel = 0; Corner(raidStopBtn, 8); Stroke(raidStopBtn, D.Red, 1, 0.4)
+
+raidStartBtn.MouseButton1Click:Connect(function()
+    if RaidState.Active then SetStatus("⚠ Raid läuft!", D.Yellow); return end
+    if not RaidState.SelRaid then SetStatus("⚠ Bitte Raid + Chapter + Modus wählen!", D.Orange); return end
+    StartRaidLoop()
+end)
+raidStopBtn.MouseButton1Click:Connect(function()
+    RaidState.Active = false; RaidState.Running = false
+    SetStatus("⏹ Raid gestoppt.", D.TextMid)
 end)
 
 -- ============================================================
