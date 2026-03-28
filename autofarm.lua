@@ -19,13 +19,27 @@ local MAIN_URL   = "https://raw.githubusercontent.com/Hazeluxeeeees/Tap-Sim/refs
 -- ============================================================
 --  WARTEN BIS SHARED BEREIT (max 10s)
 -- ============================================================
-local waited = 0
-while not (_G.HazeShared and _G.HazeShared.Container and _G.HazeShared.SetModuleLoaded) do
-    task.wait(0.5)
-    waited = waited + 0.5
-    if waited >= 10 then 
-        warn("[HazeHub] Autofarm konnte HazeShared nicht finden. Lade trotzdem...") 
-        break 
+-- FIX: Sicherer Start & Pfad-Check
+local LP = game:GetService("Players").LocalPlayer
+local RS = game:GetService("ReplicatedStorage")
+
+-- Funktion um Remotes sicher zu finden (Verhindert Nil-Fehler)
+local function GetRemote(path)
+    local current = RS
+    for _, name in ipairs(path) do
+        current = current:FindFirstChild(name)
+        if not current then return nil end
+    end
+    return current
+end
+
+-- Sicherer PlayRoom Remote
+local function SafePlayRoom(action, args)
+    local event = GetRemote({"Remote", "Server", "PlayRoom", "Event"})
+    if event then
+        pcall(function() event:FireServer(action, args) end)
+    else
+        warn("[HazeHUB] PlayRoom Event nicht gefunden!")
     end
 end
 
