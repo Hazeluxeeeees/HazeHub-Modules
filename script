@@ -979,14 +979,14 @@ local function MakeTraitsTab(name, icon)
 end
 
 local GamePage  = MakeTab("Game","◈")
-local MiscPage  = MakeTab("Misc","◇")
 local SessPage  = MakeTab("Session","◎")
-local InvPage   = MakeTab("Inventory","▣")
 local QuestPage = MakeTab("Quests","≡")
-local TraitRoot, TraitSticky, TraitPage = MakeTraitsTab("Traits", "✦")
 local ShopPage  = MakeTab("Shops","▤")
 local CraftPage = MakeTab("Crafting","⚒")
+local TraitRoot, TraitSticky, TraitPage = MakeTraitsTab("Traits", "✦")
 local TeamsPage = MakeTab("Teams","⚔")
+local InvPage   = MakeTab("Inventory","▣")
+local MiscPage  = MakeTab("Misc","◇")
 local SettPage  = MakeTab("Settings","⛭")
 
 -- Sofort setzen für Module
@@ -1154,35 +1154,8 @@ H.UI.Lbl.ScanStatus.Text="⏳  Lade Weltdaten..."; H.UI.Lbl.ScanStatus.TextColor
 H.UI.Lbl.ScanStatus.TextSize=10; H.UI.Lbl.ScanStatus.Font=Enum.Font.GothamSemibold
 H.UI.Lbl.ScanStatus.TextXAlignment=Enum.TextXAlignment.Left
 
-local arCard=Card(GamePage); Pad(arCard,10,12,10,12); VList(arCard,8); SecLbl(arCard,"AUTO-RETRY")
-local arRow=Instance.new("Frame",arCard); arRow.Size=UDim2.new(1,0,0,32); arRow.BackgroundTransparency=1; HList(arRow,10)
-H.UI.Lbl.ARStatus=Instance.new("TextLabel",arRow)
-H.UI.Lbl.ARStatus.Size=UDim2.new(0.55,0,1,0); H.UI.Lbl.ARStatus.BackgroundTransparency=1
-H.UI.Lbl.ARStatus.Text="Auto Retry: AUS"; H.UI.Lbl.ARStatus.TextColor3=D.TextMid
-H.UI.Lbl.ARStatus.TextSize=12; H.UI.Lbl.ARStatus.Font=Enum.Font.GothamBold
-H.UI.Lbl.ARStatus.TextXAlignment=Enum.TextXAlignment.Left
-H.UI.Btn.ARToggle=Instance.new("TextButton",arRow)
-H.UI.Btn.ARToggle.Size=UDim2.new(0.42,0,0,30); H.UI.Btn.ARToggle.BackgroundColor3=D.CardHover; H.UI.Btn.ARToggle.BackgroundTransparency=D.GlassPane
-H.UI.Btn.ARToggle.Text="⬜ AUS"; H.UI.Btn.ARToggle.TextColor3=D.TextLow
-H.UI.Btn.ARToggle.TextSize=12; H.UI.Btn.ARToggle.Font=Enum.Font.GothamBold
-H.UI.Btn.ARToggle.AutoButtonColor=false; H.UI.Btn.ARToggle.BorderSizePixel=0
-Corner(H.UI.Btn.ARToggle,8); Stroke(H.UI.Btn.ARToggle,D.TextLow,1,0.4)
-local function UpdateAutoRetryUI()
-    if H.Config.AutoRetry then
-        H.UI.Btn.ARToggle.Text="✅ AN"; H.UI.Btn.ARToggle.TextColor3=D.Green
-        H.UI.Lbl.ARStatus.Text="Auto Retry: AN"; H.UI.Lbl.ARStatus.TextColor3=D.Green
-        Stroke(H.UI.Btn.ARToggle,D.Green,1.5,0); Tw(H.UI.Btn.ARToggle,{BackgroundColor3=D.GreenDark,BackgroundTransparency=0.12})
-    else
-        H.UI.Btn.ARToggle.Text="⬜ AUS"; H.UI.Btn.ARToggle.TextColor3=D.TextLow
-        H.UI.Lbl.ARStatus.Text="Auto Retry: AUS"; H.UI.Lbl.ARStatus.TextColor3=D.TextMid
-        Stroke(H.UI.Btn.ARToggle,D.TextLow,1,0.4); Tw(H.UI.Btn.ARToggle,{BackgroundColor3=D.CardHover,BackgroundTransparency=D.GlassPane})
-    end
-end
-H.UI.Btn.ARToggle.MouseButton1Click:Connect(function() H.Config.AutoRetry=not H.Config.AutoRetry; SaveConfig(); UpdateAutoRetryUI() end)
-_G._UpdateAutoRetryUI=UpdateAutoRetryUI
-
--- Welt-Auswahl
-local wCard=Card(GamePage); Pad(wCard,10,10,10,10); VList(wCard,8); SecLbl(wCard,"WELT & KAPITEL AUSWAHL")
+-- Welt-Auswahl (inkl. Raid Farm)
+local wCard=Card(GamePage); Pad(wCard,10,10,10,10); VList(wCard,8); SecLbl(wCard,"WELT & KAPITEL AUSWAHL (inkl. Raid & Calamity)")
 H.UI.Lbl.WorldStatus=Instance.new("TextLabel",wCard)
 H.UI.Lbl.WorldStatus.Size=UDim2.new(1,0,0,16); H.UI.Lbl.WorldStatus.BackgroundTransparency=1
 H.UI.Lbl.WorldStatus.Text="Modus → Welt → Kapitel"; H.UI.Lbl.WorldStatus.TextColor3=D.TextLow
@@ -1190,7 +1163,7 @@ H.UI.Lbl.WorldStatus.TextSize=11; H.UI.Lbl.WorldStatus.Font=Enum.Font.GothamSemi
 H.UI.Lbl.WorldStatus.TextXAlignment=Enum.TextXAlignment.Left
 SecLbl(wCard,"SPIELMODUS")
 local modeRow=Instance.new("Frame",wCard); modeRow.Size=UDim2.new(1,0,0,28); modeRow.BackgroundTransparency=1; HList(modeRow,6)
-local MODI={{id="Story",label="📖 Story",color=D.Cyan},{id="Ranger",label="🏹 Ranger",color=D.Green},{id="Calamity",label="⚡ Calamity",color=D.Orange}}
+local MODI={{id="Story",label="📖 Story",color=D.Cyan},{id="Ranger",label="🏹 Ranger",color=D.Green},{id="Calamity",label="⚡ Calamity",color=D.Orange},{id="Raid",label="⚔ Raid",color=D.Purple}}
 H.UI.Btn.ModeBtns={}
 local function HighlightMode(activeId)
     for _,def in ipairs(MODI) do
@@ -1272,9 +1245,18 @@ RebuildWorldList=function()
         if cd and #cd.story>0 then S.SelWorld="Calamity"; RebuildChapBtns(cd.story); H.UI.Lbl.WorldStatus.Text="⚡ Calamity → Kapitel wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Orange
         else H.UI.Lbl.WorldStatus.Text="⏳ Calamity lädt..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow end; return
     end
+    if S.SelMode=="Raid" then
+        H.UI.Lbl.WorldStatus.Text="⚔ Raid Farm → Kapitel wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Purple
+        -- Raid nutzt Fallback-Kapitel; autofarm.lua befüllt ggf. WorldData["Raid"]
+        local rd=S.WorldData["Raid"]
+        if rd and (#rd.story>0 or #rd.ranger>0) then
+            S.SelWorld="Raid"; RebuildChapBtns(rd.story and #rd.story>0 and rd.story or rd.ranger)
+        else H.UI.Lbl.WorldStatus.Text="⏳ Raid-Daten laden..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow end; return
+    end
     local avail={}
     for _,wid in ipairs(S.WorldIds) do
         if wid:lower():find("calamity") then continue end
+        if wid:lower():find("raid") then continue end
         local wd=S.WorldData[wid] or {}; local list=(S.SelMode=="Story") and wd.story or wd.ranger
         if list and #list>0 then table.insert(avail,wid) end
     end
@@ -1284,11 +1266,15 @@ RebuildWorldList=function()
 end
 for _,def in ipairs(MODI) do
     local mb=Instance.new("TextButton",modeRow)
-    mb.Size=UDim2.new(0.32,0,0,26); mb.BackgroundColor3=D.CardHover; mb.Text=def.label
+    mb.Size=UDim2.new(0.24,0,0,26); mb.BackgroundColor3=D.CardHover; mb.Text=def.label
     mb.TextColor3=def.color; mb.TextSize=10; mb.Font=Enum.Font.GothamBold
     mb.AutoButtonColor=false; mb.BorderSizePixel=0; Corner(mb,7); Stroke(mb,D.Border,1,0.5)
     local capId=def.id
-    mb.MouseButton1Click:Connect(function() S.SelMode=capId; HighlightMode(capId); H.UI.Fr.DiffCard.Visible=(capId=="Story"); RebuildWorldList() end)
+    mb.MouseButton1Click:Connect(function()
+        S.SelMode=capId; HighlightMode(capId)
+        H.UI.Fr.DiffCard.Visible=(capId=="Story" or capId=="Raid")
+        RebuildWorldList()
+    end)
     H.UI.Btn.ModeBtns[def.id]=mb
 end
 HighlightMode("Story")
@@ -1310,17 +1296,19 @@ NeonBtn(wCard,"🔄  Welten neu scannen",D.CyanDim,26).MouseButton1Click:Connect
     end)
 end)
 
-local modulStatusCard=Card(GamePage,34); Pad(modulStatusCard,4,12,4,12)
+-- Modul-Status + DB-Confirm nebeneinander
+local dbStatusRow=Instance.new("Frame",GamePage); dbStatusRow.Size=UDim2.new(1,0,0,34); dbStatusRow.BackgroundTransparency=1; HList(dbStatusRow,6)
+local modulStatusCard=Instance.new("Frame",dbStatusRow); modulStatusCard.Size=UDim2.new(0.5,-3,1,0); modulStatusCard.BackgroundColor3=D.Card; modulStatusCard.BackgroundTransparency=D.GlassPane; modulStatusCard.BorderSizePixel=0; Corner(modulStatusCard,8); Stroke(modulStatusCard,D.Border,1,D.GlassStroke); Pad(modulStatusCard,4,8,4,8)
 H.UI.Lbl.ModulStatus=Instance.new("TextLabel",modulStatusCard)
 H.UI.Lbl.ModulStatus.Size=UDim2.new(1,0,1,0); H.UI.Lbl.ModulStatus.BackgroundTransparency=1
 H.UI.Lbl.ModulStatus.Text="🔴  Autofarm-Modul nicht geladen"; H.UI.Lbl.ModulStatus.TextColor3=D.Red
-H.UI.Lbl.ModulStatus.TextSize=11; H.UI.Lbl.ModulStatus.Font=Enum.Font.GothamBold; H.UI.Lbl.ModulStatus.TextXAlignment=Enum.TextXAlignment.Left
+H.UI.Lbl.ModulStatus.TextSize=10; H.UI.Lbl.ModulStatus.Font=Enum.Font.GothamBold; H.UI.Lbl.ModulStatus.TextXAlignment=Enum.TextXAlignment.Left
 
-local dbConfirmCard=Card(GamePage,34); Pad(dbConfirmCard,4,12,4,12); dbConfirmCard.Visible=false; Stroke(dbConfirmCard,D.GreenBright,1.5,0.1)
+local dbConfirmCard=Instance.new("Frame",dbStatusRow); dbConfirmCard.Size=UDim2.new(0.5,-3,1,0); dbConfirmCard.BackgroundColor3=D.Card; dbConfirmCard.BackgroundTransparency=D.GlassPane; dbConfirmCard.BorderSizePixel=0; Corner(dbConfirmCard,8); Stroke(dbConfirmCard,D.GreenBright,1.5,0.1); dbConfirmCard.Visible=false; Pad(dbConfirmCard,4,8,4,8)
 H.UI.Lbl.DBConfirm=Instance.new("TextLabel",dbConfirmCard)
 H.UI.Lbl.DBConfirm.Size=UDim2.new(1,0,1,0); H.UI.Lbl.DBConfirm.BackgroundTransparency=1
-H.UI.Lbl.DBConfirm.Text="✅  Datenbank erfolgreich aktualisiert!"; H.UI.Lbl.DBConfirm.TextColor3=D.GreenBright
-H.UI.Lbl.DBConfirm.TextSize=11; H.UI.Lbl.DBConfirm.Font=Enum.Font.GothamBold; H.UI.Lbl.DBConfirm.TextXAlignment=Enum.TextXAlignment.Left
+H.UI.Lbl.DBConfirm.Text="✅  Datenbank OK!"; H.UI.Lbl.DBConfirm.TextColor3=D.GreenBright
+H.UI.Lbl.DBConfirm.TextSize=10; H.UI.Lbl.DBConfirm.Font=Enum.Font.GothamBold; H.UI.Lbl.DBConfirm.TextXAlignment=Enum.TextXAlignment.Left
 
 local function ShowDBConfirm(msg)
     pcall(function()
@@ -1330,7 +1318,7 @@ local function ShowDBConfirm(msg)
     S.DBReady=true
     pcall(function()
         if H.UI.Lbl.ModulStatus then
-            H.UI.Lbl.ModulStatus.Text = "🟢  Autofarm-Modul aktiv [Datenbank: GELADEN]"
+            H.UI.Lbl.ModulStatus.Text = "🟢  Autofarm-Modul aktiv [DB: OK]"
             H.UI.Lbl.ModulStatus.TextColor3 = D.GreenBright
         end
     end)
@@ -1342,27 +1330,32 @@ H.UI.Fr.AutofarmInjection.Name="AutofarmInjection"; H.UI.Fr.AutofarmInjection.Si
 H.UI.Fr.AutofarmInjection.AutomaticSize=Enum.AutomaticSize.Y; H.UI.Fr.AutofarmInjection.BackgroundTransparency=1; H.UI.Fr.AutofarmInjection.BorderSizePixel=0
 _G.HazeShared.Container=H.UI.Fr.AutofarmInjection
 
--- DB-Werkzeuge
+-- DB-Werkzeuge (nebeneinander)
 do
     local dbToolCard=Card(GamePage); Pad(dbToolCard,10,10,10,10); VList(dbToolCard,8); SecLbl(dbToolCard,"🗄  DATENBANK-WERKZEUGE")
     H.UI.Lbl.DBToolStatus=MkLbl(dbToolCard,"Bereit.",10,D.TextLow); H.UI.Lbl.DBToolStatus.Size=UDim2.new(1,0,0,16)
-    MkLbl(dbToolCard,"Löscht RewardDB und startet Deep-Scan neu.",9,D.TextLow).Size=UDim2.new(1,0,0,14)
-    local rrBtn=NeonBtn(dbToolCard,"🔄  Reset & Rescan Rewards",D.Red,34)
+
+    local dbBtnRow=Instance.new("Frame",dbToolCard); dbBtnRow.Size=UDim2.new(1,0,0,34); dbBtnRow.BackgroundTransparency=1; HList(dbBtnRow,6)
+
+    local rrBtn=Instance.new("TextButton",dbBtnRow); rrBtn.Size=UDim2.new(0.5,-3,1,0); rrBtn.BackgroundColor3=D.CardHover; rrBtn.BackgroundTransparency=D.GlassPane
+    rrBtn.Text="🔄 Reset & Rescan"; rrBtn.TextColor3=D.Red; rrBtn.TextSize=11; rrBtn.Font=Enum.Font.GothamBold
+    rrBtn.AutoButtonColor=false; rrBtn.BorderSizePixel=0; Corner(rrBtn,8); Stroke(rrBtn,D.Red,1,0.4)
     rrBtn.MouseButton1Click:Connect(function()
         if rrBtn.Text:find("läuft") then return end
         pcall(function() if isfile and isfile("HazeHUB/HazeHUB_RewardDB.json") then delfile("HazeHUB/HazeHUB_RewardDB.json") end end)
         if _G.HazeShared and _G.HazeShared.TriggerResetRescan then
-            rrBtn.Text="⏳  Scan läuft..."; rrBtn.TextColor3=D.Yellow; H.UI.Lbl.DBToolStatus.Text="⏳ Scan gestartet..."; H.UI.Lbl.DBToolStatus.TextColor3=D.Yellow
+            rrBtn.Text="⏳ Scan läuft..."; rrBtn.TextColor3=D.Yellow; H.UI.Lbl.DBToolStatus.Text="⏳ Scan gestartet..."; H.UI.Lbl.DBToolStatus.TextColor3=D.Yellow
             task.spawn(function()
                 _G.HazeShared.TriggerResetRescan(function(msg) pcall(function() H.UI.Lbl.DBToolStatus.Text=msg; H.UI.Lbl.DBToolStatus.TextColor3=D.Green end) end)
-                pcall(function() rrBtn.Text="🔄  Reset & Rescan Rewards"; rrBtn.TextColor3=D.Red end)
+                pcall(function() rrBtn.Text="🔄 Reset & Rescan"; rrBtn.TextColor3=D.Red end)
             end)
         else H.UI.Lbl.DBToolStatus.Text="⚠ Autofarm nicht geladen!"; H.UI.Lbl.DBToolStatus.TextColor3=D.Orange end
     end)
-    H.UI.Lbl.WScanProgress=MkLbl(dbToolCard,"",10,D.Yellow); H.UI.Lbl.WScanProgress.Size=UDim2.new(1,0,0,16)
-    local wsBarBg=Instance.new("Frame",dbToolCard); wsBarBg.Size=UDim2.new(1,0,0,6); wsBarBg.BackgroundColor3=Color3.fromRGB(18,26,48); wsBarBg.BorderSizePixel=0; wsBarBg.Visible=false; Corner(wsBarBg,3)
-    H.UI.Fr.WScanBarFill=Instance.new("Frame",wsBarBg); H.UI.Fr.WScanBarFill.Size=UDim2.new(0,0,1,0); H.UI.Fr.WScanBarFill.BackgroundColor3=D.Cyan; H.UI.Fr.WScanBarFill.BorderSizePixel=0; Corner(H.UI.Fr.WScanBarFill,3)
-    NeonBtn(dbToolCard,"🗑  Clear World Cache",D.Orange,30).MouseButton1Click:Connect(function()
+
+    local cwBtn=Instance.new("TextButton",dbBtnRow); cwBtn.Size=UDim2.new(0.5,-3,1,0); cwBtn.BackgroundColor3=D.CardHover; cwBtn.BackgroundTransparency=D.GlassPane
+    cwBtn.Text="🗑 Clear World Cache"; cwBtn.TextColor3=D.Orange; cwBtn.TextSize=11; cwBtn.Font=Enum.Font.GothamBold
+    cwBtn.AutoButtonColor=false; cwBtn.BorderSizePixel=0; Corner(cwBtn,8); Stroke(cwBtn,D.Orange,1,0.4)
+    cwBtn.MouseButton1Click:Connect(function()
         pcall(function() if isfile and isfile(WORLD_CACHE_FILE) then delfile(WORLD_CACHE_FILE) end end)
         S.WorldData={}; S.WorldIds={}; S.ScanDone=false; S.ChapFolderRef=nil; S.SelWorld=nil; S.SelChap=nil
         pcall(function()
@@ -1375,6 +1368,10 @@ do
         end)
         ApplyFallback(); pcall(RebuildWorldList)
     end)
+
+    H.UI.Lbl.WScanProgress=MkLbl(dbToolCard,"",10,D.Yellow); H.UI.Lbl.WScanProgress.Size=UDim2.new(1,0,0,16)
+    local wsBarBg=Instance.new("Frame",dbToolCard); wsBarBg.Size=UDim2.new(1,0,0,6); wsBarBg.BackgroundColor3=Color3.fromRGB(18,26,48); wsBarBg.BorderSizePixel=0; wsBarBg.Visible=false; Corner(wsBarBg,3)
+    H.UI.Fr.WScanBarFill=Instance.new("Frame",wsBarBg); H.UI.Fr.WScanBarFill.Size=UDim2.new(0,0,1,0); H.UI.Fr.WScanBarFill.BackgroundColor3=D.Cyan; H.UI.Fr.WScanBarFill.BorderSizePixel=0; Corner(H.UI.Fr.WScanBarFill,3)
 end
 end) -- end pcall Game Tab
 
@@ -1383,12 +1380,80 @@ end) -- end pcall Game Tab
 -- ╚══════════════════════════════════════════════════════════╝
 pcall(function()
 MkLbl(MiscPage,"🔧  Misc",14,D.Cyan,true)
-local afkCard=Card(MiscPage,50); Pad(afkCard,0,14,0,14)
-local afkRow=Instance.new("Frame",afkCard); afkRow.Size=UDim2.new(1,0,1,0); afkRow.BackgroundTransparency=1
-local afkDot=Instance.new("Frame",afkRow); afkDot.Size=UDim2.new(0,10,0,10); afkDot.Position=UDim2.new(0,0,0.5,-5); afkDot.BackgroundColor3=D.Green; afkDot.BorderSizePixel=0; Corner(afkDot,99)
-local afkTxt=Instance.new("TextLabel",afkRow); afkTxt.Position=UDim2.new(0,18,0,0); afkTxt.Size=UDim2.new(1,-18,1,0); afkTxt.BackgroundTransparency=1; afkTxt.Text="Anti-AFK  —  Aktiv (alle 60s)"; afkTxt.TextColor3=D.Green; afkTxt.TextSize=13; afkTxt.Font=Enum.Font.GothamBold; afkTxt.TextXAlignment=Enum.TextXAlignment.Left
-task.spawn(function() while S.Running and ScreenGui.Parent do Tw(afkDot,{BackgroundTransparency=0.65},TM); task.wait(1.1); Tw(afkDot,{BackgroundTransparency=0},TM); task.wait(1.1) end end)
+
+-- Auto-Retry (hierher verschoben aus Game Tab)
+local arCard=Card(MiscPage); Pad(arCard,10,12,10,12); VList(arCard,8); SecLbl(arCard,"AUTO-RETRY")
+local arRow=Instance.new("Frame",arCard); arRow.Size=UDim2.new(1,0,0,32); arRow.BackgroundTransparency=1; HList(arRow,10)
+H.UI.Lbl.ARStatus=Instance.new("TextLabel",arRow)
+H.UI.Lbl.ARStatus.Size=UDim2.new(0.55,0,1,0); H.UI.Lbl.ARStatus.BackgroundTransparency=1
+H.UI.Lbl.ARStatus.Text="Auto Retry: AUS"; H.UI.Lbl.ARStatus.TextColor3=D.TextMid
+H.UI.Lbl.ARStatus.TextSize=12; H.UI.Lbl.ARStatus.Font=Enum.Font.GothamBold
+H.UI.Lbl.ARStatus.TextXAlignment=Enum.TextXAlignment.Left
+H.UI.Btn.ARToggle=Instance.new("TextButton",arRow)
+H.UI.Btn.ARToggle.Size=UDim2.new(0.42,0,0,30); H.UI.Btn.ARToggle.BackgroundColor3=D.CardHover; H.UI.Btn.ARToggle.BackgroundTransparency=D.GlassPane
+H.UI.Btn.ARToggle.Text="⬜ AUS"; H.UI.Btn.ARToggle.TextColor3=D.TextLow
+H.UI.Btn.ARToggle.TextSize=12; H.UI.Btn.ARToggle.Font=Enum.Font.GothamBold
+H.UI.Btn.ARToggle.AutoButtonColor=false; H.UI.Btn.ARToggle.BorderSizePixel=0
+Corner(H.UI.Btn.ARToggle,8); Stroke(H.UI.Btn.ARToggle,D.TextLow,1,0.4)
+local function UpdateAutoRetryUI()
+    if H.Config.AutoRetry then
+        H.UI.Btn.ARToggle.Text="✅ AN"; H.UI.Btn.ARToggle.TextColor3=D.Green
+        H.UI.Lbl.ARStatus.Text="Auto Retry: AN"; H.UI.Lbl.ARStatus.TextColor3=D.Green
+        Stroke(H.UI.Btn.ARToggle,D.Green,1.5,0); Tw(H.UI.Btn.ARToggle,{BackgroundColor3=D.GreenDark,BackgroundTransparency=0.12})
+    else
+        H.UI.Btn.ARToggle.Text="⬜ AUS"; H.UI.Btn.ARToggle.TextColor3=D.TextLow
+        H.UI.Lbl.ARStatus.Text="Auto Retry: AUS"; H.UI.Lbl.ARStatus.TextColor3=D.TextMid
+        Stroke(H.UI.Btn.ARToggle,D.TextLow,1,0.4); Tw(H.UI.Btn.ARToggle,{BackgroundColor3=D.CardHover,BackgroundTransparency=D.GlassPane})
+    end
+end
+H.UI.Btn.ARToggle.MouseButton1Click:Connect(function() H.Config.AutoRetry=not H.Config.AutoRetry; SaveConfig(); UpdateAutoRetryUI() end)
+_G._UpdateAutoRetryUI=UpdateAutoRetryUI
+
+-- Anti-AFK (neu implementiert: Mouse-Simulation + VirtualUser Kombination)
+local afkCard=Card(MiscPage); Pad(afkCard,10,12,10,12); VList(afkCard,8); SecLbl(afkCard,"ANTI-AFK")
+local afkTopRow=Instance.new("Frame",afkCard); afkTopRow.Size=UDim2.new(1,0,0,28); afkTopRow.BackgroundTransparency=1; HList(afkTopRow,10)
+local afkDot=Instance.new("Frame",afkTopRow); afkDot.Size=UDim2.new(0,10,0,10); afkDot.AnchorPoint=Vector2.new(0,0.5); afkDot.BackgroundColor3=D.Green; afkDot.BorderSizePixel=0; Corner(afkDot,99)
+local afkTxt=Instance.new("TextLabel",afkTopRow); afkTxt.Size=UDim2.new(1,-20,1,0); afkTxt.BackgroundTransparency=1
+afkTxt.Text="Anti-AFK  —  Aktiv"; afkTxt.TextColor3=D.Green; afkTxt.TextSize=13; afkTxt.Font=Enum.Font.GothamBold; afkTxt.TextXAlignment=Enum.TextXAlignment.Left
+local afkInfoLbl=MkLbl(afkCard,"Verhindert AFK-Kicks durch zyklische Eingaben (Kamera-Ping alle 55s).",10,D.TextLow)
+afkInfoLbl.Size=UDim2.new(1,0,0,28); afkInfoLbl.TextWrapped=true
+
+-- Puls-Animation für den grünen Dot
+task.spawn(function()
+    while S.Running and ScreenGui.Parent do
+        Tw(afkDot,{BackgroundTransparency=0.65},TM); task.wait(1.1)
+        Tw(afkDot,{BackgroundTransparency=0},TM); task.wait(1.1)
+    end
 end)
+
+-- Neuer Anti-AFK: Simuliert Mausbewegung + CameraHeartbeat (kein VirtualUser Spacebar-Spam)
+local _afkLastPing = 0
+task.spawn(function()
+    while S.Running do
+        task.wait(1)
+        local now = os.time()
+        if now - _afkLastPing >= 55 then
+            _afkLastPing = now
+            pcall(function()
+                -- Kamera minimal bewegen um AFK-Timer zurückzusetzen
+                local cam = workspace.CurrentCamera
+                if cam then
+                    local cf = cam.CFrame
+                    cam.CFrame = cf * CFrame.Angles(0, 0.0001, 0)
+                    task.wait(0.05)
+                    cam.CFrame = cf
+                end
+            end)
+            pcall(function()
+                -- Fallback: VirtualUser Ping ohne Spacebar
+                Svc.Vuser:CaptureController()
+                Svc.Vuser:ClickButton2(Vector2.new(0,0))
+            end)
+        end
+    end
+end)
+
+end) -- end pcall Misc Tab
 
 -- ╔══════════════════════════════════════════════════════════╗
 --  SESSION TAB
@@ -1556,8 +1621,12 @@ end
 pcall(function()
 MkLbl(InvPage,"🎒  Inventar",14,D.Cyan,true)
 
--- Player Stats
-local playerStatsCard=Card(InvPage); Pad(playerStatsCard,10,12,10,12); VList(playerStatsCard,8); SecLbl(playerStatsCard,"👤 SPIELER STATS")
+-- Spieler Stats + Shop Currency nebeneinander
+local statsAndCurrencyRow=Instance.new("Frame",InvPage); statsAndCurrencyRow.Size=UDim2.new(1,0,0,0); statsAndCurrencyRow.AutomaticSize=Enum.AutomaticSize.Y; statsAndCurrencyRow.BackgroundTransparency=1; HList(statsAndCurrencyRow,6)
+
+-- Player Stats (links)
+local playerStatsCard=Instance.new("Frame",statsAndCurrencyRow); playerStatsCard.Size=UDim2.new(0.5,-3,0,0); playerStatsCard.AutomaticSize=Enum.AutomaticSize.Y; playerStatsCard.BackgroundColor3=D.Card; playerStatsCard.BackgroundTransparency=D.GlassPane; playerStatsCard.BorderSizePixel=0; Corner(playerStatsCard,8); Stroke(playerStatsCard,D.Border,1,D.GlassStroke); Pad(playerStatsCard,10,10,10,10); VList(playerStatsCard,8)
+SecLbl(playerStatsCard,"👤 SPIELER STATS")
 local xpTextLbl=MkLbl(playerStatsCard,"⏳ Lädt XP...",11,D.Yellow); xpTextLbl.Size=UDim2.new(1,0,0,18); H.UI.Lbl.XPText=xpTextLbl
 local xpBarBg=Instance.new("Frame",playerStatsCard); xpBarBg.Size=UDim2.new(1,0,0,8); xpBarBg.BackgroundColor3=Color3.fromRGB(20,28,50); xpBarBg.BorderSizePixel=0; Corner(xpBarBg,4)
 local xpBarFill=Instance.new("Frame",xpBarBg); xpBarFill.Size=UDim2.new(0,0,1,0); xpBarFill.BackgroundColor3=D.Cyan; xpBarFill.BorderSizePixel=0; Corner(xpBarFill,4); Instance.new("UIGradient",xpBarFill).Color=ColorSequence.new({ColorSequenceKeypoint.new(0,D.Cyan),ColorSequenceKeypoint.new(1,D.Purple)}); H.UI.Fr.XPBarFill=xpBarFill
@@ -1572,8 +1641,7 @@ local UPGRADE_STATS={
 }
 H.UI.Lbl.UpgradeStats={}
 for _,sd in ipairs(UPGRADE_STATS) do
-    local sRow=Instance.new("Frame",playerStatsCard); sRow.Size=UDim2.new(1,0,0,52); sRow.BackgroundColor3=D.CardHover; sRow.BorderSizePixel=0; Corner(sRow,7); Stroke(sRow,sd.color,1,0.6)
-    local acBar=Instance.new("Frame",sRow); acBar.Size=UDim2.new(0,3,1,0); acBar.BackgroundColor3=sd.color; acBar.BorderSizePixel=0; Corner(acBar,2)
+    local sRow=Instance.new("Frame",playerStatsCard); sRow.Size=UDim2.new(1,0,0,52); sRow.BackgroundColor3=D.CardHover; sRow.BorderSizePixel=0; Corner(sRow,7); Stroke(sRow,sd.color,1,0.6)    local acBar=Instance.new("Frame",sRow); acBar.Size=UDim2.new(0,3,1,0); acBar.BackgroundColor3=sd.color; acBar.BorderSizePixel=0; Corner(acBar,2)
     local sNameLbl=Instance.new("TextLabel",sRow); sNameLbl.Position=UDim2.new(0,10,0,3); sNameLbl.Size=UDim2.new(0.55,-10,0,14); sNameLbl.BackgroundTransparency=1; sNameLbl.Text=sd.icon.." "..sd.label; sNameLbl.TextColor3=sd.color; sNameLbl.TextSize=11; sNameLbl.Font=Enum.Font.GothamBold; sNameLbl.TextXAlignment=Enum.TextXAlignment.Left
     local sLvlLbl=Instance.new("TextLabel",sRow); sLvlLbl.Position=UDim2.new(0,10,0,18); sLvlLbl.Size=UDim2.new(0.55,-10,0,13); sLvlLbl.BackgroundTransparency=1; sLvlLbl.Text="Lv. –"; sLvlLbl.TextColor3=D.TextMid; sLvlLbl.TextSize=10; sLvlLbl.Font=Enum.Font.GothamSemibold; sLvlLbl.TextXAlignment=Enum.TextXAlignment.Left
     local sGoldLbl=Instance.new("TextLabel",sRow); sGoldLbl.Position=UDim2.new(0,10,0,34); sGoldLbl.Size=UDim2.new(0.65,-10,0,13); sGoldLbl.BackgroundTransparency=1; sGoldLbl.Text="🪙 Gold bis Max: –"; sGoldLbl.TextColor3=D.TextLow; sGoldLbl.TextSize=9; sGoldLbl.Font=Enum.Font.Gotham; sGoldLbl.TextXAlignment=Enum.TextXAlignment.Left
@@ -1619,15 +1687,16 @@ local function RefreshPlayerStats()
 end
 NeonBtn(playerStatsCard,"🔄 Stats aktualisieren",D.CyanDim,28).MouseButton1Click:Connect(function() task.spawn(function() pcall(RefreshPlayerStats) end) end)
 
--- Währungen
-local currencyCard=Card(InvPage); Pad(currencyCard,10,12,10,12); VList(currencyCard,6); SecLbl(currencyCard,"💰 SHOP CURRENCY")
+-- Währungen (rechts neben Stats)
+local currencyCard=Instance.new("Frame",statsAndCurrencyRow); currencyCard.Size=UDim2.new(0.5,-3,0,0); currencyCard.AutomaticSize=Enum.AutomaticSize.Y; currencyCard.BackgroundColor3=D.Card; currencyCard.BackgroundTransparency=D.GlassPane; currencyCard.BorderSizePixel=0; Corner(currencyCard,8); Stroke(currencyCard,D.Border,1,D.GlassStroke); Pad(currencyCard,10,10,10,10); VList(currencyCard,6)
+SecLbl(currencyCard,"💰 SHOP CURRENCY")
 local CURRENCIES={{key="Boss Coins",icon="🏆",color=D.Gold},{key="Esper Token",icon="🔮",color=D.Purple},{key="Cursed Scrolls",icon="📜",color=D.Lavender},{key="Cursed Essence",icon="💜",color=D.Purple},{key="CurseToken",icon="🌀",color=D.Cyan},{key="Gem",icon="💎",color=D.Cyan},{key="Gold",icon="🟡",color=D.Gold},{key="Sol Token",icon="☀️",color=D.Orange},{key="RCCells",icon="🔬",color=D.Teal}}
 H.UI.Lbl.Currencies={}
 for _,cur in ipairs(CURRENCIES) do
-    local cRow=Instance.new("Frame",currencyCard); cRow.Size=UDim2.new(1,0,0,30); cRow.BackgroundColor3=D.CardHover; cRow.BorderSizePixel=0; Corner(cRow,7); Stroke(cRow,cur.color,1,0.65)
+    local cRow=Instance.new("Frame",currencyCard); cRow.Size=UDim2.new(1,0,0,26); cRow.BackgroundColor3=D.CardHover; cRow.BorderSizePixel=0; Corner(cRow,7); Stroke(cRow,cur.color,1,0.65)
     local cBar=Instance.new("Frame",cRow); cBar.Size=UDim2.new(0,3,0.6,0); cBar.Position=UDim2.new(0,0,0.2,0); cBar.BackgroundColor3=cur.color; cBar.BorderSizePixel=0; Corner(cBar,2)
-    local cNameLbl=Instance.new("TextLabel",cRow); cNameLbl.Position=UDim2.new(0,10,0,0); cNameLbl.Size=UDim2.new(0.65,-10,1,0); cNameLbl.BackgroundTransparency=1; cNameLbl.Text=cur.icon.."  "..cur.key; cNameLbl.TextColor3=cur.color; cNameLbl.TextSize=11; cNameLbl.Font=Enum.Font.GothamSemibold; cNameLbl.TextXAlignment=Enum.TextXAlignment.Left
-    local cValLbl=Instance.new("TextLabel",cRow); cValLbl.Position=UDim2.new(0.65,0,0,0); cValLbl.Size=UDim2.new(0.35,-8,1,0); cValLbl.BackgroundTransparency=1; cValLbl.Text="–"; cValLbl.TextColor3=D.TextHi; cValLbl.TextSize=12; cValLbl.Font=Enum.Font.GothamBold; cValLbl.TextXAlignment=Enum.TextXAlignment.Right
+    local cNameLbl=Instance.new("TextLabel",cRow); cNameLbl.Position=UDim2.new(0,8,0,0); cNameLbl.Size=UDim2.new(0.6,-8,1,0); cNameLbl.BackgroundTransparency=1; cNameLbl.Text=cur.icon.."  "..cur.key; cNameLbl.TextColor3=cur.color; cNameLbl.TextSize=10; cNameLbl.Font=Enum.Font.GothamSemibold; cNameLbl.TextXAlignment=Enum.TextXAlignment.Left; cNameLbl.TextTruncate=Enum.TextTruncate.AtEnd
+    local cValLbl=Instance.new("TextLabel",cRow); cValLbl.Position=UDim2.new(0.6,0,0,0); cValLbl.Size=UDim2.new(0.4,-4,1,0); cValLbl.BackgroundTransparency=1; cValLbl.Text="–"; cValLbl.TextColor3=D.TextHi; cValLbl.TextSize=11; cValLbl.Font=Enum.Font.GothamBold; cValLbl.TextXAlignment=Enum.TextXAlignment.Right
     H.UI.Lbl.Currencies[cur.key]=cValLbl
 end
 local function RebuildCurrencies()
@@ -1637,13 +1706,22 @@ local function RebuildCurrencies()
         if val~=nil then lbl.Text=FmtNum(val); lbl.TextColor3=D.TextHi else lbl.Text="–"; lbl.TextColor3=D.TextLow end
     end
 end
-NeonBtn(currencyCard,"🔄 Währungen aktualisieren",D.CyanDim,28).MouseButton1Click:Connect(function() task.spawn(function() pcall(RebuildCurrencies) end) end)
+NeonBtn(currencyCard,"🔄 Aktualisieren",D.CyanDim,26).MouseButton1Click:Connect(function() task.spawn(function() pcall(RebuildCurrencies) end) end)
 
--- Inventar-Items mit ImageLabel + ViewportFrame Fallback
+-- Inventar-Items mit 2-Spalten UIGridLayout
 MkLbl(InvPage,"📦 GEGENSTÄNDE",10,D.TextLow,true).Size=UDim2.new(1,0,0,14)
 MkLbl(InvPage,"Klick = Ziel setzen",11,D.TextLow).Size=UDim2.new(1,0,0,20)
-H.UI.Fr.InvList=Card(InvPage); Pad(H.UI.Fr.InvList,6,8,6,8); VList(H.UI.Fr.InvList,4)
-H.UI.Lbl.InvEmpty=MkLbl(H.UI.Fr.InvList,"Inventar wird geladen...",12,D.TextLow); H.UI.Lbl.InvEmpty.Size=UDim2.new(1,0,0,30); H.UI.Lbl.InvEmpty.TextXAlignment=Enum.TextXAlignment.Center
+H.UI.Fr.InvList=Card(InvPage); Pad(H.UI.Fr.InvList,6,8,6,8)
+H.UI.Fr.InvList.AutomaticSize=Enum.AutomaticSize.Y
+-- 2-Spalten Grid für Items
+local invGrid=Instance.new("UIGridLayout",H.UI.Fr.InvList)
+invGrid.CellSize=UDim2.new(0.5,-4,0,52)
+invGrid.CellPadding=UDim2.new(0,4,0,4)
+invGrid.SortOrder=Enum.SortOrder.LayoutOrder
+invGrid.FillDirection=Enum.FillDirection.Horizontal
+invGrid.HorizontalAlignment=Enum.HorizontalAlignment.Left
+invGrid.VerticalAlignment=Enum.VerticalAlignment.Top
+H.UI.Lbl.InvEmpty=Instance.new("TextLabel",H.UI.Fr.InvList); H.UI.Lbl.InvEmpty.Size=UDim2.new(1,0,0,30); H.UI.Lbl.InvEmpty.BackgroundTransparency=1; H.UI.Lbl.InvEmpty.Text="Inventar wird geladen..."; H.UI.Lbl.InvEmpty.TextColor3=D.TextLow; H.UI.Lbl.InvEmpty.TextSize=12; H.UI.Lbl.InvEmpty.Font=Enum.Font.GothamMedium; H.UI.Lbl.InvEmpty.TextXAlignment=Enum.TextXAlignment.Center
 
 local function RebuildInventory()
     for _,v in pairs(H.UI.Fr.InvList:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
