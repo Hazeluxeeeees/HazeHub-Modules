@@ -1465,6 +1465,24 @@ H.UI.Btn.ARToggle.MouseButton1Click:Connect(function() H.Config.AutoRetry=not H.
 _G._UpdateAutoRetryUI=UpdateAutoRetryUI
 _G.HazeHubFunctions.UpdateAutoRetryUI=UpdateAutoRetryUI
 
+-- Anti-AFK Toggle Funktion
+local AntiAFKEnabled = true
+local function ToggleAntiAFK()
+    AntiAFKEnabled = not AntiAFKEnabled
+    if afkDot and afkTxt then
+        if AntiAFKEnabled then
+            afkDot.BackgroundColor3 = D.Green
+            afkTxt.Text = "Anti-AFK  —  Aktiv"
+            afkTxt.TextColor3 = D.Green
+        else
+            afkDot.BackgroundColor3 = D.Red
+            afkTxt.Text = "Anti-AFK  —  Inaktiv"
+            afkTxt.TextColor3 = D.Red
+        end
+    end
+end
+_G.HazeHubFunctions.ToggleAntiAFK = ToggleAntiAFK
+
 -- Anti-AFK (neu implementiert: Mouse-Simulation + VirtualUser Kombination)
 local afkCard=Card(MiscPage); Pad(afkCard,10,12,10,12); VList(afkCard,8); SecLbl(afkCard,"ANTI-AFK")
 local afkTopRow=Instance.new("Frame",afkCard); afkTopRow.Size=UDim2.new(1,0,0,28); afkTopRow.BackgroundTransparency=1; HList(afkTopRow,10)
@@ -1473,6 +1491,18 @@ local afkTxt=Instance.new("TextLabel",afkTopRow); afkTxt.Size=UDim2.new(1,-20,1,
 afkTxt.Text="Anti-AFK  —  Aktiv"; afkTxt.TextColor3=D.Green; afkTxt.TextSize=13; afkTxt.Font=Enum.Font.GothamBold; afkTxt.TextXAlignment=Enum.TextXAlignment.Left
 local afkInfoLbl=MkLbl(afkCard,"Verhindert AFK-Kicks durch zyklische Eingaben (Kamera-Ping alle 55s).",10,D.TextLow)
 afkInfoLbl.Size=UDim2.new(1,0,0,28); afkInfoLbl.TextWrapped=true
+
+-- Anti-AFK Toggle Button
+local afkToggleBtn=Instance.new("TextButton",afkCard); afkToggleBtn.Size=UDim2.new(1,0,0,32); afkToggleBtn.BackgroundColor3=D.Green; afkToggleBtn.Text="🔄 Anti-AFK Umschalten"; afkToggleBtn.TextColor3=Color3.new(1,1,1); afkToggleBtn.TextSize=12; afkToggleBtn.Font=Enum.Font.GothamBold; afkToggleBtn.AutoButtonColor=false; afkToggleBtn.BorderSizePixel=0; Corner(afkToggleBtn,8); Stroke(afkToggleBtn,D.Green,1,0.2)
+afkToggleBtn.MouseButton1Click:Connect(function()
+    if _G.HazeHubFunctions.ToggleAntiAFK and type(_G.HazeHubFunctions.ToggleAntiAFK) == "function" then
+        _G.HazeHubFunctions.ToggleAntiAFK()
+    else
+        warn("[HazeHUB] ToggleAntiAFK Funktion nicht gefunden!")
+    end
+end)
+afkToggleBtn.MouseEnter:Connect(function() Tw(afkToggleBtn,{BackgroundColor3=Color3.fromRGB(0,160,80)}) end)
+afkToggleBtn.MouseLeave:Connect(function() Tw(afkToggleBtn,{BackgroundColor3=AntiAFKEnabled and D.Green or D.Red}) end)
 
 -- Puls-Animation für den grünen Dot
 task.spawn(function()
@@ -1485,27 +1515,30 @@ end)
 -- Neuer Anti-AFK: Simuliert Mausbewegung + CameraHeartbeat (kein VirtualUser Spacebar-Spam)
 local _afkLastPing = 0
 task.spawn(function()
-    while S.Running do
-        task.wait(1)
-        local now = os.time()
-        if now - _afkLastPing >= 55 then
-            _afkLastPing = now
-            pcall(function()
-                -- Kamera minimal bewegen um AFK-Timer zurückzusetzen
-                local cam = workspace.CurrentCamera
-                if cam then
-                    local cf = cam.CFrame
-                    cam.CFrame = cf * CFrame.Angles(0, 0.0001, 0)
-                    task.wait(0.05)
-                    cam.CFrame = cf
-                end
-            end)
-            pcall(function()
-                -- Fallback: VirtualUser Ping ohne Spacebar
-                Svc.Vuser:CaptureController()
-                Svc.Vuser:ClickButton2(Vector2.new(0,0))
-            end)
+    while S.Running and ScreenGui.Parent do
+        if AntiAFKEnabled then
+            local now = tick()
+            if now - _afkLastPing >= 55 then
+                _afkLastPing = now
+                pcall(function()
+                    -- Kamera-Ping (minimal, aber effektiv)
+                    local cam = workspace.CurrentCamera
+                    if cam and cam.CFrame then
+                        local cf = cam.CFrame
+                        local newPos = cf.Position + Vector3.new(0, 0.1, 0)
+                        cam.CFrame = CFrame.new(newPos, cf.LookVector)
+                        task.wait(0.05)
+                        cam.CFrame = cf
+                    end
+                end)
+                pcall(function()
+                    -- Fallback: VirtualUser Ping ohne Spacebar
+                    Svc.Vuser:CaptureController()
+                    Svc.Vuser:ClickButton2(Vector2.new(0,0))
+                end)
+            end
         end
+        task.wait(2)
     end
 end)
 
