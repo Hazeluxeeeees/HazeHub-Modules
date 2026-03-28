@@ -552,7 +552,7 @@ local function ScanAllRewards(onProgress)
 
         if filled then
             local items, hasItems = ScanRewardsSafe()
-            local cnt = 0; for _ in pairs(items) do cnt=cnt+1 end
+            local cnt = 0; for _ in pairs(items) then cnt=cnt+1 end
             if hasItems then
                 AF.RewardDatabase[t.chapId] = { world=t.worldId, mode=t.mode, chapId=t.chapId, items=items }
                 print(string.format("[HazeHub] OK [%s] %s: %d Items", t.mode, t.chapId, cnt))
@@ -1036,6 +1036,180 @@ AF.UI.Fr.List.BorderSizePixel=0
 VList(AF.UI.Fr.List,4)
 AF.UI.Lbl.QueueEmpty=MkLbl(AF.UI.Fr.List,"Queue leer.",11,D.TextLow)
 AF.UI.Lbl.QueueEmpty.Size=UDim2.new(1,0,0,24)
+
+-- ============================================================
+--  ★ RAID FUNCTION (Esper & JJK) - BEHALTEN GEMÄSS ANFORDERUNG
+-- ============================================================
+local RAID_DEFS = {
+    {
+        id        = "EsperRaid",
+        label     = "🔮 Esper Raid",
+        world     = "EsperRaid",
+        chapters  = {
+            { id = "Esper_Raid_Chapter1", label = "Chapter 1", modes = {"Normal","Nightmare"} },
+        },
+        scanPath  = "ChapterLevels",
+        itemsPath = "PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList",
+        accent    = Color3.fromRGB(160, 80, 255),
+    },
+    {
+        id        = "JJKRaid",
+        label     = "🌀 JJK Raid",
+        world     = "JJKRaid",
+        chapters  = {
+            { id = "JJK_Raid_Chapter1", label = "Chapter 1", modes = {"Normal"} },
+            { id = "JJK_Raid_Chapter2", label = "Chapter 2", modes = {"Normal"} },
+        },
+        scanPath  = "ChapterLevels",
+        itemsPath = "PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList",
+        accent    = Color3.fromRGB(255, 100, 100),
+    },
+}
+
+local RaidState = {
+    Active   = false,
+    Running  = false,
+    SelRaid  = nil,
+    SelChap  = nil,
+    SelMode  = "Normal",
+    BestChap = nil,
+}
+
+-- Scanne Drop-Daten aus dem PlayRoom GUI
+local function ScanRaidDrops(raidId)
+    local results = {}
+    pcall(function()
+        local plr = game.Players.LocalPlayer
+        if not plr or not plr.PlayerGui then return end
+        local itemsList = nil
+        pcall(function()
+            itemsList = plr.PlayerGui.PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList
+        end)
+        if not itemsList then return end
+        for _, item in ipairs(itemsList:GetChildren()) do
+            if item:IsA("UIGridLayout") or item:IsA("UIListLayout") then continue end
+            local iname    = item.Name
+            local dropAmt  = 0
+            local dropRate = 0
+            pcall(function()
+                local frame     = item:FindFirstChild("Frame")
+                local itemFrame = frame and frame:FindFirstChild("ItemFrame")
+                local info      = itemFrame and itemFrame:FindFirstChild("Info")
+                if info then
+                    -- "DropAmonut" ist ein Typo im Spiel – beide prüfen
+                    local da = info:FindFirstChild("DropAmonut")
+                            or info:FindFirstChild("DropAmount")
+                    local dr = info:FindFirstChild("DropRate")
+                    if da then dropAmt  = tonumber(da.Text or da.Value) or 0 end
+                    if dr then dropRate = tonumber(dr.Text or dr.Value) or 0 end
+                end
+            end)
+            if iname ~= "" then
+                results[iname] = {
+                    dropAmount = dropAmt,
+                    dropRate   = dropRate,
+                    score      = (tonumber(dropRate) or 0) * (tonumber(dropAmt) or 1),
+                }
+            end
+        end
+    end)
+    return results
+end
+
+local function FireStartRaid(raidDef, chapDef, mode)
+    pcall(function()
+        Fire("Create")
+        task.wait(0.4)
+        Fire("Change-World", { ["World"] = raidDef.world })
+        task.wait(0.4)
+        Fire("Change-Chapter", { Chapter = chapDef.id })
+        task.wait(0.4)
+        if mode == "Nightmare" then
+            Fire("Change-Difficulty", { Difficulty = "Nightmare" })
+            task.wait(0.35)
+        end
+        Fire("Submit")
+        task.wait(0.5)
+        Fire("Start")
+    end)
+end
+
+local function StartRaidLoop()
+    if RaidState.Active then return end
+    local raidDef = RaidState.SelRaid and RAID_DEFS[RaidState.SelRaid]
+    if not raidDef then SetStatus("⚠ Kein Raid gewählt!", D.Orange); return end
+    local chapIdx, mode = RaidState.SelChap or 1, RaidState.SelMode or "Normal"
+    local chapDef = raidDef.chapters[chapIdx]
+    if not chapDef then SetStatus("⚠ Chapter nicht gefunden!", D.Orange); return end
+
+    RaidState.Active = true; RaidState.Running = true
+    SetStatus(string.format("⚔ Raid: %s %s (%s)", raidDef.label, chapDef.label, mode), D.Cyan)
+
+    task.spawn(function()
+        while RaidState.Running do
+            if CheckIsLobby() then
+                SetStatus(string.format("🚀 Starte %s %s", raidDef.label, chapDef.label), D.Yellow)
+                FireStartRaid(raidDef, chapDef, mode)
+                -- Warten bis Spiel startet
+                local ws = os.clock()
+                while CheckIsLobby() and os.clock() - ws < 30 and RaidState.Running do
+                    task.wait(1)
+                end
+            else
+                -- In Runde: Live-Drop-Scan für Optimierung
+                local drops = ScanRaidDrops(raidDef.id)
+                local dropInfo = ""
+                for iname, d in pairs(drops) do
+                    dropInfo = dropInfo .. string.format("%s: %.1f%% ×%d  ", iname, d.dropRate, d.dropAmount)
+                end
+                SetStatus(string.format("⚔ Raid läuft | %s", #dropInfo > 0 and dropInfo or "..."), D.Cyan)
+                -- Warten bis Lobby
+                local deadline = os.time() + 600
+                while not CheckIsLobby() and os.time() < deadline and RaidState.Running do
+                    task.wait(3)
+                end
+                task.wait(2)
+            end
+        end
+        RaidState.Active = false
+        SetStatus("⏹ Raid gestoppt.", D.TextMid)
+    end)
+end
+
+-- Raid UI
+local raidCard = Card(Container)
+Pad(raidCard, 10, 10, 10, 10); VList(raidCard, 8)
+SecLbl(raidCard, "⚔  RAID FARM")
+
+local raidCtrlRow = Instance.new("Frame", raidCard)
+raidCtrlRow.Size = UDim2.new(1, 0, 0, 32); raidCtrlRow.BackgroundTransparency = 1
+HList(raidCtrlRow, 8)
+
+local raidStartBtn = Instance.new("TextButton", raidCtrlRow)
+raidStartBtn.Size = UDim2.new(0.58, 0, 0, 32)
+raidStartBtn.BackgroundColor3 = D.Green; raidStartBtn.Text = "▶ Start Raid"
+raidStartBtn.TextColor3 = Color3.new(1,1,1); raidStartBtn.TextSize = 11
+raidStartBtn.Font = Enum.Font.GothamBold; raidStartBtn.AutoButtonColor = false
+raidStartBtn.BorderSizePixel = 0; Corner(raidStartBtn, 8); Stroke(raidStartBtn, D.Green, 1, 0.2)
+
+local raidStopBtn = Instance.new("TextButton", raidCtrlRow)
+raidStopBtn.Size = UDim2.new(0.38, 0, 0, 32)
+raidStopBtn.BackgroundColor3 = D.RedDark; raidStopBtn.Text = "■ Stop"
+raidStopBtn.TextColor3 = D.Red; raidStopBtn.TextSize = 11
+raidStopBtn.Font = Enum.Font.GothamBold; raidStopBtn.AutoButtonColor = false
+raidStopBtn.BorderSizePixel = 0; Corner(raidStopBtn, 8); Stroke(raidStopBtn, D.Red, 1, 0.4)
+
+raidStartBtn.MouseButton1Click:Connect(function()
+    if RaidState.Active then SetStatus("⚠ Raid läuft!", D.Yellow); return end
+    if not RaidState.SelRaid then SetStatus("⚠ Bitte Raid wählen!", D.Orange); return end
+    RaidState.SelChap = 1
+    RaidState.SelMode = "Normal"
+    StartRaidLoop()
+end)
+raidStopBtn.MouseButton1Click:Connect(function()
+    RaidState.Active = false; RaidState.Running = false
+    SetStatus("⏹ Raid gestoppt.", D.TextMid)
+end)
 
 -- ============================================================
 --  STARTUP
