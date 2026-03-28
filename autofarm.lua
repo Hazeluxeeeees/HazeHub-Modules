@@ -824,6 +824,9 @@ local function ScanAllRewards(onProgress)
     if DBCount() > 0 then
         SaveDB()
         _G.HazeShared._AutoFarm_RewardDB = AF.RewardDatabase
+        pcall(function()
+            if HS.SaveWorldCache then HS.SaveWorldCache() end
+        end)
     end
     AF.Scanning = false
     local c=DBCount(); local ok=c>0
@@ -1306,10 +1309,11 @@ AF.UI.Lbl.QueueEmpty.Size=UDim2.new(1,0,0,24)
 --  ★ AUTO-CHALLENGE
 -- ============================================================
 local AF_Challenge = {
-    Items    = {},  -- { name, dropRate, minDrop, maxDrop, chapName, world, chapter }
+    Items    = {},  -- { name, displayName, dropRate, minDrop, maxDrop, chapName, world, chapter }
     Active   = false,
     Running  = false,
     SelIdx   = nil,
+    Title    = "Challenge",
 }
 
 local function ReadChallengeMetaFromFolder(folder)
@@ -1332,6 +1336,7 @@ end
 
 local function ScanChallengeItems()
     AF_Challenge.Items = {}
+    AF_Challenge.Title = "Challenge"
     local challengeFolder = nil
     local ok = pcall(function()
         challengeFolder = RS:WaitForChild("Gameplay", 10):WaitForChild("Game", 10):WaitForChild("Challenge", 10)
@@ -1342,6 +1347,7 @@ local function ScanChallengeItems()
     end
 
     local chapName, world, chapter = ReadChallengeMetaFromFolder(challengeFolder)
+    AF_Challenge.Title = chapName
 
     local itemsFolder = challengeFolder:FindFirstChild("Items")
     if not itemsFolder then
@@ -1375,15 +1381,25 @@ local function ScanChallengeItems()
         local avgDrop = (minDrop + maxDrop) / 2
         local score = dropRate * avgDrop
 
+        local displayName = item.Name
+        pcall(function()
+            local inf = item:FindFirstChild("Info")
+            local nv = (inf and inf:FindFirstChild("ItemNames")) or item:FindFirstChild("ItemNames")
+            if nv and nv.Value ~= nil and tostring(nv.Value) ~= "" then
+                displayName = tostring(nv.Value)
+            end
+        end)
+
         table.insert(AF_Challenge.Items, {
-            name     = item.Name,
-            chapName = chapName,
-            world    = world,
-            chapter  = chapter,
-            dropRate = dropRate,
-            minDrop  = minDrop,
-            maxDrop  = maxDrop,
-            score    = score,
+            name         = item.Name,
+            displayName = displayName,
+            chapName    = chapName,
+            world       = world,
+            chapter     = chapter,
+            dropRate    = dropRate,
+            minDrop     = minDrop,
+            maxDrop     = maxDrop,
+            score       = score,
         })
     end
 
@@ -1405,7 +1421,7 @@ local function StartChallengeLoop()
     AF_Challenge.Active = true
     AF_Challenge.Running = true
     task.spawn(function()
-        SetStatus(string.format("⚡ Challenge: %s", sel.chapName or sel.name), D.Cyan)
+        SetStatus(string.format("⚡ Challenge: %s", sel.displayName or sel.name), D.Cyan)
         pcall(function()
             Fire("Create", { ["CreateChallengeRoom"] = true })
         end)
@@ -1426,13 +1442,21 @@ SecLbl(chalCard, "⚡  AUTO-CHALLENGE")
 local chalStatusLbl = MkLbl(chalCard, "Challenge Items nicht gescannt.", 10, D.TextLow)
 chalStatusLbl.Size = UDim2.new(1, 0, 0, 16)
 
+local chalTitleLbl = MkLbl(chalCard, "", 12, D.Cyan, true)
+chalTitleLbl.Size = UDim2.new(1, 0, 0, 22)
+chalTitleLbl.Text = ""
+chalTitleLbl.Visible = false
+chalTitleLbl.TextXAlignment = Enum.TextXAlignment.Left
+chalTitleLbl.TextWrapped = true
+
 local chalListFrame = Instance.new("ScrollingFrame", chalCard)
 chalListFrame.Size                = UDim2.new(1, 0, 0, 160)
 chalListFrame.CanvasSize          = UDim2.new(0, 0, 0, 0)
 chalListFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+chalListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
 chalListFrame.BackgroundTransparency = 1
 chalListFrame.BorderSizePixel     = 0
-chalListFrame.ScrollBarThickness  = 4
+chalListFrame.ScrollBarThickness  = 0
 chalListFrame.ScrollBarImageColor3 = D.CyanDim
 chalListFrame.ScrollingEnabled    = true
 chalListFrame.ScrollingDirection  = Enum.ScrollingDirection.Y
@@ -1445,7 +1469,10 @@ local function RebuildChallengeList()
     for _, v in pairs(chalListFrame:GetChildren()) do
         if v:IsA("Frame") then v:Destroy() end
     end
-    chalEmptyLbl.Visible = (#AF_Challenge.Items == 0)
+    local has = #AF_Challenge.Items > 0
+    chalEmptyLbl.Visible = not has
+    chalTitleLbl.Text = has and (AF_Challenge.Title or "Challenge") or ""
+    chalTitleLbl.Visible = has
     for i, item in ipairs(AF_Challenge.Items) do
         local isSel = (AF_Challenge.SelIdx == i)
         local row = Instance.new("Frame", chalListFrame)
@@ -1459,7 +1486,7 @@ local function RebuildChallengeList()
         local nL = Instance.new("TextLabel", row)
         nL.Position = UDim2.new(0, 8, 0, 3); nL.Size = UDim2.new(1, -16, 0, 18)
         nL.BackgroundTransparency = 1
-        nL.Text = item.chapName
+        nL.Text = item.displayName or item.name
         nL.TextColor3 = isSel and D.Cyan or D.TextHi
         nL.TextSize = 11; nL.Font = Enum.Font.GothamBold
         nL.TextXAlignment = Enum.TextXAlignment.Left; nL.TextTruncate = Enum.TextTruncate.AtEnd
@@ -1467,7 +1494,7 @@ local function RebuildChallengeList()
         local sL = Instance.new("TextLabel", row)
         sL.Position = UDim2.new(0, 8, 0, 23); sL.Size = UDim2.new(1, -16, 0, 14)
         sL.BackgroundTransparency = 1
-        sL.Text = string.format("Drop: %.1f%%  Min:%d  Max:%d  |  %s › %s",
+        sL.Text = string.format("Drop: %.1f%%  ·  Min:%d  Max:%d  ·  %s › %s",
             item.dropRate, item.minDrop, item.maxDrop, item.world, item.chapter)
         sL.TextColor3 = D.TextMid; sL.TextSize = 9; sL.Font = Enum.Font.Gotham
         sL.TextXAlignment = Enum.TextXAlignment.Left
