@@ -1760,7 +1760,7 @@ task.spawn(TryAutoResume)
 --  ruft am Ende NotifyDBReady() auf, damit der Start-Button
 --  im Game-Tab wieder freigeschaltet wird.
 -- ────────────────────────────────────────────────────────────
-HS.TriggerResetRescan = function(onProgress)
+_G.HazeHUB.TriggerResetRescan = function(onProgress)
     if AF.Scanning then
         pcall(function()
             if onProgress then onProgress("⚠ Scan läuft bereits – bitte warten!") end
