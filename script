@@ -155,23 +155,24 @@ local GlobalSession = { CurrentRound = 0, TotalTime = 0, AllRewards = {} }
 GlobalSession.Items = GlobalSession.AllRewards
 _G.GlobalSession = GlobalSession
 
+-- === GLOBALE HAZEHUB TABELLE (SYNCHRONISATION) ===
+_G.HazeHUB = {}
+_G.HazeHUB_Loaded = false
+
 -- ── GLOBALE FUNKTIONS-DEFINITIONEN (HOISTING - VERHINDERT SCOPE-FEHLER) ──
--- ALLE wichtigen Funktionen werden hier definiert, BEVOR UI-Elemente erstellt werden
+-- ALLE wichtigen Funktionen werden hier definiert und global gemacht
 
 -- Vorwärtsdeklarationen für alle UI-Funktionen
 local UpdateGoalsUI, UpdateSessionUI, RebuildWorldList, LoadWorldCache
-local SetGoalFromInventory, SetKeyDisplay, UpdateAutoRetryUI
-local ToggleAntiAFK, StartRaid, StopRaid
 local RefreshPlayerStats, SelectTab, OnMiniBtnClick, ToggleHubGui
-local SendWebhook, AccumulateRewards, UpdateSessionUI
-local UpdateGoalsUI, BuildItemPreview, LoadItemViewport
+local SendWebhook, AccumulateRewards, BuildItemPreview, LoadItemViewport
 local GetItemTextureId, ApplySharpTypography
 
 -- Globale Variablen
 local AntiAFKEnabled = true
 
--- === KERNFUNKTIONEN ===
-local function ToggleAntiAFK()
+-- === GLOBALE KERNFUNKTIONEN ===
+_G.HazeHUB.ToggleAntiAFK = function()
     AntiAFKEnabled = not AntiAFKEnabled
     if afkDot and afkTxt then
         if AntiAFKEnabled then
@@ -186,7 +187,7 @@ local function ToggleAntiAFK()
     end
 end
 
-local function StartRaid()
+_G.HazeHUB.StartRaid = function()
     if _G.HazeShared and _G.HazeShared.StartFarmFromMain and type(_G.HazeShared.StartFarmFromMain) == "function" then
         _G.HazeShared.StartFarmFromMain()
     else
@@ -194,7 +195,7 @@ local function StartRaid()
     end
 end
 
-local function StopRaid()
+_G.HazeHUB.StopRaid = function()
     if _G.HazeShared and _G.HazeShared.StopFarm and type(_G.HazeShared.StopFarm) == "function" then
         _G.HazeShared.StopFarm()
     else
@@ -202,9 +203,9 @@ local function StopRaid()
     end
 end
 
-local function SetGoalFromInventory(itemName)
+_G.HazeHUB.SetGoalFromInventory = function(itemName)
     if not itemName or itemName == "" then return end
-    SelectTab("Session")
+    if _G.HazeHUB.SelectTab then _G.HazeHUB.SelectTab("Session") end
     if H.UI.Inp.GoalItem then H.UI.Inp.GoalItem.Text=itemName end
     if H.UI.Inp.GoalAmt then H.UI.Inp.GoalAmt.Text="" end
     task.defer(function() pcall(function() if H.UI.Inp.GoalAmt then H.UI.Inp.GoalAmt:CaptureFocus() end end) end)
@@ -214,7 +215,7 @@ local function SetGoalFromInventory(itemName)
     end
 end
 
-local function SetKeyDisplay(k)
+_G.HazeHUB.SetKeyDisplay = function(k)
     if H.UI.Btn.KeyBtn then
         H.UI.Btn.KeyBtn.Text="[ "..(k or "F4").." ]"
         H.UI.Btn.KeyBtn.TextColor3=D.Accent
@@ -222,7 +223,7 @@ local function SetKeyDisplay(k)
     end
 end
 
-local function UpdateAutoRetryUI()
+_G.HazeHUB.UpdateAutoRetryUI = function()
     if not H.UI.Btn.ARToggle or not H.UI.Lbl.ARStatus then return end
     if H.Config.AutoRetry then
         H.UI.Btn.ARToggle.Text="✅ AN"; H.UI.Btn.ARToggle.TextColor3=D.TextHi
@@ -235,36 +236,33 @@ local function UpdateAutoRetryUI()
     end
 end
 
--- === HELPER-FUNKTIONEN ===
-local function TeleportToLobby()
+_G.HazeHUB.StartAutofarm = function()
+    warn("[HazeHUB] StartAutofarm nicht implementiert")
+end
+
+_G.HazeHUB.StopAutofarm = function()
+    warn("[HazeHUB] StopAutofarm nicht implementiert")
+end
+
+_G.HazeHUB.UpdateStatus = function(status, color)
+    warn("[HazeHUB] UpdateStatus nicht implementiert: " .. tostring(status))
+end
+
+_G.HazeHUB.SaveSettings = function()
+    if not writefile then return end
+    pcall(function() writefile(GetSettingsFilePath(), Svc.Http:JSONEncode({ AutoFarm = H.Config.AutoFarm, ts = os.time() })) end)
+end
+
+-- === GLOBALE HELPER-FUNKTIONEN ===
+_G.HazeHUB.TeleportToLobby = function()
     pcall(function() game:GetService("TeleportService"):Teleport(K.LOBBY_ID) end)
 end
 
-local function IsInLobby()
+_G.HazeHUB.IsInLobby = function()
     return game:GetService("Workspace"):FindFirstChild("Lobby") ~= nil
 end
 
-local function FmtDur(sec)
-    local h=math.floor(sec/3600); local m=math.floor((sec%3600)/60); local s=sec%60
-    if h>0 then return string.format("%dh %02dm %02ds",h,m,s) else return string.format("%dm %02ds",m,s) end
-end
-
-local function FmtNum(n)
-    n=math.floor(tonumber(n) or 0); local s=tostring(n); local r=""; local c=0
-    for i=#s,1,-1 do c=c+1; r=s:sub(i,i)..r; if c%3==0 and i>1 then r=","..r end end
-    return r
-end
-
-local function formatTime(sec)
-    local t = tonumber(sec) or 0
-    if t < 0 then t = 0 end
-    if t < 60 then return string.format("%ds", t) end
-    local minInt = math.floor(t / 60)
-    local secInt = t % 60
-    return string.format("%d:%02d", minInt, secInt)
-end
-
-local function GetInvAmt(itemName)
+_G.HazeHUB.GetInvAmt = function(itemName)
     local n=0
     pcall(function()
         local f=Svc.RS:WaitForChild("Player_Data",3):WaitForChild(LP.Name,3):WaitForChild("Items",3)
@@ -274,128 +272,82 @@ local function GetInvAmt(itemName)
     return n
 end
 
--- === SAVE/LOAD FUNKTIONEN ===
-local function GetSettingsFilePath()
-    return K.FOLDER .. "/" .. LP.Name .. "_settings.json"
+_G.HazeHUB.FmtDur = function(sec)
+    local h=math.floor(sec/3600); local m=math.floor((sec%3600)/60); local s=sec%60
+    if h>0 then return string.format("%dh %02dm %02ds",h,m,s) else return string.format("%dm %02ds",m,s) end
 end
 
-local function GetAutoSaveFilePath()
-    return K.FOLDER .. "/" .. LP.Name .. "_autosave.json"
+_G.HazeHUB.FmtNum = function(n)
+    n=math.floor(tonumber(n) or 0); local s=tostring(n); local r=""; local c=0
+    for i=#s,1,-1 do c=c+1; r=s:sub(i,i)..r; if c%3==0 and i>1 then r=","..r end end
+    return r
 end
 
-local function SaveConfig()
-    H.Config.GuiVisible = S.GuiVisible
-    H.Config.SavedGoals={}
-    for _,g in ipairs(S.Goals) do table.insert(H.Config.SavedGoals,{item=g.item,amount=g.amount}) end
-    if writefile then pcall(function() writefile(GetAutoSaveFilePath(), Svc.Http:JSONEncode(H.Config)) end) end
+_G.HazeHUB.formatTime = function(sec)
+    local t = tonumber(sec) or 0
+    if t < 0 then t = 0 end
+    if t < 60 then return string.format("%ds", t) end
+    local minInt = math.floor(t / 60)
+    local secInt = t % 60
+    return string.format("%d:%02d", minInt, secInt)
 end
 
-local function LoadConfig()
-    local savePath = GetAutoSaveFilePath()
-    if not (isfile and isfile(savePath)) then return end
-    local ok,data=pcall(function() return Svc.Http:JSONDecode(readfile(savePath)) end)
-    if ok and data then
-        for k,v in pairs(data) do H.Config[k]=v end
-        if data.SavedGoals then S.Goals=data.SavedGoals end
-    end
-end
+-- === GLOBALE UI FACTORY FUNKTIONEN ===
+_G.HazeHUB.Tw = function(o,p,ti) Svc.Tween:Create(o,ti or TF,p):Play() end
 
--- === REMOTE FUNKTIONEN ===
-local function PR(...) if R.PlayRoom then pcall(R.PlayRoom.FireServer,R.PlayRoom,...) end end
-local function FireVoteRetry()
-    task.spawn(function()
-        task.wait(1)
-        pcall(function()
-            if R.VoteRetry then R.VoteRetry:FireServer() end
-        end)
-    end)
-end
-
-local function FireCreateAndStart(worldId,mode,chapId)
-    task.spawn(function()
-        pcall(function()
-            PR("Create"); task.wait(0.3)
-            PR("Change-World",{World=worldId})
-            task.wait(0.3)
-            PR("Change-Mode",{Mode=mode})
-            task.wait(0.3)
-            PR("Change-Chapter",{Chapter=chapId})
-        end)
-    end)
-end
-
--- === WORLD SCAN FUNKTIONEN ===
-local WORLD_CACHE_FILE = K.FOLDER .. "/" .. LP.Name .. "_WorldCache.json"
-
-local function SaveWorldData()
-    if not writefile then return end
-    if next(S.WorldData) == nil then return end
-    pcall(function() writefile(WORLD_CACHE_FILE, Svc.Http:JSONEncode({ worlds = S.WorldData, ids = S.WorldIds, ts = os.time() })) end)
-end
-
-local function LoadWorldCache()
-    if not (isfile and isfile(WORLD_CACHE_FILE)) then return false end
-    local ok,data=pcall(function() return Svc.Http:JSONDecode(readfile(WORLD_CACHE_FILE)) end)
-    if not ok or not data or type(data.worlds)~="table" then return false end
-    S.WorldData=data.worlds; S.WorldIds=data.ids; S.ScanDone=true; return true
-end
-
--- === UI FACTORY FUNKTIONEN ===
-local function Tw(o,p,ti) Svc.Tween:Create(o,ti or TF,p):Play() end
-
-local function Corner(p,r)
+_G.HazeHUB.Corner = function(p,r)
     local c=Instance.new("UICorner",p); c.CornerRadius=UDim.new(0,r or 10); return c
 end
 
-local function Stroke(p,col,th,tr)
+_G.HazeHUB.Stroke = function(p,col,th,tr)
     local s=Instance.new("UIStroke",p); s.Color=col or D.Border; s.Thickness=th or 1; s.Transparency=tr or 0; return s
 end
 
-local function Pad(p,l,t,r,b)
+_G.HazeHUB.Pad = function(p,l,t,r,b)
     local pl=Instance.new("UIPadding",p); pl.PaddingLeft=UDim.new(0,l or 0); pl.PaddingTop=UDim.new(0,t or 0)
     pl.PaddingRight=UDim.new(0,r or 0); pl.PaddingBottom=UDim.new(0,b or 0); return pl
 end
 
-local function VList(p,spacing)
+_G.HazeHUB.VList = function(p,spacing)
     local l=Instance.new("UIListLayout",p); l.SortOrder=Enum.SortOrder.LayoutOrder; l.Padding=UDim.new(0,spacing or 8); return l
 end
 
-local function HList(p,spacing)
+_G.HazeHUB.HList = function(p,spacing)
     local l=Instance.new("UIListLayout",p); l.SortOrder=Enum.SortOrder.LayoutOrder; l.Padding=UDim.new(0,spacing or 8); l.FillDirection=Enum.FillDirection.Horizontal; return l
 end
 
-local function MkLbl(parent,text,size,color)
+_G.HazeHUB.MkLbl = function(parent,text,size,color)
     local lbl=Instance.new("TextLabel",parent); lbl.Text=text or ""; lbl.Size=UDim2.new(1,0,0,size or 12)
     lbl.TextColor3=color or D.TextMid; lbl.TextSize=size or 12; lbl.Font=Enum.Font.Gotham; lbl.BackgroundTransparency=1; return lbl
 end
 
-local function SecLbl(parent,text)
-    local lbl=MkLbl(parent,text,13,D.Accent); lbl.Font=Enum.Font.GothamBold; return lbl
+_G.HazeHUB.SecLbl = function(parent,text)
+    local lbl=_G.HazeHUB.MkLbl(parent,text,13,D.Accent); lbl.Font=Enum.Font.GothamBold; return lbl
 end
 
-local function MkInput(parent,placeholder)
-    local outer=Instance.new("Frame",parent); outer.Size=UDim2.new(1,0,0,28); outer.BackgroundColor3=D.Input; outer.BackgroundTransparency=D.GlassPane or 0.18; outer.BorderSizePixel=0; Corner(outer,6); Stroke(outer,D.Border,1,0.4)
-    Pad(outer,8,0,8,0); local box=Instance.new("TextBox",outer); box.Size=UDim2.new(1,0,1,0); box.BackgroundTransparency=1; box.Text=placeholder or ""; box.PlaceholderText=placeholder or ""; box.TextColor3=D.TextHi; box.PlaceholderColor3=D.TextLow; box.TextSize=12; box.Font=Enum.Font.Gotham; return outer,box
+_G.HazeHUB.MkInput = function(parent,placeholder)
+    local outer=Instance.new("Frame",parent); outer.Size=UDim2.new(1,0,0,28); outer.BackgroundColor3=D.Input; outer.BackgroundTransparency=D.GlassPane or 0.18; outer.BorderSizePixel=0; _G.HazeHUB.Corner(outer,6); _G.HazeHUB.Stroke(outer,D.Border,1,0.4)
+    _G.HazeHUB.Pad(outer,8,0,8,0); local box=Instance.new("TextBox",outer); box.Size=UDim2.new(1,0,1,0); box.BackgroundTransparency=1; box.Text=placeholder or ""; box.PlaceholderText=placeholder or ""; box.TextColor3=D.TextHi; box.PlaceholderColor3=D.TextLow; box.TextSize=12; box.Font=Enum.Font.Gotham; return outer,box
 end
 
-local function Card(parent,sizeY)
-    local card=Instance.new("Frame",parent); card.Size=UDim2.new(1,0,0,sizeY or 60); card.BackgroundColor3=D.Card; card.BackgroundTransparency=D.GlassPane or 0.18; card.BorderSizePixel=0; Corner(card,8); Stroke(card,D.Border,1,0.5); return card
+_G.HazeHUB.Card = function(parent,sizeY)
+    local card=Instance.new("Frame",parent); card.Size=UDim2.new(1,0,0,sizeY or 60); card.BackgroundColor3=D.Card; card.BackgroundTransparency=D.GlassPane or 0.18; card.BorderSizePixel=0; _G.HazeHUB.Corner(card,8); _G.HazeHUB.Stroke(card,D.Border,1,0.5); return card
 end
 
-local function NeonBtn(parent,text,color,sizeY)
-    local btn=Instance.new("TextButton",parent); btn.Size=UDim2.new(1,0,0,sizeY or 34); btn.BackgroundColor3=color; btn.BackgroundTransparency=D.GlassPane or 0.18; btn.Text=text; btn.TextColor3=Color3.new(1,1,1); btn.TextSize=13; btn.Font=Enum.Font.GothamBold; btn.AutoButtonColor=false; btn.BorderSizePixel=0; Corner(btn,8); Stroke(btn,color,1.5,0)
-    btn.MouseEnter:Connect(function() Tw(btn,{BackgroundColor3=Color3.fromRGB(math.min(255,color.R*255*1.3),math.min(255,color.G*255*1.3),math.min(255,color.B*255*1.3))}) end)
-    btn.MouseLeave:Connect(function() Tw(btn,{BackgroundColor3=color}) end)
+_G.HazeHUB.NeonBtn = function(parent,text,color,sizeY)
+    local btn=Instance.new("TextButton",parent); btn.Size=UDim2.new(1,0,0,sizeY or 34); btn.BackgroundColor3=color; btn.BackgroundTransparency=D.GlassPane or 0.18; btn.Text=text; btn.TextColor3=Color3.new(1,1,1); btn.TextSize=13; btn.Font=Enum.Font.GothamBold; btn.AutoButtonColor=false; btn.BorderSizePixel=0; _G.HazeHUB.Corner(btn,8); _G.HazeHUB.Stroke(btn,color,1.5,0)
+    btn.MouseEnter:Connect(function() _G.HazeHUB.Tw(btn,{BackgroundColor3=Color3.fromRGB(math.min(255,color.R*255*1.3),math.min(255,color.G*255*1.3),math.min(255,color.B*255*1.3))}) end)
+    btn.MouseLeave:Connect(function() _G.HazeHUB.Tw(btn,{BackgroundColor3=color}) end)
     return btn
 end
 
 -- === GLOBALE REGISTRIERUNG (sofort verfügbar) ===
-_G.HazeHubFunctions.ToggleAntiAFK = ToggleAntiAFK
-_G.HazeHubFunctions.StartRaid = StartRaid
-_G.HazeHubFunctions.StopRaid = StopRaid
-_G.HazeHubFunctions.SetGoalFromInventory = SetGoalFromInventory
-_G.HazeHubFunctions.SetKeyDisplay = SetKeyDisplay
-_G.HazeHubFunctions.UpdateAutoRetryUI = UpdateAutoRetryUI
+_G.HazeHubFunctions.ToggleAntiAFK = _G.HazeHUB.ToggleAntiAFK
+_G.HazeHubFunctions.StartRaid = _G.HazeHUB.StartRaid
+_G.HazeHubFunctions.StopRaid = _G.HazeHUB.StopRaid
+_G.HazeHubFunctions.SetGoalFromInventory = _G.HazeHUB.SetGoalFromInventory
+_G.HazeHubFunctions.SetKeyDisplay = _G.HazeHUB.SetKeyDisplay
+_G.HazeHubFunctions.UpdateAutoRetryUI = _G.HazeHUB.UpdateAutoRetryUI
 
 -- Session: Währungen/XP (nicht in der Item-Drop-Liste / Webhook-Items)
 local _SessionCurrencyLower = { gem = true }
@@ -2650,59 +2602,65 @@ local function LoadModule(url,name,delay,onErr)
     task.spawn(function()
         task.wait(delay or 1)
         
+        -- Warte bis das Hauptskript vollständig geladen ist
+        repeat task.wait(0.5) until _G.HazeHUB_Loaded == true
+        
         -- Stelle sicher, dass alle globalen Funktionen und Variablen verfügbar sind
         if not _G.HazeHubFunctions then
             _G.HazeHubFunctions = {}
         end
         
-        -- Fülle ALLE möglichen Funktionen auf, die externe Module benötigen könnten
+        -- Fülle ALLE möglichen Funktionen mit _G.HazeHUB Referenzen auf
         local fallbackFunctions = {
-            ToggleAntiAFK = function() warn("[HazeHUB] ToggleAntiAFK nicht implementiert") end,
-            StartRaid = function() warn("[HazeHUB] StartRaid nicht implementiert") end,
-            StopRaid = function() warn("[HazeHUB] StopRaid nicht implementiert") end,
-            SetGoalFromInventory = function() warn("[HazeHUB] SetGoalFromInventory nicht implementiert") end,
-            SetKeyDisplay = function() warn("[HazeHUB] SetKeyDisplay nicht implementiert") end,
-            UpdateAutoRetryUI = function() warn("[HazeHUB] UpdateAutoRetryUI nicht implementiert") end,
-            UpdateGoalsUI = function() warn("[HazeHUB] UpdateGoalsUI nicht implementiert") end,
-            UpdateSessionUI = function() warn("[HazeHUB] UpdateSessionUI nicht implementiert") end,
-            RebuildWorldList = function() warn("[HazeHUB] RebuildWorldList nicht implementiert") end,
-            LoadWorldCache = function() warn("[HazeHUB] LoadWorldCache nicht implementiert") end,
-            SaveWorldData = function() warn("[HazeHUB] SaveWorldData nicht implementiert") end,
-            SendWebhook = function() warn("[HazeHUB] SendWebhook nicht implementiert") end,
-            AccumulateRewards = function() warn("[HazeHUB] AccumulateRewards nicht implementiert") end,
-            RefreshPlayerStats = function() warn("[HazeHUB] RefreshPlayerStats nicht implementiert") end,
-            SelectTab = function() warn("[HazeHUB] SelectTab nicht implementiert") end,
-            OnMiniBtnClick = function() warn("[HazeHUB] OnMiniBtnClick nicht implementiert") end,
-            ToggleHubGui = function() warn("[HazeHUB] ToggleHubGui nicht implementiert") end,
-            BuildItemPreview = function() warn("[HazeHUB] BuildItemPreview nicht implementiert") end,
-            LoadItemViewport = function() warn("[HazeHUB] LoadItemViewport nicht implementiert") end,
-            GetItemTextureId = function() warn("[HazeHUB] GetItemTextureId nicht implementiert") end,
-            ApplySharpTypography = function() warn("[HazeHUB] ApplySharpTypography nicht implementiert") end,
-            FireCreateAndStart = function() warn("[HazeHUB] FireCreateAndStart nicht implementiert") end,
-            FireVoteRetry = function() warn("[HazeHUB] FireVoteRetry nicht implementiert") end,
-            TeleportToLobby = function() warn("[HazeHUB] TeleportToLobby nicht implementiert") end,
-            IsInLobby = function() warn("[HazeHUB] IsInLobby nicht implementiert") end,
-            SaveConfig = function() warn("[HazeHUB] SaveConfig nicht implementiert") end,
-            LoadConfig = function() warn("[HazeHUB] LoadConfig nicht implementiert") end,
-            SaveSettings = function() warn("[HazeHUB] SaveSettings nicht implementiert") end,
-            LoadSettings = function() warn("[HazeHUB] LoadSettings nicht implementiert") end,
-            GetSettingsFilePath = function() warn("[HazeHUB] GetSettingsFilePath nicht implementiert") end,
-            GetAutoSaveFilePath = function() warn("[HazeHUB] GetAutoSaveFilePath nicht implementiert") end,
-            GetInvAmt = function() warn("[HazeHUB] GetInvAmt nicht implementiert") end,
-            FmtDur = function() warn("[HazeHUB] FmtDur nicht implementiert") end,
-            FmtNum = function() warn("[HazeHUB] FmtNum nicht implementiert") end,
-            formatTime = function() warn("[HazeHUB] formatTime nicht implementiert") end,
-            Tw = function() warn("[HazeHUB] Tw nicht implementiert") end,
-            Corner = function() warn("[HazeHUB] Corner nicht implementiert") end,
-            Stroke = function() warn("[HazeHUB] Stroke nicht implementiert") end,
-            Pad = function() warn("[HazeHUB] Pad nicht implementiert") end,
-            VList = function() warn("[HazeHUB] VList nicht implementiert") end,
-            HList = function() warn("[HazeHUB] HList nicht implementiert") end,
-            MkLbl = function() warn("[HazeHUB] MkLbl nicht implementiert") end,
-            SecLbl = function() warn("[HazeHUB] SecLbl nicht implementiert") end,
-            MkInput = function() warn("[HazeHUB] MkInput nicht implementiert") end,
-            Card = function() warn("[HazeHUB] Card nicht implementiert") end,
-            NeonBtn = function() warn("[HazeHUB] NeonBtn nicht implementiert") end
+            ToggleAntiAFK = _G.HazeHUB.ToggleAntiAFK or function() warn("[HazeHUB] ToggleAntiAFK nicht implementiert") end,
+            StartRaid = _G.HazeHUB.StartRaid or function() warn("[HazeHUB] StartRaid nicht implementiert") end,
+            StopRaid = _G.HazeHUB.StopRaid or function() warn("[HazeHUB] StopRaid nicht implementiert") end,
+            SetGoalFromInventory = _G.HazeHUB.SetGoalFromInventory or function() warn("[HazeHUB] SetGoalFromInventory nicht implementiert") end,
+            SetKeyDisplay = _G.HazeHUB.SetKeyDisplay or function() warn("[HazeHUB] SetKeyDisplay nicht implementiert") end,
+            UpdateAutoRetryUI = _G.HazeHUB.UpdateAutoRetryUI or function() warn("[HazeHUB] UpdateAutoRetryUI nicht implementiert") end,
+            UpdateGoalsUI = _G.HazeHUB.UpdateGoalsUI or function() warn("[HazeHUB] UpdateGoalsUI nicht implementiert") end,
+            UpdateSessionUI = _G.HazeHUB.UpdateSessionUI or function() warn("[HazeHUB] UpdateSessionUI nicht implementiert") end,
+            RebuildWorldList = _G.HazeHUB.RebuildWorldList or function() warn("[HazeHUB] RebuildWorldList nicht implementiert") end,
+            LoadWorldCache = _G.HazeHUB.LoadWorldCache or function() warn("[HazeHUB] LoadWorldCache nicht implementiert") end,
+            SaveWorldData = _G.HazeHUB.SaveWorldData or function() warn("[HazeHUB] SaveWorldData nicht implementiert") end,
+            SendWebhook = _G.HazeHUB.SendWebhook or function() warn("[HazeHUB] SendWebhook nicht implementiert") end,
+            AccumulateRewards = _G.HazeHUB.AccumulateRewards or function() warn("[HazeHUB] AccumulateRewards nicht implementiert") end,
+            RefreshPlayerStats = _G.HazeHUB.RefreshPlayerStats or function() warn("[HazeHUB] RefreshPlayerStats nicht implementiert") end,
+            SelectTab = _G.HazeHUB.SelectTab or function() warn("[HazeHUB] SelectTab nicht implementiert") end,
+            OnMiniBtnClick = _G.HazeHUB.OnMiniBtnClick or function() warn("[HazeHUB] OnMiniBtnClick nicht implementiert") end,
+            ToggleHubGui = _G.HazeHUB.ToggleHubGui or function() warn("[HazeHUB] ToggleHubGui nicht implementiert") end,
+            BuildItemPreview = _G.HazeHUB.BuildItemPreview or function() warn("[HazeHUB] BuildItemPreview nicht implementiert") end,
+            LoadItemViewport = _G.HazeHUB.LoadItemViewport or function() warn("[HazeHUB] LoadItemViewport nicht implementiert") end,
+            GetItemTextureId = _G.HazeHUB.GetItemTextureId or function() warn("[HazeHUB] GetItemTextureId nicht implementiert") end,
+            ApplySharpTypography = _G.HazeHUB.ApplySharpTypography or function() warn("[HazeHUB] ApplySharpTypography nicht implementiert") end,
+            FireCreateAndStart = _G.HazeHUB.FireCreateAndStart or function() warn("[HazeHUB] FireCreateAndStart nicht implementiert") end,
+            FireVoteRetry = _G.HazeHUB.FireVoteRetry or function() warn("[HazeHUB] FireVoteRetry nicht implementiert") end,
+            TeleportToLobby = _G.HazeHUB.TeleportToLobby or function() warn("[HazeHUB] TeleportToLobby nicht implementiert") end,
+            IsInLobby = _G.HazeHUB.IsInLobby or function() warn("[HazeHUB] IsInLobby nicht implementiert") end,
+            SaveConfig = _G.HazeHUB.SaveConfig or function() warn("[HazeHUB] SaveConfig nicht implementiert") end,
+            LoadConfig = _G.HazeHUB.LoadConfig or function() warn("[HazeHUB] LoadConfig nicht implementiert") end,
+            SaveSettings = _G.HazeHUB.SaveSettings or function() warn("[HazeHUB] SaveSettings nicht implementiert") end,
+            LoadSettings = _G.HazeHUB.LoadSettings or function() warn("[HazeHUB] LoadSettings nicht implementiert") end,
+            GetSettingsFilePath = _G.HazeHUB.GetSettingsFilePath or function() warn("[HazeHUB] GetSettingsFilePath nicht implementiert") end,
+            GetAutoSaveFilePath = _G.HazeHUB.GetAutoSaveFilePath or function() warn("[HazeHUB] GetAutoSaveFilePath nicht implementiert") end,
+            GetInvAmt = _G.HazeHUB.GetInvAmt or function() warn("[HazeHUB] GetInvAmt nicht implementiert") end,
+            FmtDur = _G.HazeHUB.FmtDur or function() warn("[HazeHUB] FmtDur nicht implementiert") end,
+            FmtNum = _G.HazeHUB.FmtNum or function() warn("[HazeHUB] FmtNum nicht implementiert") end,
+            formatTime = _G.HazeHUB.formatTime or function() warn("[HazeHUB] formatTime nicht implementiert") end,
+            Tw = _G.HazeHUB.Tw or function() warn("[HazeHUB] Tw nicht implementiert") end,
+            Corner = _G.HazeHUB.Corner or function() warn("[HazeHUB] Corner nicht implementiert") end,
+            Stroke = _G.HazeHUB.Stroke or function() warn("[HazeHUB] Stroke nicht implementiert") end,
+            Pad = _G.HazeHUB.Pad or function() warn("[HazeHUB] Pad nicht implementiert") end,
+            VList = _G.HazeHUB.VList or function() warn("[HazeHUB] VList nicht implementiert") end,
+            HList = _G.HazeHUB.HList or function() warn("[HazeHUB] HList nicht implementiert") end,
+            MkLbl = _G.HazeHUB.MkLbl or function() warn("[HazeHUB] MkLbl nicht implementiert") end,
+            SecLbl = _G.HazeHUB.SecLbl or function() warn("[HazeHUB] SecLbl nicht implementiert") end,
+            MkInput = _G.HazeHUB.MkInput or function() warn("[HazeHUB] MkInput nicht implementiert") end,
+            Card = _G.HazeHUB.Card or function() warn("[HazeHUB] Card nicht implementiert") end,
+            NeonBtn = _G.HazeHUB.NeonBtn or function() warn("[HazeHUB] NeonBtn nicht implementiert") end,
+            StartAutofarm = _G.HazeHUB.StartAutofarm or function() warn("[HazeHUB] StartAutofarm nicht implementiert") end,
+            StopAutofarm = _G.HazeHUB.StopAutofarm or function() warn("[HazeHUB] StopAutofarm nicht implementiert") end,
+            UpdateStatus = _G.HazeHUB.UpdateStatus or function() warn("[HazeHUB] UpdateStatus nicht implementiert") end
         }
         
         -- Registriere alle Fallback-Funktionen
@@ -2787,3 +2745,7 @@ LoadModule(K.TEAMS_URL, "Teams", 5, function(err)
         end
     end)
 end)
+
+-- === HAUPTSKRIPT GELADEN - MODULE KÖNNEN STARTEN ===
+_G.HazeHUB_Loaded = true
+print("[HazeHUB] Hauptskript vollständig geladen - Module können jetzt starten")
