@@ -2290,7 +2290,7 @@ MainFrame.Visible=S.GuiVisible
 pcall(function() if HazeHubBlur and HazeHubBlur.Parent then HazeHubBlur.Enabled=S.GuiVisible end end)
 if _earlyAutoFarm then H.Config.AutoFarm=true end
 if _G._SetKeyDisplay        then _G._SetKeyDisplay(H.Config.ToggleKey) end
-if _G._UpdateAutoRetryUI    then _G._UpdateAutoRetryUI() end
+if _G and _G._UpdateAutoRetryUI    then _G._UpdateAutoRetryUI() end
 -- Auto-Mobile-Detection: TouchEnabled uebersteigt gespeicherte UISize-Einstellung
 local _startupMode = H.Config.UISize
 if Svc.Input.TouchEnabled then _startupMode = "Mobile" end
