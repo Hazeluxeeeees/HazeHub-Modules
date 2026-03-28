@@ -166,11 +166,9 @@ local function Fire(action, data)
             if data ~= nil then ev:FireServer(action, data)
             else ev:FireServer(action) end
         end)
-        if not ok then warn("[HazeHub] Fire Fehler (" .. tostring(action) .. "): " .. tostring(err)) end
-    elseif PR and type(PR) == "function" then
-        pcall(function() PR(action, data) end)
+        if not ok then warn("[HazeHub] Fire-Fehler: " .. tostring(err)) end
     else
-        warn("[HazeHub] Fire: PlayRoom Event + PR fehlen – " .. tostring(action))
+        warn("[HazeHub] Fire-Fehler: PlayRoom Event ist NIL!")
     end
 end
 
