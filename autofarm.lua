@@ -123,33 +123,40 @@ task.spawn(function()
     else warn("[HazeHub] PlayRoomEvent nicht gefunden!") end
 end)
 
-local function Fire(action, data)
-    if PlayRoomEvent then
-        pcall(function()
-            if data then PlayRoomEvent:FireServer(action, data)
-            else PlayRoomEvent:FireServer(action) end
-        end)
-    else 
-        if PR then PR(action, data) end 
+-- FÜGE DIESEN TEIL EIN:
+
+-- ★ Nil-sicherer Remote-Getter
+local function GetPlayRoomRemote()
+    local ok, remote = pcall(function()
+        return RS:WaitForChild("Remote", 5)
+                 :WaitForChild("Server", 5)
+                 :WaitForChild("PlayRoom", 5)
+                 :WaitForChild("Event", 5)
+    end)
+    if not ok or not remote then
+        warn("[HazeHub] PlayRoom Remote nicht gefunden!")
+        return nil
     end
+    return remote
 end
 
+-- ★ Nil-sicherer SafeFire (ERSETZT die bisherige SafeFire-Funktion)
 local function SafeFire(action, data)
-    if not action or action == "" then
-        warn("[HazeHub] SafeFire: action nil – überspringe."); return
+    local remote = GetPlayRoomRemote()
+    if not remote then
+        warn("[HazeHub] SafeFire abgebrochen – Remote nil. Action: " .. tostring(action))
+        return
     end
-    if data then
-        for k, v in pairs(data) do
-            if v == nil then
-                warn(string.format("[HazeHub] SafeFire '%s': '%s' ist nil.", action, tostring(k)))
-                return
-            end
+    local ok, err = pcall(function()
+        if data then
+            remote:FireServer(action, data)
+        else
+            remote:FireServer(action)
         end
-    end
-    pcall(function()
-        if data then PlayRoomEvent:FireServer(action, data)
-        else         PlayRoomEvent:FireServer(action) end
     end)
+    if not ok then
+        warn("[HazeHub] SafeFire Fehler (" .. tostring(action) .. "): " .. tostring(err))
+    end
 end
 -- ============================================================
 --  INVENTAR  (★ LP.Name dynamisch)
