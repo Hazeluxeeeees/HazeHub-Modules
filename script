@@ -889,8 +889,8 @@ local function SelectTab(name)
 end
 local function MakeTab(name,icon)
     local B=Instance.new("TextButton",H.UI.Fr.TabHolder)
-    B.Size=UDim2.new(1,0,0,30); B.BackgroundColor3=D.TabInactive; B.BackgroundTransparency=D.GlassPane
-    B.Text=icon.."  "..name; B.TextColor3=D.TextMid; B.TextSize=13
+    B.Size=UDim2.new(1,0,0,34); B.BackgroundColor3=D.TabInactive; B.BackgroundTransparency=D.GlassPane
+    B.Text=icon.."  "..name; B.TextColor3=D.TextMid; B.TextSize=12
     B.Font=Enum.Font.GothamMedium; B.TextScaled=false; B.RichText=true; B.TextStrokeTransparency=1
     B.TextTruncate=Enum.TextTruncate.AtEnd
     B.AutoButtonColor=false; B.BorderSizePixel=0
@@ -909,14 +909,15 @@ end
 
 local function MakeTraitsTab(name, icon)
     local B = Instance.new("TextButton", H.UI.Fr.TabHolder)
-    B.Size = UDim2.new(1, 0, 0, 30)
+    B.Size = UDim2.new(1, 0, 0, 34)
     B.BackgroundColor3 = D.TabInactive
     B.BackgroundTransparency = D.GlassPane
     B.Text = icon .. "  " .. name
     B.TextColor3 = D.TextMid
-    B.TextSize = 14
+    B.TextSize = 12
     B.Font = Enum.Font.GothamMedium
     B.TextScaled = false; B.RichText = true; B.TextStrokeTransparency = 1
+    B.TextTruncate = Enum.TextTruncate.AtEnd
     B.AutoButtonColor = false
     B.BorderSizePixel = 0
     Corner(B, 8)
@@ -1024,8 +1025,9 @@ end
 -- ── GUI-Resize ────────────────────────────────────────────────
 -- Kompakt: 70%/80% der PC-Scale (kleiner als Desktop); UIScale nur bei Touch
 local PC_FRAME_SCALE_X, PC_FRAME_SCALE_Y = 0.40, 0.48
-local MOBILE_FRAME = UDim2.new(PC_FRAME_SCALE_X * 0.7, 0, PC_FRAME_SCALE_Y * 0.8, 0)
-local TOUCH_MAIN_UI_SCALE = 0.85
+-- Mobile: deutlich groesser – 90% Breite, 72% Hoehe des Bildschirms
+local MOBILE_FRAME = UDim2.new(0.90, 0, 0.72, 0)
+local TOUCH_MAIN_UI_SCALE = 1.0   -- kein zusaetzlicher Scale-Shrink auf Mobile
 
 local function SetGUISize(mode)
     H.Config.UISize=mode; SaveConfig()
@@ -1040,10 +1042,12 @@ local function SetGUISize(mode)
     H.UI.Fr.Sidebar.Position=UDim2.new(0,0,0,0)
     if useCompact then
         MainFrame.Size = MOBILE_FRAME
-        if ma then ma.AspectRatio = (PC_FRAME_SCALE_X * 0.7) / (PC_FRAME_SCALE_Y * 0.8) end
-        H.UI.Fr.Sidebar.Size=UDim2.new(0.30, 0, 1, 0)
-        H.UI.Fr.Content.Position=UDim2.new(0.30, 4, 0, 25)
-        H.UI.Fr.Content.Size=UDim2.new(0.70, -6, 1, -33)
+        -- Seitenverhaeltnis fuer 90% x 72%
+        if ma then ma.AspectRatio = 0.90 / 0.72; ma.DominantAxis = Enum.DominantAxis.Width end
+        -- Sidebar 32%, Content 68%
+        H.UI.Fr.Sidebar.Size=UDim2.new(0.32, 0, 1, 0)
+        H.UI.Fr.Content.Position=UDim2.new(0.32, 4, 0, 25)
+        H.UI.Fr.Content.Size=UDim2.new(0.68, -6, 1, -33)
     else
         MainFrame.Size=UDim2.fromScale(PC_FRAME_SCALE_X, PC_FRAME_SCALE_Y)
         if ma then ma.AspectRatio = 580 / 450 end
@@ -1969,8 +1973,9 @@ end) -- end pcall Settings Tab
 
 -- ── Mobile Button (rund, links mittig, Haze-Logo PNG zentriert) ──────────────
 H.UI.Fr.MiniBtn=Instance.new("TextButton",ScreenGui)
-H.UI.Fr.MiniBtn.Name="MiniBtn"; H.UI.Fr.MiniBtn.Size=UDim2.new(0.042,0,0.075,0)
-H.UI.Fr.MiniBtn.AnchorPoint=Vector2.new(0,0.5); H.UI.Fr.MiniBtn.Position=UDim2.new(0.012,0,0.5,0)
+-- Groesser fuer Mobile: 6.5% Breite, quadratisch via AspectRatio
+H.UI.Fr.MiniBtn.Name="MiniBtn"; H.UI.Fr.MiniBtn.Size=UDim2.new(0.065,0,0.10,0)
+H.UI.Fr.MiniBtn.AnchorPoint=Vector2.new(0,0.5); H.UI.Fr.MiniBtn.Position=UDim2.new(0.008,0,0.5,0)
 local MiniAsp = Instance.new("UIAspectRatioConstraint", H.UI.Fr.MiniBtn); MiniAsp.AspectRatio = 1
 H.UI.Fr.MiniBtn.BackgroundColor3=D.BG; H.UI.Fr.MiniBtn.BackgroundTransparency=0.2
 H.UI.Fr.MiniBtn.Text=""; H.UI.Fr.MiniBtn.AutoButtonColor=false; H.UI.Fr.MiniBtn.BorderSizePixel=0; Corner(H.UI.Fr.MiniBtn,99)
@@ -2002,8 +2007,8 @@ local function OnMiniBtnClick()
 end
 H.UI.Fr.MiniBtn.MouseEnter:Connect(function() Tw(H.UI.Fr.MiniBtn,{BackgroundTransparency=0.08},TM); Stroke(MBRing,D.Accent,2,0.25) end)
 H.UI.Fr.MiniBtn.MouseLeave:Connect(function() Tw(H.UI.Fr.MiniBtn,{BackgroundTransparency=0.2},TM); Stroke(MBRing,D.Border,1.5,0.45) end)
-H.UI.Fr.MiniBtn.MouseButton1Down:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0.038,0,0.068,0)},TF) end)
-H.UI.Fr.MiniBtn.MouseButton1Up:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0.042,0,0.075,0)},TF) end)
+H.UI.Fr.MiniBtn.MouseButton1Down:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0.058,0,0.090,0)},TF) end)
+H.UI.Fr.MiniBtn.MouseButton1Up:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0.065,0,0.10,0)},TF) end)
 H.UI.Fr.MiniBtn.MouseButton1Click:Connect(OnMiniBtnClick)
 MakeDraggable(H.UI.Fr.Main,MainFrame)
 MakeDraggable(H.UI.Fr.MiniBtn,H.UI.Fr.MiniBtn)
@@ -2143,7 +2148,10 @@ pcall(function() if HazeHubBlur and HazeHubBlur.Parent then HazeHubBlur.Enabled=
 if _earlyAutoFarm then H.Config.AutoFarm=true end
 if _G._SetKeyDisplay        then _G._SetKeyDisplay(H.Config.ToggleKey) end
 if _G._UpdateAutoRetryUI    then _G._UpdateAutoRetryUI() end
-SetGUISize(H.Config.UISize)
+-- Auto-Mobile-Detection: TouchEnabled uebersteigt gespeicherte UISize-Einstellung
+local _startupMode = H.Config.UISize
+if Svc.Input.TouchEnabled then _startupMode = "Mobile" end
+SetGUISize(_startupMode)
 if H.UI.Inp.Webhook then H.UI.Inp.Webhook.Text=H.Config.WebhookURL end
 SelectTab("Game")
 if UpdateSessionUI then pcall(UpdateSessionUI) end
