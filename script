@@ -1408,15 +1408,52 @@ end
 -- ╚══════════════════════════════════════════════════════════╝
 pcall(function()
 MkLbl(GamePage,"🎮  Game",14,D.Cyan,true)
-local scanCard=Card(GamePage,30); Pad(scanCard,4,10,4,10)
-H.UI.Lbl.ScanStatus=Instance.new("TextLabel",scanCard)
-H.UI.Lbl.ScanStatus.Size=UDim2.new(1,0,1,0); H.UI.Lbl.ScanStatus.BackgroundTransparency=1
-H.UI.Lbl.ScanStatus.Text="⏳  Lade Weltdaten..."; H.UI.Lbl.ScanStatus.TextColor3=D.Yellow
-H.UI.Lbl.ScanStatus.TextSize=10; H.UI.Lbl.ScanStatus.Font=Enum.Font.GothamSemibold
-H.UI.Lbl.ScanStatus.TextXAlignment=Enum.TextXAlignment.Left
 
--- Welt-Auswahl (inkl. Raid Farm)
-local wCard=Card(GamePage); Pad(wCard,10,10,10,10); VList(wCard,8); SecLbl(wCard,"WELT & KAPITEL AUSWAHL (inkl. Raid & Calamity)")
+-- === STATUS-ANZEIGEN (horizontal nebeneinander) ===
+local statusRow=Instance.new("Frame",GamePage); statusRow.Size=UDim2.new(1,0,0,30); statusRow.BackgroundTransparency=1; HList(statusRow,10)
+
+-- Autofarm-Modul Status
+local afStatusCard=Card(statusRow,30); afStatusCard.Size=UDim2.new(0.5,-5,1,0); Pad(afStatusCard,8,8,8,8)
+H.UI.Lbl.ModulStatus=Instance.new("TextLabel",afStatusCard)
+H.UI.Lbl.ModulStatus.Size=UDim2.new(1,0,1,0); H.UI.Lbl.ModulStatus.BackgroundTransparency=1
+H.UI.Lbl.ModulStatus.Text="⏳  Autofarm-Modul lädt..."; H.UI.Lbl.ModulStatus.TextColor3=D.Yellow
+H.UI.Lbl.ModulStatus.TextSize=10; H.UI.Lbl.ModulStatus.Font=Enum.Font.GothamSemibold
+H.UI.Lbl.ModulStatus.TextXAlignment=Enum.TextXAlignment.Center
+
+-- Datenbank Status
+local dbStatusCard=Card(statusRow,30); dbStatusCard.Size=UDim2.new(0.5,-5,1,0); Pad(dbStatusCard,8,8,8,8)
+H.UI.Lbl.DBStatus=Instance.new("TextLabel",dbStatusCard)
+H.UI.Lbl.DBStatus.Size=UDim2.new(1,0,1,0); H.UI.Lbl.DBStatus.BackgroundTransparency=1
+H.UI.Lbl.DBStatus.Text="⏳  Datenbank lädt..."; H.UI.Lbl.DBStatus.TextColor3=D.Yellow
+H.UI.Lbl.DBStatus.TextSize=10; H.UI.Lbl.DBStatus.Font=Enum.Font.GothamSemibold
+H.UI.Lbl.DBStatus.TextXAlignment=Enum.TextXAlignment.Center
+
+-- === RAID FARM SEKTION (ganz oben) ===
+local raidCard=Card(GamePage); Pad(raidCard,10,10,10,10); VList(raidCard,8); SecLbl(raidCard,"⚔ RAID FARM")
+local raidRow=Instance.new("Frame",raidCard); raidRow.Size=UDim2.new(1,0,0,36); raidRow.BackgroundTransparency=1; HList(raidRow,10)
+
+-- Esper Raid Button
+local esperBtn=NeonBtn(raidRow,"🔮 ESPER RAID",D.Purple,32); esperBtn.Size=UDim2.new(0.5,-5,1,0)
+esperBtn.MouseButton1Click:Connect(function()
+    if _G.HazeHUB.StartRaid and type(_G.HazeHUB.StartRaid) == "function" then
+        _G.HazeHUB.StartRaid()
+    else
+        warn("[HazeHUB] StartRaid Funktion nicht gefunden!")
+    end
+end)
+
+-- JJK Raid Button
+local jjkBtn=NeonBtn(raidRow,"🗡️ JJK RAID",D.Red,32); jjkBtn.Size=UDim2.new(0.5,-5,1,0)
+jjkBtn.MouseButton1Click:Connect(function()
+    if _G.HazeHUB.StartRaid and type(_G.HazeHUB.StartRaid) == "function" then
+        _G.HazeHUB.StartRaid()
+    else
+        warn("[HazeHUB] StartRaid Funktion nicht gefunden!")
+    end
+end)
+
+-- === WELT & KAPITEL AUSWAHL (ohne Raid) ===
+local wCard=Card(GamePage); Pad(wCard,10,10,10,10); VList(wCard,8); SecLbl(wCard,"WELT & KAPITEL AUSWAHL")
 H.UI.Lbl.WorldStatus=Instance.new("TextLabel",wCard)
 H.UI.Lbl.WorldStatus.Size=UDim2.new(1,0,0,16); H.UI.Lbl.WorldStatus.BackgroundTransparency=1
 H.UI.Lbl.WorldStatus.Text="Modus → Welt → Kapitel"; H.UI.Lbl.WorldStatus.TextColor3=D.TextLow
@@ -1424,7 +1461,7 @@ H.UI.Lbl.WorldStatus.TextSize=11; H.UI.Lbl.WorldStatus.Font=Enum.Font.GothamSemi
 H.UI.Lbl.WorldStatus.TextXAlignment=Enum.TextXAlignment.Left
 SecLbl(wCard,"SPIELMODUS")
 local modeRow=Instance.new("Frame",wCard); modeRow.Size=UDim2.new(1,0,0,28); modeRow.BackgroundTransparency=1; HList(modeRow,6)
-local MODI={{id="Story",label="📖 Story",color=D.Cyan},{id="Ranger",label="🏹 Ranger",color=D.Green},{id="Calamity",label="⚡ Calamity",color=D.Orange},{id="Raid",label="⚔ Raid",color=D.Purple}}
+local MODI={{id="Story",label="📖 Story",color=D.Cyan},{id="Ranger",label="🏹 Ranger",color=D.Green},{id="Calamity",label="⚡ Calamity",color=D.Orange}}
 H.UI.Btn.ModeBtns={}
 local function HighlightMode(activeId)
     for _,def in ipairs(MODI) do
@@ -1578,49 +1615,6 @@ H.UI.Fr.AutofarmInjection.Name="AutofarmInjection"; H.UI.Fr.AutofarmInjection.Si
 H.UI.Fr.AutofarmInjection.AutomaticSize=Enum.AutomaticSize.Y; H.UI.Fr.AutofarmInjection.BackgroundTransparency=1; H.UI.Fr.AutofarmInjection.BorderSizePixel=0
 _G.HazeShared.Container=H.UI.Fr.AutofarmInjection
 
--- DB-Werkzeuge (nebeneinander)
-do
-    local dbToolCard=Card(GamePage); Pad(dbToolCard,10,10,10,10); VList(dbToolCard,8); SecLbl(dbToolCard,"🗄  DATENBANK-WERKZEUGE")
-    H.UI.Lbl.DBToolStatus=MkLbl(dbToolCard,"Bereit.",10,D.TextLow); H.UI.Lbl.DBToolStatus.Size=UDim2.new(1,0,0,16)
-
-    local dbBtnRow=Instance.new("Frame",dbToolCard); dbBtnRow.Size=UDim2.new(1,0,0,34); dbBtnRow.BackgroundTransparency=1; HList(dbBtnRow,6)
-
-    local rrBtn=Instance.new("TextButton",dbBtnRow); rrBtn.Size=UDim2.new(0.5,-3,1,0); rrBtn.BackgroundColor3=D.CardHover; rrBtn.BackgroundTransparency=D.GlassPane
-    rrBtn.Text="🔄 Reset & Rescan"; rrBtn.TextColor3=D.Red; rrBtn.TextSize=11; rrBtn.Font=Enum.Font.GothamBold
-    rrBtn.AutoButtonColor=false; rrBtn.BorderSizePixel=0; Corner(rrBtn,8); Stroke(rrBtn,D.Red,1,0.4)
-    rrBtn.MouseButton1Click:Connect(function()
-        if rrBtn.Text:find("läuft") then return end
-        pcall(function() if isfile and isfile("HazeHUB/HazeHUB_RewardDB.json") then delfile("HazeHUB/HazeHUB_RewardDB.json") end end)
-        if _G.HazeShared and _G.HazeShared.TriggerResetRescan and type(_G.HazeShared.TriggerResetRescan) == "function" then
-            rrBtn.Text="⏳ Scan läuft..."; rrBtn.TextColor3=D.Yellow; H.UI.Lbl.DBToolStatus.Text="⏳ Scan gestartet..."; H.UI.Lbl.DBToolStatus.TextColor3=D.Yellow
-            task.spawn(function()
-                _G.HazeShared.TriggerResetRescan(function(msg) pcall(function() H.UI.Lbl.DBToolStatus.Text=msg; H.UI.Lbl.DBToolStatus.TextColor3=D.Green end) end)
-                pcall(function() rrBtn.Text="🔄 Reset & Rescan"; rrBtn.TextColor3=D.Red end)
-            end)
-        else H.UI.Lbl.DBToolStatus.Text="⚠ Autofarm nicht geladen!"; H.UI.Lbl.DBToolStatus.TextColor3=D.Orange end
-    end)
-
-    local cwBtn=Instance.new("TextButton",dbBtnRow); cwBtn.Size=UDim2.new(0.5,-3,1,0); cwBtn.BackgroundColor3=D.CardHover; cwBtn.BackgroundTransparency=D.GlassPane
-    cwBtn.Text="🗑 Clear World Cache"; cwBtn.TextColor3=D.Orange; cwBtn.TextSize=11; cwBtn.Font=Enum.Font.GothamBold
-    cwBtn.AutoButtonColor=false; cwBtn.BorderSizePixel=0; Corner(cwBtn,8); Stroke(cwBtn,D.Orange,1,0.4)
-    cwBtn.MouseButton1Click:Connect(function()
-        pcall(function() if isfile and isfile(WORLD_CACHE_FILE) then delfile(WORLD_CACHE_FILE) end end)
-        S.WorldData={}; S.WorldIds={}; S.ScanDone=false; S.ChapFolderRef=nil; S.SelWorld=nil; S.SelChap=nil
-        pcall(function()
-            for _,v in pairs(H.UI.Fr.WorldBtns:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
-            for _,v in pairs(H.UI.Fr.ChapRow:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
-            H.UI.Fr.ChapBtns={}
-            H.UI.Lbl.WorldStatus.Text="🗑 Cache gelöscht"; H.UI.Lbl.WorldStatus.TextColor3=D.Orange
-            H.UI.Lbl.ScanStatus.Text="⚠ Kein Cache"; H.UI.Lbl.ScanStatus.TextColor3=D.Orange
-            H.UI.Lbl.DBToolStatus.Text="✅ WorldCache.json gelöscht."; H.UI.Lbl.DBToolStatus.TextColor3=D.Green
-        end)
-        ApplyFallback(); pcall(RebuildWorldList)
-    end)
-
-    H.UI.Lbl.WScanProgress=MkLbl(dbToolCard,"",10,D.Yellow); H.UI.Lbl.WScanProgress.Size=UDim2.new(1,0,0,16)
-    local wsBarBg=Instance.new("Frame",dbToolCard); wsBarBg.Size=UDim2.new(1,0,0,6); wsBarBg.BackgroundColor3=Color3.fromRGB(18,26,48); wsBarBg.BorderSizePixel=0; wsBarBg.Visible=false; Corner(wsBarBg,3)
-    H.UI.Fr.WScanBarFill=Instance.new("Frame",wsBarBg); H.UI.Fr.WScanBarFill.Size=UDim2.new(0,0,1,0); H.UI.Fr.WScanBarFill.BackgroundColor3=D.Cyan; H.UI.Fr.WScanBarFill.BorderSizePixel=0; Corner(H.UI.Fr.WScanBarFill,3)
-end
 end) -- end pcall Game Tab
 
 -- ╔══════════════════════════════════════════════════════════╗
