@@ -1,7 +1,12 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – autofarm.lua  v2.8.1
+--  HazeHUB – autofarm.lua  v2.8.2
 --  GitHub: Hazeluxeeeees/HazeHub-Modules
 --
+--  v2.8.2:
+--    + Fire() / GetPlayRoomEvent(): kanonisch RS.Remote.Server.PlayRoom.Event (fix: nil Fire → Zeile 628)
+--    + ScanAllRewards: nil-sichere WorldData/story/ranger; Raid-Tasks aus Player_Data[LP.Name].ChapterLevels
+--    + Challenge-Scanner: RS.Gameplay.Game.Challenge.Items + Metadaten aus Challenge-Ordner (Values)
+--    + Queue-Wechsel: EsperRaid / JJKRaid + optional Difficulty
 --  v2.8.1:
 --    + Alle Pfade nutzen LP.Name (dynamisch, kein Hardcode)
 --    + TeleportToLobby via TeleportService (ID: 111446873000464)
@@ -12,7 +17,7 @@
 --    + Location-Check via workspace:FindFirstChild("Lobby")
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION    = "2.8.1"
+local VERSION    = "2.8.2"
 local LOBBY_ID   = 111446873000464
 local MAIN_URL   = "https://raw.githubusercontent.com/Hazeluxeeeees/Tap-Sim/refs/heads/main/script"
 
@@ -137,30 +142,56 @@ task.spawn(function()
     else warn("[HazeHub] PlayRoomEvent nicht gefunden!") end
 end)
 
+-- ★ Kanonischer PlayRoom-Remote: Remote.Server.PlayRoom.Event
+--    z. B. :FireServer("Change-World", { ["World"] = "JJKRaid" })
+local function GetPlayRoomEvent()
+    if PlayRoomEvent and PlayRoomEvent.Parent then return PlayRoomEvent end
+    local ok, ev = pcall(function()
+        return RS:WaitForChild("Remote", 8)
+            :WaitForChild("Server", 8)
+            :WaitForChild("PlayRoom", 8)
+            :WaitForChild("Event", 8)
+    end)
+    if ok and ev then
+        PlayRoomEvent = ev
+        return ev
+    end
+    return nil
+end
 
--- ★ Nil-sicherer Remote-Getter
--- Ersetze die fehlerhaften Pfade durch diesen dynamischen Finder:
+-- ★ Fire – von Deep-Scan, Raid, Challenge genutzt (war undefiniert → Absturz Zeile 628)
+local function Fire(action, data)
+    local ev = GetPlayRoomEvent()
+    if not ev then
+        warn("[HazeHub] Fire: PlayRoom Event nil – " .. tostring(action))
+        return
+    end
+    local ok, err = pcall(function()
+        if data ~= nil then
+            ev:FireServer(action, data)
+        else
+            ev:FireServer(action)
+        end
+    end)
+    if not ok then
+        warn("[HazeHub] Fire Fehler (" .. tostring(action) .. "): " .. tostring(err))
+    end
+end
+
+-- Fallback-Suche (nur wenn kanonischer Pfad fehlt)
 local function GetPlayRoomRemote()
-    -- Wir suchen jetzt flexibel im ReplicatedStorage
+    local ev = GetPlayRoomEvent()
+    if ev then return ev end
     local remoteFolder = RS:FindFirstChild("Remote") or RS:FindFirstChild("Remotes")
     if not remoteFolder then return nil end
-    
-    -- Suche tief nach dem Event (pfadunabhängig)
-    local event = remoteFolder:FindFirstChild("Event", true) or remoteFolder:FindFirstChild("PlayRoomEvent", true)
-    return event
+    return remoteFolder:FindFirstChild("Event", true) or remoteFolder:FindFirstChild("PlayRoomEvent", true)
 end
 
--- Beispiel für den Aufruf (behebt den Absturz):
-local playEvent = GetPlayRoomRemote()
-if playEvent then
-    pcall(function()
-        playEvent:FireServer("Create", {["CreateChallengeRoom"] = true})
-    end)
-else
-    warn("[HazeHUB] KRITISCH: PlayRoom Remote im Spiel nicht gefunden!")
+if not GetPlayRoomEvent() then
+    warn("[HazeHUB] KRITISCH: Remote.Server.PlayRoom.Event nicht gefunden!")
 end
 
--- ★ Nil-sicherer SafeFire (ERSETZT die bisherige SafeFire-Funktion)
+-- ★ Nil-sicherer SafeFire
 local function SafeFire(action, data)
     local remote = GetPlayRoomRemote()
     if not remote then
@@ -321,9 +352,11 @@ local function SyncInventoryWithQueue()
 
                 if CheckIsLobby() and AF.Running then
                     task.wait(2)
-                    local nextChapId, nextWorldId, nextMode = FindBestChapter(nextQ.item)
+                    local nextChapId, nextWorldId, nextMode, _nr, nextDiff = FindBestChapter(nextQ.item)
 
-                    if nextChapId and (nextWorldId or nextMode == "Calamity") then
+                    if nextChapId
+                        and (nextWorldId or nextMode == "Calamity" or nextMode == "JJKRaid" or nextMode == "EsperRaid")
+                    then
                         SetStatus(string.format("🚀 Starte direkt: [%s] %s", nextMode or "?", nextChapId), D.Cyan)
                         task.spawn(function()
                             local ok, err = pcall(function()
@@ -344,6 +377,21 @@ local function SyncInventoryWithQueue()
                                     SafeFire("Create");                                                task.wait(0.35)
                                     SafeFire("Change-Mode",    { Mode    = "Calamity" });              task.wait(0.35)
                                     SafeFire("Change-Chapter", { Chapter = nextChapId });              task.wait(0.35)
+                                    SafeFire("Submit");                                                task.wait(0.50)
+                                    SafeFire("Start")
+                                elseif nextMode == "JJKRaid" then
+                                    SafeFire("Create");                                                task.wait(0.40)
+                                    SafeFire("Change-World",   { ["World"] = "JJKRaid" });             task.wait(0.40)
+                                    SafeFire("Change-Chapter", { Chapter = nextChapId });              task.wait(0.35)
+                                    SafeFire("Submit");                                                task.wait(0.50)
+                                    SafeFire("Start")
+                                elseif nextMode == "EsperRaid" then
+                                    SafeFire("Create");                                                task.wait(0.40)
+                                    SafeFire("Change-World",   { ["World"] = "EsperRaid" });           task.wait(0.40)
+                                    SafeFire("Change-Chapter", { Chapter = nextChapId });              task.wait(0.35)
+                                    if nextDiff == "Nightmare" then
+                                        SafeFire("Change-Difficulty", { Difficulty = "Nightmare" }); task.wait(0.35)
+                                    end
                                     SafeFire("Submit");                                                task.wait(0.50)
                                     SafeFire("Start")
                                 end
@@ -530,6 +578,136 @@ local function SetScanProgress(current, total, label)
 end
 
 -- ============================================================
+--  ★ RAID_DEFS + ChapterLevels-Scanner (vor Deep-Scan & UI)
+-- ============================================================
+local RAID_DEFS = {
+    {
+        id        = "EsperRaid",
+        label     = "🔮 Esper Raid",
+        world     = "EsperRaid",
+        chapters  = {
+            { id = "Esper_Raid_Chapter1", label = "Chapter 1", modes = {"Normal","Nightmare"} },
+        },
+        scanPath  = "ChapterLevels",
+        itemsPath = "PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList",
+        accent    = Color3.fromRGB(160, 80, 255),
+    },
+    {
+        id        = "JJKRaid",
+        label     = "🌀 JJK Raid",
+        world     = "JJKRaid",
+        chapters  = {
+            { id = "JJK_Raid_Chapter1", label = "Chapter 1", modes = {"Normal"} },
+            { id = "JJK_Raid_Chapter2", label = "Chapter 2", modes = {"Normal"} },
+        },
+        scanPath  = "ChapterLevels",
+        itemsPath = "PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList",
+        accent    = Color3.fromRGB(80, 140, 255),
+    },
+}
+
+local RaidState = {
+    Active   = false,
+    Running  = false,
+    SelRaid  = nil,
+    SelChap  = nil,
+    SelMode  = "Normal",
+    BestChap = nil,
+    BestMode = nil,
+}
+
+local function ReadChapterIdsFromFolder(folder)
+    local ids = {}
+    local seen = {}
+    if not folder then return ids end
+    for _, ch in ipairs(folder:GetChildren()) do
+        if ch:IsA("UIGridLayout") or ch:IsA("UIListLayout") or ch:IsA("UIPadding") or ch:IsA("UICorner") then
+            continue
+        end
+        if ch:IsA("Folder") then
+            for _, c2 in ipairs(ch:GetChildren()) do
+                local id = tostring(c2.Name)
+                if id ~= "" and not seen[id] then
+                    seen[id] = true
+                    table.insert(ids, id)
+                end
+            end
+        else
+            local id = tostring(ch.Name)
+            if id ~= "" and not seen[id] then
+                seen[id] = true
+                table.insert(ids, id)
+            end
+        end
+    end
+    return ids
+end
+
+-- RS.Player_Data[LP.Name].ChapterLevels → Raid-Kapitel-IDs (Fallback: RAID_DEFS)
+local function GetRaidChapterIdsFromPlayerData(worldKey, fallbackChapters)
+    local ids = {}
+    local seen = {}
+    local function add(id)
+        id = tostring(id or "")
+        if id == "" or seen[id] then return end
+        seen[id] = true
+        table.insert(ids, id)
+    end
+    pcall(function()
+        local pd = RS:FindFirstChild("Player_Data")
+        if not pd then return end
+        local pf = pd:FindFirstChild(LP.Name)
+        if not pf then return end
+        local cl = pf:FindFirstChild("ChapterLevels")
+        if not cl then return end
+        local candidates = {
+            worldKey,
+            (worldKey:gsub("Raid", "_Raid")),
+            worldKey == "EsperRaid" and "Esper" or nil,
+            worldKey == "JJKRaid" and "JJK" or nil,
+        }
+        local sub = nil
+        for _, name in ipairs(candidates) do
+            if name and cl:FindFirstChild(name) then
+                sub = cl:FindFirstChild(name)
+                break
+            end
+        end
+        if sub then
+            for _, id in ipairs(ReadChapterIdsFromFolder(sub)) do
+                add(id)
+            end
+        end
+    end)
+    if #ids == 0 and type(fallbackChapters) == "table" then
+        for _, ch in ipairs(fallbackChapters) do
+            if ch and ch.id then add(ch.id) end
+        end
+    end
+    return ids
+end
+
+local function AppendRaidScanTasks(tasks)
+    local esperIds = GetRaidChapterIdsFromPlayerData("EsperRaid", RAID_DEFS[1] and RAID_DEFS[1].chapters)
+    for _, cid in ipairs(esperIds) do
+        table.insert(tasks, { worldId = "EsperRaid", chapId = cid, mode = "EsperRaid", difficulty = "Normal" })
+        table.insert(tasks, { worldId = "EsperRaid", chapId = cid, mode = "EsperRaid", difficulty = "Nightmare" })
+    end
+    local jjkIds = GetRaidChapterIdsFromPlayerData("JJKRaid", RAID_DEFS[2] and RAID_DEFS[2].chapters)
+    for _, cid in ipairs(jjkIds) do
+        table.insert(tasks, { worldId = "JJKRaid", chapId = cid, mode = "JJKRaid", difficulty = "Normal" })
+    end
+end
+
+local function RewardDbKeyForTask(t)
+    local base = tostring(t.chapId or "unknown")
+    if t.mode == "EsperRaid" and t.difficulty == "Nightmare" then
+        return base .. " [Nightmare]"
+    end
+    return base
+end
+
+-- ============================================================
 --  ★ ScanRewardsSafe
 --  Pfad: LP.PlayerGui.PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList
 --  ★ LP.Name ist bereits dynamisch durch LP = Players.LocalPlayer
@@ -614,68 +792,147 @@ local function ScanAllRewards(onProgress)
         return false
     end
     AF.Scanning = true; AF.RewardDatabase = {}
-    local WorldData = HS.GetWorldData(); local WorldIds = HS.GetWorldIds()
+    local WorldData = nil
+    local WorldIds = nil
+    pcall(function() WorldData = HS.GetWorldData() end)
+    pcall(function() WorldIds = HS.GetWorldIds() end)
+    if type(WorldData) ~= "table" then WorldData = {} end
+    if type(WorldIds) ~= "table" then WorldIds = {} end
+
     local tasks = {}
     for _, wid in ipairs(WorldIds) do
-        local wd = WorldData[wid] or {}; local isCal = wid:lower():find("calamity") ~= nil
-        for _, cid in ipairs(wd.story or {})  do table.insert(tasks, { worldId=wid, chapId=cid, mode=isCal and "Calamity" or "Story" }) end
-        for _, cid in ipairs(wd.ranger or {}) do table.insert(tasks, { worldId=wid, chapId=cid, mode="Ranger" }) end
+        local wkey = tostring(wid or "")
+        if wkey == "" then continue end
+        local wd = WorldData[wkey]
+        if type(wd) ~= "table" then continue end
+        local storyList = wd.story
+        local rangerList = wd.ranger
+        if type(storyList) ~= "table" then storyList = {} end
+        if type(rangerList) ~= "table" then rangerList = {} end
+        local isCal = wkey:lower():find("calamity") ~= nil
+        for _, cid in ipairs(storyList) do
+            if cid == nil or tostring(cid) == "" then continue end
+            table.insert(tasks, { worldId = wkey, chapId = cid, mode = isCal and "Calamity" or "Story" })
+        end
+        for _, cid in ipairs(rangerList) do
+            if cid == nil or tostring(cid) == "" then continue end
+            table.insert(tasks, { worldId = wkey, chapId = cid, mode = "Ranger" })
+        end
     end
-    local total=0; for _ in ipairs(tasks) do total=total+1 end
-    local scanned=0; local failed=0; local retried=0
-    if total == 0 then AF.Scanning=false; pcall(function() onProgress("Keine Chapters!") end); return false end
+
+    pcall(function() AppendRaidScanTasks(tasks) end)
+
+    local total = 0
+    for _ in ipairs(tasks) do total = total + 1 end
+    local scanned = 0
+    local failed = 0
+    local retried = 0
+    if total == 0 then
+        AF.Scanning = false
+        pcall(function() onProgress("Keine Chapters!") end)
+        return false
+    end
     print(string.format("[HazeHub] DEEP-SCAN START: %d Chapters", total))
-    Fire("Create"); task.wait(1.5)
+    Fire("Create")
+    task.wait(1.5)
 
     for _, t in ipairs(tasks) do
         if not AF.Scanning then break end
         scanned = scanned + 1
-        SetScanProgress(scanned, total, string.format("Scanne: %s %s...", t.worldId, t.chapId))
-        pcall(function() onProgress(string.format("Scanne %d/%d: [%s] %s", scanned, total, t.mode, t.chapId)) end)
-        print(string.format("[HazeHub] [%s] %s > %s (%d/%d)", t.mode, t.worldId, t.chapId, scanned, total))
+        local diffLabel = (t.difficulty and t.difficulty ~= "Normal") and (" " .. tostring(t.difficulty)) or ""
+        SetScanProgress(scanned, total, string.format("Scanne: %s %s%s...", t.worldId or "?", tostring(t.chapId), diffLabel))
+        pcall(function()
+            onProgress(string.format("Scanne %d/%d: [%s] %s%s", scanned, total, tostring(t.mode), tostring(t.chapId), diffLabel))
+        end)
+        print(string.format("[HazeHub] [%s] %s > %s (%d/%d)", tostring(t.mode), tostring(t.worldId), tostring(t.chapId), scanned, total))
 
         if t.mode == "Story" then
-            Fire("Create");                                             task.wait(0.5)
-            Fire("Change-World",   { World   = t.worldId });           task.wait(0.5)
+            Fire("Create")
+            task.wait(0.5)
+            Fire("Change-World", { World = t.worldId })
+            task.wait(0.5)
             Fire("Change-Chapter", { Chapter = t.chapId })
             task.wait(2.0)
         elseif t.mode == "Ranger" then
-            Fire("Create");                                             task.wait(0.5)
-            Fire("Change-Mode", { KeepWorld=t.worldId, Mode="Ranger Stage" })
+            Fire("Create")
+            task.wait(0.5)
+            Fire("Change-Mode", { KeepWorld = t.worldId, Mode = "Ranger Stage" })
             task.wait(1.0)
-            Fire("Change-World",   { World   = t.worldId });           task.wait(0.5)
+            Fire("Change-World", { World = t.worldId })
+            task.wait(0.5)
             Fire("Change-Chapter", { Chapter = t.chapId })
             task.wait(2.0)
         elseif t.mode == "Calamity" then
-            Fire("Create");                                             task.wait(0.5)
-            Fire("Change-Mode",    { Mode    = "Calamity" });          task.wait(0.5)
+            Fire("Create")
+            task.wait(0.5)
+            Fire("Change-Mode", { Mode = "Calamity" })
+            task.wait(0.5)
             Fire("Change-Chapter", { Chapter = t.chapId })
             task.wait(2.0)
+        elseif t.mode == "EsperRaid" then
+            Fire("Create")
+            task.wait(0.5)
+            Fire("Change-World", { ["World"] = "EsperRaid" })
+            task.wait(0.4)
+            Fire("Change-Chapter", { Chapter = t.chapId })
+            task.wait(2.0)
+            if t.difficulty == "Nightmare" then
+                Fire("Change-Difficulty", { Difficulty = "Nightmare" })
+                task.wait(0.35)
+            end
+        elseif t.mode == "JJKRaid" then
+            Fire("Create")
+            task.wait(0.5)
+            Fire("Change-World", { ["World"] = "JJKRaid" })
+            task.wait(0.4)
+            Fire("Change-Chapter", { Chapter = t.chapId })
+            task.wait(2.0)
+        else
+            failed = failed + 1
+            warn(string.format("[HazeHub] Scan: unbekannter Modus – überspringe (%s)", tostring(t.mode)))
+            pcall(function() onProgress("SKIP: " .. tostring(t.chapId)) end)
+            continue
         end
 
         local filled = WaitForItemsListFilled(3)
         if not filled then
-            print(string.format("[HazeHub] Retry für %s...", t.chapId))
-            task.wait(2.0); filled = WaitForItemsListFilled(2)
+            print(string.format("[HazeHub] Retry für %s...", tostring(t.chapId)))
+            task.wait(2.0)
+            filled = WaitForItemsListFilled(2)
             if filled then retried = retried + 1 end
         end
 
+        local dbKey = RewardDbKeyForTask(t)
         if filled then
             local items, hasItems = ScanRewardsSafe()
-            local cnt = 0; for _ in pairs(items) do cnt=cnt+1 end
+            local cnt = 0
+            for _ in pairs(items) do cnt = cnt + 1 end
             if hasItems then
-                AF.RewardDatabase[t.chapId] = { world=t.worldId, mode=t.mode, chapId=t.chapId, items=items }
-                print(string.format("[HazeHub] OK [%s] %s: %d Items", t.mode, t.chapId, cnt))
+                AF.RewardDatabase[dbKey] = {
+                    world = t.worldId,
+                    mode = t.mode,
+                    chapId = t.chapId,
+                    items = items,
+                    difficulty = t.difficulty,
+                }
+                print(string.format("[HazeHub] OK [%s] %s: %d Items (DB-Key: %s)", t.mode, tostring(t.chapId), cnt, dbKey))
             else
-                failed=failed+1; warn(string.format("[HazeHub] LEER [%s] %s", t.mode, t.chapId))
-                pcall(function() onProgress("LEER: "..t.chapId) end)
+                failed = failed + 1
+                warn(string.format("[HazeHub] LEER [%s] %s", t.mode, tostring(t.chapId)))
+                pcall(function() onProgress("LEER: " .. tostring(t.chapId)) end)
             end
         else
-            failed=failed+1; warn(string.format("[HazeHub] TIMEOUT [%s] %s", t.mode, t.chapId))
-            pcall(function() onProgress("TIMEOUT: "..t.chapId) end)
+            failed = failed + 1
+            warn(string.format("[HazeHub] TIMEOUT [%s] %s", t.mode, tostring(t.chapId)))
+            pcall(function() onProgress("TIMEOUT: " .. tostring(t.chapId)) end)
         end
 
-        pcall(function() Fire("Submit"); task.wait(0.4); Fire("Create"); task.wait(0.6) end)
+        pcall(function()
+            Fire("Submit")
+            task.wait(0.4)
+            Fire("Create")
+            task.wait(0.6)
+        end)
     end
 
     if DBCount() > 0 then
@@ -702,16 +959,26 @@ end
 --  BESTES CHAPTER
 -- ============================================================
 local function FindBestChapter(itemName)
-    local bestChapId=nil; local bestRate=-1; local bestWorldId=nil; local bestMode=nil
+    local bestChapId, bestRate = nil, -1
+    local bestWorldId, bestMode, bestDiff = nil, nil, nil
     for chapId, data in pairs(AF.RewardDatabase) do
-        if data.items and data.items[itemName] then
+        if type(data) == "table" and data.items and data.items[itemName] then
             local r = data.items[itemName].dropRate or 0
-            if r > bestRate then bestRate=r; bestChapId=data.chapId or chapId; bestWorldId=data.world; bestMode=data.mode end
+            if r > bestRate then
+                bestRate = r
+                bestChapId = data.chapId or chapId
+                bestWorldId = data.world
+                bestMode = data.mode
+                bestDiff = data.difficulty
+            end
         end
     end
-    if bestChapId then print(string.format("[HazeHub] Best '%s': [%s] %s (%.1f%%)", itemName, bestMode, bestChapId, bestRate))
-    else warn("[HazeHub] '"..itemName.."' nicht in DB.") end
-    return bestChapId, bestWorldId, bestMode, bestRate
+    if bestChapId then
+        print(string.format("[HazeHub] Best '%s': [%s] %s (%.1f%%)", itemName, bestMode, bestChapId, bestRate))
+    else
+        warn("[HazeHub] '" .. itemName .. "' nicht in DB.")
+    end
+    return bestChapId, bestWorldId, bestMode, bestRate, bestDiff
 end
 
 -- ============================================================
@@ -812,15 +1079,18 @@ local function LobbyActionLoop(delaySeconds)
         return false
     end
 
-    local useChapId, worldId, mode = FindBestChapter(q.item)
+    local useChapId, worldId, mode, _br, raidDiff = FindBestChapter(q.item)
 
     -- Fallback 1: irgendein Chapter aus der DB
     if not useChapId then
         for cid, data in pairs(AF.RewardDatabase) do
-            worldId    = data.world
-            mode       = data.mode
-            useChapId  = data.chapId or cid
-            break
+            if type(data) == "table" then
+                worldId   = data.world
+                mode      = data.mode
+                useChapId = data.chapId or cid
+                raidDiff  = data.difficulty
+                break
+            end
         end
     end
 
@@ -882,15 +1152,19 @@ local function LobbyActionLoop(delaySeconds)
 
             elseif mode == "JJKRaid" then
                 SafeFire("Create");                                            task.wait(0.40)
-                SafeFire("Change-World",   { World   = "JJKRaid" });           task.wait(0.40)
+                SafeFire("Change-World",   { ["World"] = "JJKRaid" });         task.wait(0.40)
                 SafeFire("Change-Chapter", { Chapter = useChapId });           task.wait(0.35)
                 SafeFire("Submit");                                            task.wait(0.50)
                 SafeFire("Start")
 
             elseif mode == "EsperRaid" then
                 SafeFire("Create");                                            task.wait(0.40)
-                SafeFire("Change-World",   { World   = "EsperRaid" });         task.wait(0.40)
+                SafeFire("Change-World",   { ["World"] = "EsperRaid" });       task.wait(0.40)
                 SafeFire("Change-Chapter", { Chapter = useChapId });           task.wait(0.35)
+                if raidDiff == "Nightmare" then
+                    SafeFire("Change-Difficulty", { Difficulty = "Nightmare" })
+                    task.wait(0.35)
+                end
                 SafeFire("Submit");                                            task.wait(0.50)
                 SafeFire("Start")
             end
@@ -1228,86 +1502,110 @@ local AF_Challenge = {
     SelIdx   = nil,
 }
 
+local function ReadChallengeMetaFromFolder(folder)
+    local chapName, world, chapter = "Challenge", "Unknown", "Unknown"
+    if not folder then return chapName, world, chapter end
+    pcall(function()
+        local function gv(name)
+            local o = folder:FindFirstChild(name)
+            if o and (o:IsA("StringValue") or o:IsA("IntValue") or o:IsA("NumberValue") or o:IsA("ObjectValue")) then
+                return tostring(o.Value)
+            end
+            return nil
+        end
+        chapName = gv("ChallengeName") or chapName
+        world = gv("World") or world
+        chapter = gv("Chapter") or chapter
+    end)
+    return chapName, world, chapter
+end
+
 local function ScanChallengeItems()
     AF_Challenge.Items = {}
-    local ok, challengeFolder = pcall(function()
-        -- ★ Pfad: RS.Gameplay.Game.Challenge
-        return RS:WaitForChild("Gameplay", 10)
-                 :WaitForChild("Game",      10)
-                 :WaitForChild("Challenge", 10)
+    local challengeFolder = nil
+    local ok = pcall(function()
+        challengeFolder = RS:WaitForChild("Gameplay", 10):WaitForChild("Game", 10):WaitForChild("Challenge", 10)
     end)
     if not ok or not challengeFolder then
-        warn("[HazeHub] ScanChallengeItems: Pfad RS.Gameplay.Game.Challenge nicht gefunden.")
+        warn("[HazeHub] ScanChallengeItems: RS.Gameplay.Game.Challenge nicht gefunden.")
         return 0
     end
 
-    for _, item in ipairs(challengeFolder:GetChildren()) do
-        -- Layout-Objekte überspringen
+    local chapName, world, chapter = ReadChallengeMetaFromFolder(challengeFolder)
+
+    local itemsFolder = challengeFolder:FindFirstChild("Items")
+    if not itemsFolder then
+        warn("[HazeHub] ScanChallengeItems: RS.Gameplay.Game.Challenge.Items fehlt.")
+        return 0
+    end
+
+    for _, item in ipairs(itemsFolder:GetChildren()) do
         if item:IsA("UIGridLayout") or item:IsA("UIListLayout")
-        or item:IsA("UIPadding")    or item:IsA("UICorner")
-        or item:IsA("UIScale") then continue end
+            or item:IsA("UIPadding") or item:IsA("UICorner") or item:IsA("UIScale") then
+            continue
+        end
 
-        -- ★ Attribute zuerst lesen, dann Children-Fallback
         local dropRate = tonumber(item:GetAttribute("DropRate")) or 0
-        local maxDrop  = tonumber(item:GetAttribute("MaxDrop"))  or 1
-        local minDrop  = tonumber(item:GetAttribute("MinDrop"))  or 1
+        local maxDrop  = tonumber(item:GetAttribute("MaxDrop")) or 1
+        local minDrop  = tonumber(item:GetAttribute("MinDrop")) or 1
 
-        -- Children-Fallback falls Attribute fehlen
         if dropRate == 0 then
             local dr = item:FindFirstChild("DropRate")
-            if dr then dropRate = tonumber(dr.Value) or 0 end
+            if dr and dr.Value ~= nil then dropRate = tonumber(dr.Value) or 0 end
         end
         if maxDrop == 1 then
             local md = item:FindFirstChild("MaxDrop")
-            if md then maxDrop = tonumber(md.Value) or 1 end
+            if md and md.Value ~= nil then maxDrop = tonumber(md.Value) or 1 end
         end
         if minDrop == 1 then
             local mi = item:FindFirstChild("MinDrop")
-            if mi then minDrop = tonumber(mi.Value) or 1 end
+            if mi and mi.Value ~= nil then minDrop = tonumber(mi.Value) or 1 end
         end
 
-        -- ChallengeName / World / Chapter aus Attributen
-        local chapName = item:GetAttribute("ChallengeName")
-        if not chapName then
-            local cv = item:FindFirstChild("ChallengeName")
-            chapName = cv and tostring(cv.Value) or item.Name
-        end
-
-        local world = item:GetAttribute("World")
-        if not world then
-            local wv = item:FindFirstChild("World")
-            world = wv and tostring(wv.Value) or "Unknown"
-        end
-
-        local chapter = item:GetAttribute("Chapter")
-        if not chapter then
-            local cv2 = item:FindFirstChild("Chapter")
-            chapter = cv2 and tostring(cv2.Value) or "Unknown"
-        end
-
-        -- ★ Score: DropRate × Durchschnitt(Min+Max) / 2
         local avgDrop = (minDrop + maxDrop) / 2
-        local score   = dropRate * avgDrop
+        local score = dropRate * avgDrop
 
         table.insert(AF_Challenge.Items, {
-            name      = item.Name,      -- Ordner-Name (intern)
-            chapName  = chapName,        -- Anzeige-Name im GUI
-            world     = world,
-            chapter   = chapter,
-            dropRate  = dropRate,
-            minDrop   = minDrop,
-            maxDrop   = maxDrop,
-            score     = score,           -- für Sortierung nach Effizienz
+            name     = item.Name,
+            chapName = chapName,
+            world    = world,
+            chapter  = chapter,
+            dropRate = dropRate,
+            minDrop  = minDrop,
+            maxDrop  = maxDrop,
+            score    = score,
         })
     end
 
-    -- Nach Score absteigend sortieren (bester Chapter zuerst)
     table.sort(AF_Challenge.Items, function(a, b)
         return a.score > b.score
     end)
 
     print(string.format("[HazeHub] ScanChallengeItems: %d Items gefunden.", #AF_Challenge.Items))
     return #AF_Challenge.Items
+end
+
+local function StartChallengeLoop()
+    if AF_Challenge.Running then return end
+    local sel = AF_Challenge.SelIdx and AF_Challenge.Items[AF_Challenge.SelIdx]
+    if not sel then
+        SetStatus("⚠ Kein Challenge-Item gewählt!", D.Orange)
+        return
+    end
+    AF_Challenge.Active = true
+    AF_Challenge.Running = true
+    task.spawn(function()
+        SetStatus(string.format("⚡ Challenge: %s", sel.chapName or sel.name), D.Cyan)
+        pcall(function()
+            Fire("Create", { ["CreateChallengeRoom"] = true })
+        end)
+        while AF_Challenge.Running and AF_Challenge.Active do
+            task.wait(2)
+        end
+        AF_Challenge.Running = false
+        AF_Challenge.Active = false
+        SetStatus("Challenge beendet.", D.TextMid)
+    end)
 end
 
 -- ── Challenge UI ──────────────────────────────────────────────
@@ -1417,50 +1715,20 @@ chalStopBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
---  ★ RAID FUNCTION (Esper & JJK)
+--  ★ RAID FUNCTION (Esper & JJK)  — RAID_DEFS / RaidState weiter oben
 -- ============================================================
-local RAID_DEFS = {
-    {
-        id        = "EsperRaid",
-        label     = "🔮 Esper Raid",
-        world     = "EsperRaid",
-        chapters  = {
-            { id = "Esper_Raid_Chapter1", label = "Chapter 1", modes = {"Normal","Nightmare"} },
-        },
-        scanPath  = "ChapterLevels",
-        itemsPath = "PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList",
-        accent    = Color3.fromRGB(160, 80, 255),
-    },
-    {
-        id        = "JJKRaid",
-        label     = "🌀 JJK Raid",
-        world     = "JJKRaid",
-        chapters  = {
-            { id = "JJK_Raid_Chapter1", label = "Chapter 1", modes = {"Normal"} },
-            { id = "JJK_Raid_Chapter2", label = "Chapter 2", modes = {"Normal"} },
-        },
-        scanPath  = "ChapterLevels",
-        itemsPath = "PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList",
-        accent    = Color3.fromRGB(80, 140, 255),
-    },
-}
-
-local RaidState = {
-    Active   = false,
-    Running  = false,
-    SelRaid  = nil,   -- RAID_DEFS index
-    SelChap  = nil,   -- chapter index
-    SelMode  = "Normal",
-    BestChap = nil,   -- auto-detected
-    BestMode = nil,
-}
 
 -- Scanne Drop-Daten aus dem PlayRoom GUI
 local function ScanRaidDrops(raidId)
     local results = {}
     pcall(function()
-        local LP = game.Players.LocalPlayer
-        local itemsList = LP.PlayerGui.PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList
+        local plr = game.Players.LocalPlayer
+        if not plr or not plr.PlayerGui then return end
+        local itemsList = nil
+        pcall(function()
+            itemsList = plr.PlayerGui.PlayRoom.Main.GameStage.Main.Base.Rewards.ItemsList
+        end)
+        if not itemsList then return end
         for _, item in ipairs(itemsList:GetChildren()) do
             if item:IsA("UIGridLayout") or item:IsA("UIListLayout") then continue end
             local iname    = item.Name
@@ -1515,7 +1783,7 @@ local function FireStartRaid(raidDef, chapDef, mode)
     pcall(function()
         Fire("Create")
         task.wait(0.4)
-        Fire("Change-World", { World = raidDef.world })
+        Fire("Change-World", { ["World"] = raidDef.world })
         task.wait(0.4)
         Fire("Change-Chapter", { Chapter = chapDef.id })
         task.wait(0.4)
@@ -1782,8 +2050,4 @@ pcall(function()
 end)
 print(string.format("[HazeHub] autofarm.lua v%s geladen | Spieler: %s | DB: %d Chapters", VERSION, LP.Name, DBCount()))
 
--- Am Ende der Datei (NACH allen Funktionen):
-if _G.HazeShared and _G.HazeShared.SetModuleLoaded then
-    _G.HazeShared.SetModuleLoaded(VERSION)
-end
-return AF -- (Oder TM für Teams)
+return AF
