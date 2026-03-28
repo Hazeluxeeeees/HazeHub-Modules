@@ -323,8 +323,7 @@ local function BuildItemList(parent, folderGetter, shopDef, acc)
             end)
 
             local row = Instance.new("Frame", container)
-            row.Size = UDim2.new(1,0,0,48)  -- Kompaktere Höhe für mehr Items
-            row.BackgroundColor3 = D.Card
+            row.Size = UDim2.new(1,0,0,72); row.BackgroundColor3 = D.Card
             row.BackgroundTransparency = D.GlassPane or 0.18
             row.BorderSizePixel=0; Corner(row,8); Stroke(row,acc,1,0.6)
 
@@ -445,24 +444,15 @@ local function BuildShop(opts)
 end
 
 -- ============================================================
---  SHOPS 2x2 LAYOUT (alle Shops nebeneinander)
--- ============================================================
-local shopsRow1 = Instance.new("Frame", ShopPage)
-shopsRow1.Size = UDim2.new(1, 0, 0, 0)
-shopsRow1.AutomaticSize = Enum.AutomaticSize.Y
-shopsRow1.BackgroundTransparency = 1
-HList(shopsRow1, 8)
-
--- ============================================================
---  SHOP 1 – GHOUL HUNT - linke Spalte
+--  SHOP 1 – GHOUL HUNT
 --  Pfad  : RS.Player_Data.[Name].GhoulHunt
 --  Remote: GhoulHuntExchange(ItemName, Menge)
---  Währung: RCells
+--  Währung: RCCells
 -- ============================================================
 BuildShop({
-    parent       = shopsRow1,
+    parent       = ShopPage,
     name         = "👻  Ghoul Hunt",
-    currencyKey  = "RCells",
+    currencyKey  = "RCCells",
     accent       = D.Teal,
     timerType    = "daily415",
     folderGetter = function()
@@ -491,13 +481,13 @@ BuildShop({
 })
 
 -- ============================================================
---  SHOP 2 – MERCHANT - rechte Spalte
+--  SHOP 2 – MERCHANT
 --  Pfad  : RS.Player_Data.[Name].Merchant
 --  Remote: Merchant(ItemName, Menge)
 --  Währung: Gold
 -- ============================================================
 BuildShop({
-    parent       = shopsRow1,
+    parent       = ShopPage,
     name         = "🏦  Merchant",
     currencyKey  = "Gold",
     accent       = D.Gold,
@@ -526,25 +516,13 @@ BuildShop({
 })
 
 -- ============================================================
---  SHOPS ZWEITE ROW (Calamity + Raid)
--- ============================================================
-local shopsRow2 = Instance.new("Frame", ShopPage)
-shopsRow2.Size = UDim2.new(1, 0, 0, 0)
-shopsRow2.AutomaticSize = Enum.AutomaticSize.Y
-shopsRow2.BackgroundTransparency = 1
-HList(shopsRow2, 8)
-
--- ============================================================
---  SHOP 3 – CALAMITY SHOP (FireForce + JJK) - linke Spalte
+--  SHOP 3 – CALAMITY (FireForce + JJK)
 --  ★ Pfad : RS.Player_Data.[Name].Calamity_Shop.FireForce / .JJK
 --  Remote: Calamity_Shop(ShopType, ItemName, Menge)
 --  Währung: Sol Token | Cursed Essence
 -- ============================================================
 do
-    local calCard = Card(shopsRow2)
-    calCard.Size = UDim2.new(0.5, -4, 0, 0)
-    calCard.AutomaticSize = Enum.AutomaticSize.Y
-    Pad(calCard,10,12,10,12); VList(calCard,8)
+    local calCard = Card(ShopPage); Pad(calCard,10,12,10,12); VList(calCard,8)
     Stroke(calCard, D.Orange, 1.5, 0.25)
 
     local hdr = Instance.new("TextLabel",calCard)
@@ -609,16 +587,13 @@ do
 end
 
 -- ============================================================
---  SHOP 4 – RAID SHOP (Esper + JJK) - rechte Spalte
+--  SHOP 4 – RAID SHOP (Esper + JJK)
 --  ★ Pfad : RS.Player_Data.[Name].JJK_Raid_Shop.Esper / .JJK
 --  Remote: JJK_RaidShop(ShopType, ItemName, Menge)
 --  Währung: Esper Token | Cursed Scrolls
 -- ============================================================
 do
-    local raidCard = Card(shopsRow2)
-    raidCard.Size = UDim2.new(0.5, -4, 0, 0)
-    raidCard.AutomaticSize = Enum.AutomaticSize.Y
-    Pad(raidCard,10,12,10,12); VList(raidCard,8)
+    local raidCard = Card(ShopPage); Pad(raidCard,10,12,10,12); VList(raidCard,8)
     Stroke(raidCard, D.Purple, 1.5, 0.25)
 
     local hdr = Instance.new("TextLabel",raidCard)
