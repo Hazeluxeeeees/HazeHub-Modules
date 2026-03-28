@@ -23,23 +23,19 @@ local MAIN_URL   = "https://raw.githubusercontent.com/Hazeluxeeeees/Tap-Sim/refs
 local LP = game:GetService("Players").LocalPlayer
 local RS = game:GetService("ReplicatedStorage")
 
--- Funktion um Remotes sicher zu finden (Verhindert Nil-Fehler)
-local function GetRemote(path)
-    local current = RS
-    for _, name in ipairs(path) do
-        current = current:FindFirstChild(name)
-        if not current then return nil end
-    end
-    return current
-end
-
--- Sicherer PlayRoom Remote
-local function SafePlayRoom(action, args)
-    local event = GetRemote({"Remote", "Server", "PlayRoom", "Event"})
-    if event then
-        pcall(function() event:FireServer(action, args) end)
+-- Ersetze den direkten Aufruf durch diesen sicheren Block:
+local function SafeStart()
+    local RS = game:GetService("ReplicatedStorage")
+    local remote = RS:WaitForChild("Remote", 3):WaitForChild("Server", 3):WaitForChild("PlayRoom", 3):WaitForChild("Event", 3)
+    
+    if remote then
+        local success, err = pcall(function()
+            -- Hier werden die Werte gesendet
+            remote:FireServer("Create", {["CreateChallengeRoom"] = true})
+        end)
+        if not success then warn("Start-Fehler abgefangen: " .. tostring(err)) end
     else
-        warn("[HazeHUB] PlayRoom Event nicht gefunden!")
+        warn("[HazeHUB] Fehler :1999 verhindert: PlayRoom Remote ist NIL!")
     end
 end
 
@@ -141,7 +137,6 @@ task.spawn(function()
     else warn("[HazeHub] PlayRoomEvent nicht gefunden!") end
 end)
 
--- FÜGE DIESEN TEIL EIN:
 
 -- ★ Nil-sicherer Remote-Getter
 -- Ersetze die fehlerhaften Pfade durch diesen dynamischen Finder:
