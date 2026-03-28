@@ -1,6 +1,11 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – trait.lua  v2.4.0
+--  HazeHUB – trait.lua  v2.5.0
 --
+--  v2.5.0:
+--    ✓ ApplyTraitResponsiveLayout: Touch / HS._isTouchClient → schmale Spalten, Unit-Grid 1 Kachel/Zeile
+--    ✓ Rating-Grid + Stat-Mode: Mobile vs. PC (FillDirection / MaxCells)
+--    ✓ Trait-Übersicht: UIListLayout + AutomaticSize (lange Stats, z. B. Sovereign)
+--    ✓ ScrollBarThickness 0 + AutomaticCanvasSize wo sinnvoll
 --  v2.4.0:
 --    ✓ Multi-Selection Stat-Reroll: Checkboxen für alle Ratings
 --      (C-, C, C+, B-, B, B+, A-, A, A+, S-, S, S+, SS, SSS, O-, O, O+)
@@ -12,7 +17,7 @@
 --    ✓ Session/Webhook: nach manuellem Roll → RecordSessionTrait (Main/Sub)
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "2.4.0"
+local VERSION = "2.5.0"
 
 -- ── Warten bis HazeShared bereit ──────────────────────────────
 local _w = 0
@@ -49,6 +54,7 @@ end)
 
 local RS = game:GetService("ReplicatedStorage")
 local LP = game.Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
 
 -- ── Trait-Daten laden ─────────────────────────────────────────
 local TraitData, DivineTraitData = nil, nil
@@ -254,12 +260,12 @@ unitScroll.Name                 = "UnitGridScroll"
 unitScroll.Size                 = UDim2.new(1, 0, 0, 240)
 unitScroll.BackgroundTransparency = 1
 unitScroll.BorderSizePixel      = 0
-unitScroll.ScrollBarThickness   = 4
+unitScroll.ScrollBarThickness   = 0
 unitScroll.ScrollBarImageColor3 = D.CyanDim
 unitScroll.ScrollingEnabled     = true
 unitScroll.ScrollingDirection   = Enum.ScrollingDirection.Y
 unitScroll.CanvasSize           = UDim2.new(0, 0, 0, 0)
-unitScroll.AutomaticCanvasSize  = Enum.AutomaticSize.None
+unitScroll.AutomaticCanvasSize  = Enum.AutomaticSize.Y
 unitScroll.ClipsDescendants     = true
 
 local unitListFrame = Instance.new("Frame", unitScroll)
@@ -277,8 +283,7 @@ unitGrid.SortOrder             = Enum.SortOrder.LayoutOrder
 
 local function refreshUnitScrollCanvas()
     local y = unitGrid.AbsoluteContentSize.Y
-    unitListFrame.Size   = UDim2.new(1, 0, 0, y)
-    unitScroll.CanvasSize = UDim2.new(0, 0, 0, y + 4)
+    unitListFrame.Size = UDim2.new(1, 0, 0, y)
 end
 unitGrid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(refreshUnitScrollCanvas)
 TR.UI.Fr.UnitList = unitListFrame
@@ -1078,7 +1083,7 @@ ratingScroll.CanvasSize          = UDim2.new(0, 0, 0, 0)
 ratingScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 ratingScroll.BackgroundTransparency = 1
 ratingScroll.BorderSizePixel     = 0
-ratingScroll.ScrollBarThickness  = 4
+ratingScroll.ScrollBarThickness  = 0
 ratingScroll.ScrollBarImageColor3 = D.CyanDim
 ratingScroll.ScrollingEnabled    = true
 ratingScroll.ScrollingDirection  = Enum.ScrollingDirection.Y
@@ -1583,6 +1588,47 @@ trListFrame.AutomaticSize         = Enum.AutomaticSize.Y
 trListFrame.BackgroundTransparency = 1
 VList(trListFrame, 3)
 
+local function ApplyTraitResponsiveLayout()
+    local touch = (HS._isTouchClient == true) or UserInputService.TouchEnabled
+    if touch then
+        unitGrid.FillDirection = Enum.FillDirection.Horizontal
+        unitGrid.FillDirectionMaxCells = 1
+        unitGrid.CellSize = UDim2.new(1, -12, 0, 76)
+        unitGrid.CellPadding = UDim2.new(0, 6, 0, 8)
+        unitCard.Size = UDim2.new(1, -8, 0, 0)
+        unitCard.AutomaticSize = Enum.AutomaticSize.Y
+        overviewCard.Size = UDim2.new(1, -8, 0, 0)
+        overviewCard.AutomaticSize = Enum.AutomaticSize.Y
+        ratingGridLayout.FillDirection = Enum.FillDirection.Horizontal
+        ratingGridLayout.FillDirectionMaxCells = 2
+        ratingGridLayout.CellSize = UDim2.new(0.48, -4, 0, 30)
+        if statModeLayout then
+            statModeLayout.FillDirection = Enum.FillDirection.Vertical
+            statModeLayout.CellSize = UDim2.new(1, -4, 0, 28)
+        end
+    else
+        unitGrid.FillDirection = Enum.FillDirection.Horizontal
+        unitGrid.FillDirectionMaxCells = 0
+        unitGrid.CellSize = UDim2.new(0, 150, 0, 180)
+        unitGrid.CellPadding = UDim2.new(0, 6, 0, 8)
+        unitCard.Size = UDim2.new(1, 0, 0, 0)
+        unitCard.AutomaticSize = Enum.AutomaticSize.Y
+        overviewCard.Size = UDim2.new(1, 0, 0, 0)
+        overviewCard.AutomaticSize = Enum.AutomaticSize.Y
+        ratingGridLayout.FillDirection = Enum.FillDirection.Horizontal
+        ratingGridLayout.FillDirectionMaxCells = 3
+        ratingGridLayout.CellSize = UDim2.new(0.33, -4, 0, 28)
+        if statModeLayout then
+            statModeLayout.FillDirection = Enum.FillDirection.Horizontal
+            statModeLayout.CellSize = UDim2.new(0.49, 0, 0, 26)
+        end
+    end
+    task.defer(function()
+        pcall(refreshUnitScrollCanvas)
+    end)
+end
+_G.HazeShared._ApplyTraitResponsiveLayout = ApplyTraitResponsiveLayout
+
 local function BuildTraitOverview(filter)
     for _, v in pairs(trListFrame:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
     filter = (filter or ""):lower()
@@ -1610,47 +1656,68 @@ local function BuildTraitOverview(filter)
         row.BackgroundColor3 = D.Card
         Stroke(row, col, 1, 0.5)
 
+        local acBar = Instance.new("Frame", row)
+        acBar.Name = "AccentBar"
+        acBar.Size = UDim2.new(0, 3, 0, 40)
+        acBar.Position = UDim2.new(0, 0, 0, 0)
+        acBar.BackgroundColor3 = col
+        acBar.BorderSizePixel = 0
+        Corner(acBar, 2)
+
         local inner = Instance.new("Frame", row)
-        inner.Size                  = UDim2.new(1, 0, 1, 0)
+        inner.Size = UDim2.new(1, -6, 0, 0)
+        inner.Position = UDim2.new(0, 3, 0, 0)
+        inner.AutomaticSize = Enum.AutomaticSize.Y
         inner.BackgroundTransparency = 1
         Pad(inner, 5, 8, 5, 8)
 
-        local acBar = Instance.new("Frame", row)
-        acBar.Size             = UDim2.new(0, 3, 1, 0)
-        acBar.BackgroundColor3 = col
-        acBar.BorderSizePixel  = 0
-        Corner(acBar, 2)
+        local innerLay = Instance.new("UIListLayout", inner)
+        innerLay.FillDirection = Enum.FillDirection.Vertical
+        innerLay.Padding = UDim.new(0, 4)
+        innerLay.SortOrder = Enum.SortOrder.LayoutOrder
 
-        local nL = Instance.new("TextLabel", inner)
-        nL.Size                  = UDim2.new(0.65, 0, 0, 18)
+        local headRow = Instance.new("Frame", inner)
+        headRow.Size = UDim2.new(1, 0, 0, 18)
+        headRow.BackgroundTransparency = 1
+
+        local nL = Instance.new("TextLabel", headRow)
+        nL.Size = UDim2.new(0.65, 0, 1, 0)
         nL.BackgroundTransparency = 1
-        nL.Text                  = entry.name
-        nL.TextColor3            = col
-        nL.TextSize              = 16
-        nL.Font                  = Enum.Font.GothamBold
-        nL.TextXAlignment        = Enum.TextXAlignment.Left
+        nL.Text = entry.name
+        nL.TextColor3 = col
+        nL.TextSize = 16
+        nL.Font = Enum.Font.GothamBold
+        nL.TextXAlignment = Enum.TextXAlignment.Left
 
-        local rL = Instance.new("TextLabel", inner)
-        rL.Position               = UDim2.new(0.65, 0, 0, 0)
-        rL.Size                   = UDim2.new(0.35, 0, 0, 18)
+        local rL = Instance.new("TextLabel", headRow)
+        rL.Size = UDim2.new(0.35, 0, 1, 0)
+        rL.Position = UDim2.new(0.65, 0, 0, 0)
         rL.BackgroundTransparency = 1
-        rL.Text                   = (td and td.Rarity) or ""
-        rL.TextColor3             = col
-        rL.TextSize               = 14
-        rL.Font                   = Enum.Font.GothamMedium
-        rL.TextXAlignment         = Enum.TextXAlignment.Right
+        rL.Text = (td and td.Rarity) or ""
+        rL.TextColor3 = col
+        rL.TextSize = 14
+        rL.Font = Enum.Font.GothamMedium
+        rL.TextXAlignment = Enum.TextXAlignment.Right
+
+        local function syncBarHeight()
+            local h = inner.AbsoluteSize.Y
+            if h > 0 then acBar.Size = UDim2.new(0, 3, 0, h) end
+        end
+        inner:GetPropertyChangedSignal("AbsoluteSize"):Connect(syncBarHeight)
+        innerLay:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncBarHeight)
+        task.defer(syncBarHeight)
 
         if td and td.Description then
             local dL = Instance.new("TextLabel", inner)
-            dL.Size                  = UDim2.new(1, 0, 0, 16)
-            dL.Position              = UDim2.new(0, 0, 0, 20)
+            dL.Size = UDim2.new(1, 0, 0, 0)
+            dL.AutomaticSize = Enum.AutomaticSize.Y
             dL.BackgroundTransparency = 1
-            dL.Text                  = td.Description
-            dL.TextColor3            = D.TextLow
-            dL.TextSize              = 14
-            dL.Font                  = Enum.Font.GothamMedium
-            dL.TextXAlignment        = Enum.TextXAlignment.Left
-            dL.TextWrapped           = true
+            dL.Text = td.Description
+            dL.TextColor3 = D.TextLow
+            dL.TextSize = 14
+            dL.Font = Enum.Font.GothamMedium
+            dL.TextXAlignment = Enum.TextXAlignment.Left
+            dL.TextWrapped = true
         end
         if td and td.Stats then
             local statParts = {}
@@ -1660,15 +1727,15 @@ local function BuildTraitOverview(filter)
             end
             if #statParts > 0 then
                 local sL = Instance.new("TextLabel", inner)
-                sL.Size                  = UDim2.new(1, 0, 0, 16)
-                sL.Position              = UDim2.new(0, 0, 0, td and td.Description and 38 or 20)
+                sL.Size = UDim2.new(1, 0, 0, 0)
+                sL.AutomaticSize = Enum.AutomaticSize.Y
                 sL.BackgroundTransparency = 1
-                sL.Text                  = table.concat(statParts, ", ")
-                sL.TextColor3            = col
-                sL.TextSize              = 14
-                sL.Font                  = Enum.Font.GothamBold
-                sL.TextXAlignment        = Enum.TextXAlignment.Left
-                sL.TextWrapped           = true
+                sL.Text = table.concat(statParts, ", ")
+                sL.TextColor3 = col
+                sL.TextSize = 14
+                sL.Font = Enum.Font.GothamBold
+                sL.TextXAlignment = Enum.TextXAlignment.Left
+                sL.TextWrapped = true
             end
         end
     end
@@ -1692,8 +1759,10 @@ task.delay(1, function()
         ScanUnits()
         BuildUnitList("")
         BuildTraitOverview("")
+        pcall(ApplyTraitResponsiveLayout)
     end)
 end)
+task.defer(function() pcall(ApplyTraitResponsiveLayout) end)
 
 pcall(function()
     if HS.ApplySharpTypography then
