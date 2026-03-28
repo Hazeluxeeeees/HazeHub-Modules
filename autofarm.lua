@@ -92,6 +92,344 @@ local SETTINGS_FILE = FOLDER .. "/" .. saveFile
 if makefolder then pcall(function() makefolder(FOLDER) end) end
 
 -- ============================================================
+--  CHALLENGE MODUL - ITEM SCANNING & MANAGEMENT
+-- ============================================================
+local function ScanChallenges()
+    local challenges = {}
+    
+    -- Pfad: ReplicatedStorage.Gameplay.Game.Challenge
+    local challengeFolder = nil
+    local success, result = pcall(function()
+        local gameplay = game:GetService("ReplicatedStorage"):WaitForChild("Gameplay", 3)
+        if not gameplay then return nil end
+        
+        local gameFolder = gameplay:WaitForChild("Game", 3)
+        if not gameFolder then return nil end
+        
+        return gameFolder:WaitForChild("Challenge", 3)
+    end)
+    
+    if not success or not result then
+        warn("[HazeHUB] Challenge Pfad nicht gefunden: ReplicatedStorage.Gameplay.Game.Challenge")
+        return challenges
+    end
+    
+    challengeFolder = result
+    
+    -- Alle Challenges scannen
+    for _, challenge in pairs(challengeFolder:GetChildren()) do
+        if challenge:IsA("Folder") or challenge:IsA("Model") then
+            local challengeData = {
+                id = challenge.Name,
+                label = challenge.Name,
+                world = "",
+                chapter = "",
+                items = {}
+            }
+            
+            -- Challenge-Properties extrahieren
+            local worldValue = challenge:FindFirstChild("World")
+            local chapterValue = challenge:FindFirstChild("Chapter")
+            
+            if worldValue and worldValue:IsA("StringValue") then
+                challengeData.world = worldValue.Value
+            end
+            
+            if chapterValue and chapterValue:IsA("StringValue") then
+                challengeData.chapter = chapterValue.Value
+            end
+            
+            -- WICHTIG: Nur Items aus .Items Unterordner scannen (nicht den Challenge-Ordner selbst!)
+            local itemsFolder = challenge:FindFirstChild("Items")
+            if itemsFolder then
+                for _, item in pairs(itemsFolder:GetChildren()) do
+                    if item:IsA("Folder") or item:IsA("Model") then
+                        local itemData = {
+                            id = item.Name,
+                            label = item.Name,
+                            dropRate = 0,
+                            maxDrop = 0,
+                            minDrop = 0
+                        }
+                        
+                        -- Attribute extrahieren
+                        local dropRateAttr = item:GetAttribute("DropRate")
+                        local maxDropAttr = item:GetAttribute("MaxDrop")
+                        local minDropAttr = item:GetAttribute("MinDrop")
+                        
+                        if dropRateAttr then itemData.dropRate = tonumber(dropRateAttr) or 0 end
+                        if maxDropAttr then itemData.maxDrop = tonumber(maxDropAttr) or 0 end
+                        if minDropAttr then itemData.minDrop = tonumber(minDropAttr) or 0 end
+                        
+                        table.insert(challengeData.items, itemData)
+                        print("[HazeHUB] Challenge Item gefunden: " .. itemData.label .. " (DropRate: " .. itemData.dropRate .. ")")
+                    end
+                end
+            end
+            
+            table.insert(challenges, challengeData)
+            print("[HazeHUB] Challenge gefunden: " .. challengeData.label .. " (World: " .. challengeData.world .. ", Chapter: " .. challengeData.chapter .. ", Items: " .. #challengeData.items .. ")")
+        end
+    end
+    
+    return challenges
+end
+
+-- ============================================================
+--  ERWEITERTE RAID-KATEGORISIERUNG
+-- ============================================================
+local function ScanAdvancedRaids()
+    local raids = {}
+    local LP = game.Players.LocalPlayer
+    if not LP then return raids end
+    
+    -- ChapterLevels Pfad
+    local chapterLevels = nil
+    local success, result = pcall(function()
+        local playerData = game:GetService("ReplicatedStorage"):WaitForChild("Player_Data", 3)
+        if not playerData then return nil end
+        
+        local playerFolder = playerData:WaitForChild(LP.Name, 3)
+        if not playerFolder then return nil end
+        
+        return playerFolder:WaitForChild("ChapterLevels", 3)
+    end)
+    
+    if not success or not result then
+        warn("[HazeHUB] ChapterLevels für Raid-Scan nicht gefunden")
+        return raids
+    end
+    
+    chapterLevels = result
+    
+    -- Esper Raid scannen
+    local esperRaid = chapterLevels:FindFirstChild("Esper_Raid_Chapter1")
+    if esperRaid then
+        table.insert(raids, {
+            id = "Esper_Raid_Chapter1_Normal",
+            label = "🔮 Esper Raid (Normal)",
+            type = "Raid",
+            world = "Esper",
+            difficulty = "Normal",
+            path = esperRaid:GetFullName()
+        })
+        
+        -- Nightmare Schwierigkeit (falls vorhanden)
+        local nightmareFolder = esperRaid:FindFirstChild("Nightmare")
+        if nightmareFolder then
+            table.insert(raids, {
+                id = "Esper_Raid_Chapter1_Nightmare",
+                label = "🔮 Esper Raid (Nightmare)",
+                type = "Raid",
+                world = "Esper",
+                difficulty = "Nightmare",
+                path = nightmareFolder:GetFullName()
+            })
+        end
+        
+        print("[HazeHUB] Esper Raid gescannt: Normal" .. (nightmareFolder and " + Nightmare" or ""))
+    end
+    
+    -- JJK Raids scannen
+    for i = 1, 2 do
+        local jjkRaid = chapterLevels:FindFirstChild("JJK_Raid_Chapter" .. i)
+        if jjkRaid then
+            table.insert(raids, {
+                id = "JJK_Raid_Chapter" .. i .. "_Normal",
+                label = "🌀 JJK Raid Chapter " .. i .. " (Normal)",
+                type = "Raid",
+                world = "JJK",
+                difficulty = "Normal",
+                path = jjkRaid:GetFullName()
+            })
+            
+            print("[HazeHUB] JJK Raid Chapter " .. i .. " gescannt")
+        end
+    end
+    
+    return raids
+end
+
+-- ============================================================
+--  SMART-FARM EFFIZIENZ-ALGORITHMUS
+-- ============================================================
+local function WaitForItemsList(timeout)
+    timeout = timeout or 10
+    local startTime = tick()
+    
+    while tick() - startTime < timeout do
+        local success, itemsList = pcall(function()
+            local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui", 2)
+            if not playerGui then return nil end
+            
+            local playRoom = playerGui:WaitForChild("PlayRoom", 2)
+            if not playRoom then return nil end
+            
+            local main = playRoom:WaitForChild("Main", 2)
+            if not main then return nil end
+            
+            local gameStage = main:WaitForChild("GameStage", 2)
+            if not gameStage then return nil end
+            
+            local stageMain = gameStage:WaitForChild("Main", 2)
+            if not stageMain then return nil end
+            
+            local base = stageMain:WaitForChild("Base", 2)
+            if not base then return nil end
+            
+            local rewards = base:WaitForChild("Rewards", 2)
+            if not rewards then return nil end
+            
+            return rewards:WaitForChild("ItemsList", 2)
+        end)
+        
+        if success and itemsList then
+            return itemsList
+        end
+        
+        task.wait(0.5)
+    end
+    
+    warn("[HazeHUB] ItemsList nicht gefunden nach " .. timeout .. " Sekunden")
+    return nil
+end
+
+local function SafeScanRewards()
+    local itemsList = WaitForItemsList()
+    if not itemsList then
+        return {}
+    end
+    
+    local rewards = {}
+    
+    -- Safe scanning mit zusätzlichen Checks
+    for _, item in pairs(itemsList:GetChildren()) do
+        if item and item:IsA("Frame") then
+            local itemData = {
+                name = "",
+                dropAmount = 0,
+                dropRate = 0,
+                efficiency = 0
+            }
+            
+            -- Safe Item-Name extrahieren
+            pcall(function()
+                local nameLabel = item:FindFirstChild("ItemName")
+                if nameLabel and nameLabel:IsA("TextLabel") and nameLabel.Text then
+                    itemData.name = nameLabel.Text
+                end
+            end)
+            
+            -- Safe DropAmount extrahieren
+            pcall(function()
+                local dropAmountLabel = item:FindFirstChild("DropAmount")
+                if dropAmountLabel and dropAmountLabel:IsA("TextLabel") and dropAmountLabel.Text then
+                    local amountText = dropAmountLabel.Text:gsub("[^%d]", "") -- Nur Zahlen extrahieren
+                    itemData.dropAmount = tonumber(amountText) or 0
+                end
+            end)
+            
+            -- Safe DropRate extrahieren
+            pcall(function()
+                local dropRateLabel = item:FindFirstChild("DropRate")
+                if dropRateLabel and dropRateLabel:IsA("TextLabel") and dropRateLabel.Text then
+                    local rateText = dropRateLabel.Text:gsub("[^%d]", "") -- Nur Zahlen extrahieren
+                    itemData.dropRate = tonumber(rateText) or 0
+                end
+            end)
+            
+            -- Effizienz berechnen
+            itemData.efficiency = itemData.dropRate * itemData.dropAmount
+            
+            if itemData.name ~= "" then
+                table.insert(rewards, itemData)
+                print("[HazeHUB] Reward Item: " .. itemData.name .. " (Amount: " .. itemData.dropAmount .. ", Rate: " .. itemData.dropRate .. ", Efficiency: " .. itemData.efficiency .. ")")
+            end
+        end
+    end
+    
+    -- Nach Effizienz sortieren
+    table.sort(rewards, function(a, b) return a.efficiency > b.efficiency end)
+    
+    return rewards
+end
+
+-- Globale Smart-Farm Funktion
+_G.HazeHUB.StartSmartFarm = function(targetItemName)
+    if not targetItemName then
+        warn("[HazeHUB] StartSmartFarm: targetItemName erforderlich")
+        return false
+    end
+    
+    -- Safe Rewards scannen
+    local rewards = SafeScanRewards()
+    if #rewards == 0 then
+        warn("[HazeHUB] Keine Rewards gefunden für Smart-Farm")
+        return false
+    end
+    
+    -- Bestes Item für Ziel finden
+    local bestItem = nil
+    for _, item in ipairs(rewards) do
+        if string.find(item.name:lower(), targetItemName:lower()) then
+            bestItem = item
+            break
+        end
+    end
+    
+    if not bestItem then
+        warn("[HazeHUB] Ziel-Item nicht gefunden: " .. targetItemName)
+        return false
+    end
+    
+    print("[HazeHUB] Smart-Farm gestartet für: " .. bestItem.name .. " (Effizienz: " .. bestItem.efficiency .. ")")
+    
+    -- UI-Anzeige für beste Effizienz
+    pcall(function()
+        if AF.UI.Lbl.DBStatus then
+            AF.UI.Lbl.DBStatus.Text = "🎯 Beste Effizienz: " .. bestItem.name .. " (" .. bestItem.efficiency .. ")"
+            AF.UI.Lbl.DBStatus.TextColor3 = D.Green
+        end
+    end)
+    
+    -- Hier würde die eigentliche Farm-Logik implementiert werden
+    -- z.B. automatische Auswahl des besten Runs/Raids
+    
+    return true
+end
+
+-- Challenge-Start Funktion
+_G.HazeHUB.StartChallenge = function()
+    local success = pcall(function()
+        local remote = game:GetService("ReplicatedStorage"):WaitForChild("Remote", 3)
+        if not remote then return false end
+        
+        local server = remote:WaitForChild("Server", 3)
+        if not server then return false end
+        
+        local playRoomEvent = server:WaitForChild("PlayRoomEvent", 3)
+        if not playRoomEvent then return false end
+        
+        playRoomEvent:FireServer("Create", {["CreateChallengeRoom"] = true})
+        return true
+    end)
+    
+    if success then
+        print("[HazeHUB] Challenge Room erstellt")
+    else
+        warn("[HazeHUB] Fehler beim Erstellen des Challenge Room")
+    end
+    
+    return success
+end
+
+-- Globale Registrierung
+_G.HazeHUB.ScanChallenges = ScanChallenges
+_G.HazeHUB.ScanAdvancedRaids = ScanAdvancedRaids
+_G.HazeHUB.ScanRewardsList = SafeScanRewards
+_G.HazeHUB.WaitForItemsList = WaitForItemsList
+
+-- ============================================================
 --  STATE
 -- ============================================================
 local AF = {
@@ -1020,8 +1358,40 @@ qAddBtn.MouseButton1Click:Connect(function()
     pcall(function() AF.UI.Lbl.QueueFileInfo.Text="Queue: "..#AF.Queue.." Items"; AF.UI.Lbl.QueueFileInfo.TextColor3=D.Green end)
 end)
 local ctrlRow=Instance.new("Frame",qCard); ctrlRow.Size=UDim2.new(1,0,0,32); ctrlRow.BackgroundTransparency=1; ctrlRow.LayoutOrder=3; HList(ctrlRow,8)
-local startBtn=Instance.new("TextButton",ctrlRow); startBtn.Size=UDim2.new(0.48,0,0,32); startBtn.BackgroundColor3=D.Green; startBtn.Text="Start Queue"; startBtn.TextColor3=Color3.new(1,1,1); startBtn.TextSize=12; startBtn.Font=Enum.Font.GothamBold; startBtn.AutoButtonColor=false; startBtn.BorderSizePixel=0; Corner(startBtn,8); Stroke(startBtn,D.Green,1,0.2)
-local stopBtn=Instance.new("TextButton",ctrlRow); stopBtn.Size=UDim2.new(0.48,0,0,32); stopBtn.BackgroundColor3=D.RedDark; stopBtn.Text="Stop"; stopBtn.TextColor3=D.Red; stopBtn.TextSize=12; stopBtn.Font=Enum.Font.GothamBold; stopBtn.AutoButtonColor=false; stopBtn.BorderSizePixel=0; Corner(stopBtn,8); Stroke(stopBtn,D.Red,1,0.4)
+local startBtn=Instance.new("TextButton",ctrlRow); startBtn.Size=UDim2.new(0.32,0,0,32); startBtn.BackgroundColor3=D.Green; startBtn.Text="Start Queue"; startBtn.TextColor3=Color3.new(1,1,1); startBtn.TextSize=12; startBtn.Font=Enum.Font.GothamBold; startBtn.AutoButtonColor=false; startBtn.BorderSizePixel=0; Corner(startBtn,8); Stroke(startBtn,D.Green,1,0.2)
+local stopBtn=Instance.new("TextButton",ctrlRow); stopBtn.Size=UDim2.new(0.32,0,0,32); stopBtn.BackgroundColor3=D.RedDark; stopBtn.Text="Stop"; stopBtn.TextColor3=D.Red; stopBtn.TextSize=12; stopBtn.Font=Enum.Font.GothamBold; stopBtn.AutoButtonColor=false; stopBtn.BorderSizePixel=0; Corner(stopBtn,8); Stroke(stopBtn,D.Red,1,0.4)
+local smartFarmBtn = Instance.new("TextButton", ctrlRow)
+smartFarmBtn.Size = UDim2.new(0.32, 0, 0, 32)
+smartFarmBtn.BackgroundColor3 = D.Purple
+smartFarmBtn.Text = "🎯 Smart Farm"
+smartFarmBtn.TextColor3 = Color3.new(1,1,1)
+smartFarmBtn.TextSize = 11
+smartFarmBtn.Font = Enum.Font.GothamBold
+smartFarmBtn.AutoButtonColor = false
+smartFarmBtn.BorderSizePixel = 0
+Corner(smartFarmBtn, 8)
+Stroke(smartFarmBtn, D.Purple, 1, 0.2)
+
+smartFarmBtn.MouseButton1Click:Connect(function()
+    -- Beispiel: Smart-Farm für "Coin" starten
+    local success = _G.HazeHUB.StartSmartFarm("Coin")
+    if success then
+        smartFarmBtn.Text = "🎯 Smart Farm ✓"
+        smartFarmBtn.BackgroundColor3 = D.Green
+        task.delay(2, function()
+            smartFarmBtn.Text = "🎯 Smart Farm"
+            smartFarmBtn.BackgroundColor3 = D.Purple
+        end)
+    else
+        smartFarmBtn.Text = "❌ Smart Farm"
+        smartFarmBtn.BackgroundColor3 = D.Red
+        task.delay(2, function()
+            smartFarmBtn.Text = "🎯 Smart Farm"
+            smartFarmBtn.BackgroundColor3 = D.Purple
+        end)
+    end
+end)
+
 startBtn.MouseButton1Click:Connect(function()
     if AF.Active then SetStatus("Farm läuft!",D.Yellow); return end
     if #AF.Queue==0 then SetStatus("Queue leer!",D.Orange); return end
