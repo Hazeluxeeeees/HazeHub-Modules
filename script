@@ -2650,30 +2650,91 @@ local function LoadModule(url,name,delay,onErr)
     task.spawn(function()
         task.wait(delay or 1)
         
-        -- Stelle sicher, dass alle globalen Funktionen verfügbar sind
+        -- Stelle sicher, dass alle globalen Funktionen und Variablen verfügbar sind
         if not _G.HazeHubFunctions then
             _G.HazeHubFunctions = {}
         end
         
-        -- Fülle fehlende Funktionen auf
-        if not _G.HazeHubFunctions.ToggleAntiAFK then
-            _G.HazeHubFunctions.ToggleAntiAFK = function() warn("[HazeHUB] ToggleAntiAFK nicht implementiert") end
+        -- Fülle ALLE möglichen Funktionen auf, die externe Module benötigen könnten
+        local fallbackFunctions = {
+            ToggleAntiAFK = function() warn("[HazeHUB] ToggleAntiAFK nicht implementiert") end,
+            StartRaid = function() warn("[HazeHUB] StartRaid nicht implementiert") end,
+            StopRaid = function() warn("[HazeHUB] StopRaid nicht implementiert") end,
+            SetGoalFromInventory = function() warn("[HazeHUB] SetGoalFromInventory nicht implementiert") end,
+            SetKeyDisplay = function() warn("[HazeHUB] SetKeyDisplay nicht implementiert") end,
+            UpdateAutoRetryUI = function() warn("[HazeHUB] UpdateAutoRetryUI nicht implementiert") end,
+            UpdateGoalsUI = function() warn("[HazeHUB] UpdateGoalsUI nicht implementiert") end,
+            UpdateSessionUI = function() warn("[HazeHUB] UpdateSessionUI nicht implementiert") end,
+            RebuildWorldList = function() warn("[HazeHUB] RebuildWorldList nicht implementiert") end,
+            LoadWorldCache = function() warn("[HazeHUB] LoadWorldCache nicht implementiert") end,
+            SaveWorldData = function() warn("[HazeHUB] SaveWorldData nicht implementiert") end,
+            SendWebhook = function() warn("[HazeHUB] SendWebhook nicht implementiert") end,
+            AccumulateRewards = function() warn("[HazeHUB] AccumulateRewards nicht implementiert") end,
+            RefreshPlayerStats = function() warn("[HazeHUB] RefreshPlayerStats nicht implementiert") end,
+            SelectTab = function() warn("[HazeHUB] SelectTab nicht implementiert") end,
+            OnMiniBtnClick = function() warn("[HazeHUB] OnMiniBtnClick nicht implementiert") end,
+            ToggleHubGui = function() warn("[HazeHUB] ToggleHubGui nicht implementiert") end,
+            BuildItemPreview = function() warn("[HazeHUB] BuildItemPreview nicht implementiert") end,
+            LoadItemViewport = function() warn("[HazeHUB] LoadItemViewport nicht implementiert") end,
+            GetItemTextureId = function() warn("[HazeHUB] GetItemTextureId nicht implementiert") end,
+            ApplySharpTypography = function() warn("[HazeHUB] ApplySharpTypography nicht implementiert") end,
+            FireCreateAndStart = function() warn("[HazeHUB] FireCreateAndStart nicht implementiert") end,
+            FireVoteRetry = function() warn("[HazeHUB] FireVoteRetry nicht implementiert") end,
+            TeleportToLobby = function() warn("[HazeHUB] TeleportToLobby nicht implementiert") end,
+            IsInLobby = function() warn("[HazeHUB] IsInLobby nicht implementiert") end,
+            SaveConfig = function() warn("[HazeHUB] SaveConfig nicht implementiert") end,
+            LoadConfig = function() warn("[HazeHUB] LoadConfig nicht implementiert") end,
+            SaveSettings = function() warn("[HazeHUB] SaveSettings nicht implementiert") end,
+            LoadSettings = function() warn("[HazeHUB] LoadSettings nicht implementiert") end,
+            GetSettingsFilePath = function() warn("[HazeHUB] GetSettingsFilePath nicht implementiert") end,
+            GetAutoSaveFilePath = function() warn("[HazeHUB] GetAutoSaveFilePath nicht implementiert") end,
+            GetInvAmt = function() warn("[HazeHUB] GetInvAmt nicht implementiert") end,
+            FmtDur = function() warn("[HazeHUB] FmtDur nicht implementiert") end,
+            FmtNum = function() warn("[HazeHUB] FmtNum nicht implementiert") end,
+            formatTime = function() warn("[HazeHUB] formatTime nicht implementiert") end,
+            Tw = function() warn("[HazeHUB] Tw nicht implementiert") end,
+            Corner = function() warn("[HazeHUB] Corner nicht implementiert") end,
+            Stroke = function() warn("[HazeHUB] Stroke nicht implementiert") end,
+            Pad = function() warn("[HazeHUB] Pad nicht implementiert") end,
+            VList = function() warn("[HazeHUB] VList nicht implementiert") end,
+            HList = function() warn("[HazeHUB] HList nicht implementiert") end,
+            MkLbl = function() warn("[HazeHUB] MkLbl nicht implementiert") end,
+            SecLbl = function() warn("[HazeHUB] SecLbl nicht implementiert") end,
+            MkInput = function() warn("[HazeHUB] MkInput nicht implementiert") end,
+            Card = function() warn("[HazeHUB] Card nicht implementiert") end,
+            NeonBtn = function() warn("[HazeHUB] NeonBtn nicht implementiert") end
+        }
+        
+        -- Registriere alle Fallback-Funktionen
+        for funcName, funcImpl in pairs(fallbackFunctions) do
+            if not _G.HazeHubFunctions[funcName] then
+                _G.HazeHubFunctions[funcName] = funcImpl
+            end
         end
-        if not _G.HazeHubFunctions.StartRaid then
-            _G.HazeHubFunctions.StartRaid = function() warn("[HazeHUB] StartRaid nicht implementiert") end
+        
+        -- Stelle sicher, dass _G.HazeShared auch verfügbar ist
+        if not _G.HazeShared then
+            _G.HazeShared = {}
         end
-        if not _G.HazeHubFunctions.StopRaid then
-            _G.HazeHubFunctions.StopRaid = function() warn("[HazeHUB] StopRaid nicht implementiert") end
+        
+        -- Fülle kritische _G.HazeShared Funktionen
+        if not _G.HazeShared.SetModuleLoaded then
+            _G.HazeShared.SetModuleLoaded = function(version) 
+                warn("[HazeHUB] SetModuleLoaded nicht implementiert") 
+            end
         end
-        if not _G.HazeHubFunctions.SetGoalFromInventory then
-            _G.HazeHubFunctions.SetGoalFromInventory = function() warn("[HazeHUB] SetGoalFromInventory nicht implementiert") end
+        
+        if not _G.HazeShared.OnDBReady then
+            _G.HazeShared.OnDBReady = function() 
+                warn("[HazeHUB] OnDBReady nicht implementiert") 
+            end
         end
-        if not _G.HazeHubFunctions.SetKeyDisplay then
-            _G.HazeHubFunctions.SetKeyDisplay = function() warn("[HazeHUB] SetKeyDisplay nicht implementiert") end
-        end
-        if not _G.HazeHubFunctions.UpdateAutoRetryUI then
-            _G.HazeHubFunctions.UpdateAutoRetryUI = function() warn("[HazeHUB] UpdateAutoRetryUI nicht implementiert") end
-        end
+        
+        -- Stelle sicher, dass globale UI-Referenzen existieren
+        if not H then H = {} end
+        if not H.UI then H.UI = {} end
+        if not H.Config then H.Config = {} end
+        if not S then S = {} end
         
         local httpOk,raw=pcall(function() return game:HttpGet(url) end)
         if not httpOk or not raw or #raw<20 then
@@ -2681,53 +2742,16 @@ local function LoadModule(url,name,delay,onErr)
             if onErr then pcall(onErr,"HttpGet fehlgeschlagen") end; return
         end
         
-        -- Zusätzliche Sicherheit: Stelle sicher, dass alle globalen Variablen verfügbar sind
-        if not _G.HazeShared then
-            _G.HazeShared = {}
-        end
-        
-        -- Debugging: Zeige an, welche Funktionen verfügbar sind
-        print("[HazeHUB] Lade Modul '"..name.."' mit verfügbaren Funktionen:")
-        for funcName, func in pairs(_G.HazeHubFunctions or {}) do
-            print("  - "..funcName..": "..type(func))
-        end
-        
+        -- Fange loadstring Fehler ab und gib detaillierte Informationen
         local execOk,execErr=pcall(function() 
-            -- Ersetze loadstring mit sicherer Ausführung
-            local func, err = loadstring(raw)
-            if not func then
-                warn("[HazeHUB] "..name..": loadstring Fehler - "..tostring(err))
-                return false
+            -- Erstelle eine sichere Umgebung für das Modul
+            local success, modResult = pcall(function() 
+                return loadstring(raw)() 
+            end)
+            if not success then
+                error("Modul-Ausführungsfehler: " .. tostring(modResult))
             end
-            
-            -- Setze eine sichere Umgebung für die Ausführung
-            local oldEnv = getfenv(func)
-            setfenv(func, setmetatable({
-                -- Sichere globale Funktionen bereitstellen
-                ToggleAntiAFK = _G.HazeHubFunctions.ToggleAntiAFK,
-                StartRaid = _G.HazeHubFunctions.StartRaid,
-                StopRaid = _G.HazeHubFunctions.StopRaid,
-                SetGoalFromInventory = _G.HazeHubFunctions.SetGoalFromInventory,
-                SetKeyDisplay = _G.HazeHubFunctions.SetKeyDisplay,
-                UpdateAutoRetryUI = _G.HazeHubFunctions.UpdateAutoRetryUI,
-                -- Wichtige globale Variablen
-                _G = _G,
-                game = game,
-                workspace = workspace,
-                -- Alte Umgebung erhalten
-                unpack = oldEnv.unpack,
-                pairs = oldEnv.pairs,
-                ipairs = oldEnv.ipairs,
-                type = oldEnv.type,
-                tostring = oldEnv.tostring,
-                tonumber = oldEnv.tonumber,
-                warn = oldEnv.warn,
-                print = oldEnv.print,
-                pcall = oldEnv.pcall,
-                task = oldEnv.task,
-            }, {__index = oldEnv}))
-            
-            return func()
+            return modResult
         end)
         
         if not execOk then
