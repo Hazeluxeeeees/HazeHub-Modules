@@ -552,7 +552,7 @@ end
 _G._RebuildTeamsList = RebuildTeamsList
 
 -- ── Team laden (Equip-Logik) ──────────────────────────────────
--- ── 1) Hilfsfunktion: Findet den echten Namen zum Tag (Oben in teams.txt einfügen) ──
+-- 1) Hilfsfunktion: Findet den echten Namen zum Tag (Oben in teams.txt einfügen)
 local function GetUnitNameByTag(targetTag)
     local collection = game:GetService("ReplicatedStorage").Player_Data[game.Players.LocalPlayer.Name].Collection
     for _, unitFolder in ipairs(collection:GetChildren()) do
@@ -564,23 +564,27 @@ local function GetUnitNameByTag(targetTag)
     return nil
 end
 
--- ── 2) Der korrigierte Lade-Ablauf (In MouseButton1Click einfügen) ──
+-- 2) Korrigierte Lade-Funktion (Ersetzt deinen fehlerhaften Block)
 loadTeamBtn.MouseButton1Click:Connect(function()
-    task.spawn(function()
-        loadFeedback.Text = "⏳ Setze Team zurück..."
-        loadFeedback.TextColor3 = D.Yellow
+    -- SICHERHEITS-CHECK: Ist das Team vorhanden?
+    if not team or not team.units then 
+        loadFeedback.Text = "❌ Fehler: Team-Daten leer!"; 
+        return 
+    end
 
-        -- SCHRITT 1: Alles ausziehen (UnEquipAll)
-        local unequipRemote = game:GetService("ReplicatedStorage").Remote.Server.Units:FindFirstChild("UnEquipAll")
-        if unequipRemote then
-            pcall(function() unequipRemote:FireServer() end)
-            task.wait(0.6) -- Wichtig: Dem Server Zeit geben
+    task.spawn(function()
+        loadFeedback.Text = "⏳ Reset Slots..."
+        
+        -- ALLES AUSZIEHEN (UnEquipAll)
+        local unequipAll = game:GetService("ReplicatedStorage").Remote.Server.Units:FindFirstChild("UnEquipAll")
+        if unequipAll then 
+            unequipAll:FireServer() 
+            task.wait(0.5)
         end
 
-        -- SCHRITT 2: Einheiten mit ECHTEM NAMEN anziehen
-        loadFeedback.Text = "⏳ Equippe Einheiten..."
-        for slotIndex = 1, 6 do
-            local savedTag = team.units and team.units[slotIndex]
+        -- EINHEITEN PRO SLOT LADEN
+        for i = 1, 6 do
+            local savedTag = team.units[i]
             if savedTag and savedTag ~= "" then
                 local realName = GetUnitNameByTag(savedTag)
                 if realName then
@@ -588,32 +592,23 @@ loadTeamBtn.MouseButton1Click:Connect(function()
                     local equipRemote = game:GetService("ReplicatedStorage").Remote.Server.Units:FindFirstChild("Equip")
                     
                     if equipRemote and unitObj then
-                        pcall(function() equipRemote:FireServer(unitObj) end)
+                        equipRemote:FireServer(unitObj)
                         task.wait(0.2)
                     end
                 end
             end
         end
 
-        -- SCHRITT 3: AutoUpgradeConfig laden (Deine neue Funktion)
-        loadFeedback.Text = "⏳ Setze AutoUpgrade-Konfiguration..."
+        -- AUTO-UPGRADE CONFIG
+        loadFeedback.Text = "⏳ Setze Upgrades..."
         for i = 1, 6 do
             local auVal = team.autoUpgrade and team.autoUpgrade[i]
             if auVal ~= nil then
-                -- Sicherer Aufruf (verhindert Nil-Fehler in Zeile 1999)
-                pcall(function() 
-                    if FireAutoUpgrade then 
-                        FireAutoUpgrade(i, auVal) 
-                    end 
-                end)
-                task.wait(0.15)
+                pcall(function() FireAutoUpgrade(i, auVal) end)
+                task.wait(0.1)
             end
         end
-
-        -- Fertigstellung
-        loadFeedback.Text = "✅ Team '" .. team.name .. "' geladen!"
-        loadFeedback.TextColor3 = D.GreenBright
-        task.delay(4, function() pcall(function() loadFeedback.Text = "" end) end)
+        loadFeedback.Text = "✅ Team geladen!"
     end)
 end)
 
