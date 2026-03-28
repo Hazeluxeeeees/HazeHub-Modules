@@ -1,67 +1,75 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – teams.lua  v1.1.0
---  Team-Manager Modul: Speichern & Laden von Unit-Loadouts
---  ★ Alle Pfade nutzen LP.Name (dynamisch, kein Hardcode)
---  ★ v1.1.0: Mobile-optimiertes ScrollingFrame, vollständige
---    AutomaticCanvasSize, Equip/UnEquip/AutoUpgradeConfig Remote
+--  HazeHUB – teams.lua  v1.1.1
+--  FIXES v1.1.1:
+--    ✓ FireUnEquip nil-fix (war nie definiert)
+--    ✓ Equip nutzt Instance aus Collection (kein staler Ref)
+--    ✓ UnEquipAll → FireUnEquipAll (Remote: UnEquipAll)
+--    ✓ LoadTeamsFile fehlte komplett
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "1.1.0"
+local VERSION = "1.1.1"
 
--- ── Warten bis HazeShared bereit ──────────────────────────────
 local waited = 0
 while not (_G.HazeShared and _G.HazeShared.TeamsPage and _G.HazeShared.SetModuleLoaded) do
     task.wait(0.3); waited = waited + 0.3
     if waited >= 12 then warn("[HazeHub/Teams] _G.HazeShared.TeamsPage nicht bereit."); return end
 end
 
--- ── Shared Aliase ─────────────────────────────────────────────
-local HS     = _G.HazeShared
-local D      = HS.D
-local TF     = HS.TF;   local TM = HS.TM;   local Tw = HS.Tw
-local Svc    = HS.Svc
-local Card   = HS.Card;     local NeonBtn = HS.NeonBtn
-local MkLbl  = HS.MkLbl;   local SecLbl  = HS.SecLbl
-local MkInput= HS.MkInput; local VList   = HS.VList
-local HList  = HS.HList;   local Pad     = HS.Pad
-local Corner = HS.Corner;  local Stroke  = HS.Stroke
-local FmtNum = HS.FmtNum
+local HS      = _G.HazeShared
+local D       = HS.D
+local TF      = HS.TF;   local TM = HS.TM;   local Tw = HS.Tw
+local Svc     = HS.Svc
+local Card    = HS.Card;     local NeonBtn = HS.NeonBtn
+local MkLbl   = HS.MkLbl;   local SecLbl  = HS.SecLbl
+local MkInput = HS.MkInput; local VList   = HS.VList
+local HList   = HS.HList;   local Pad     = HS.Pad
+local Corner  = HS.Corner;  local Stroke  = HS.Stroke
+local FmtNum  = HS.FmtNum
 
 local TeamsPage = HS.TeamsPage
 
--- ── Services ──────────────────────────────────────────────────
 local LP = game.Players.LocalPlayer
 local RS = game:GetService("ReplicatedStorage")
 
--- ★ Mapper: Tag.Value → {name, instance}
--- Gibt ALLE Einheiten zurück, inkl. Duplikate mit internem Tag als Unterscheidung
+-- ── Dateipfad ────────────────────────────────────────────────
+local FOLDER     = "HazeHUB"
+local TEAMS_FILE = FOLDER .. "/" .. LP.Name .. "_teams.json"
+if makefolder then pcall(function() makefolder(FOLDER) end) end
+
+-- ── Collection-Mapper ─────────────────────────────────────────
+-- Gibt ALLE Einheiten aus Collection zurück als {name, tag, instance}
 local function GetAllUnitsFromCollection()
     local result = {}
-    local col = RS:WaitForChild("Player_Data",5)
-                  :WaitForChild(LP.Name,5)
-                  :WaitForChild("Collection",5)
+    local col = nil
+    pcall(function()
+        col = RS:WaitForChild("Player_Data", 5)
+                :WaitForChild(LP.Name, 5)
+                :WaitForChild("Collection", 5)
+    end)
+    if not col then return result end
+
     for _, unitFolder in ipairs(col:GetChildren()) do
         if unitFolder:IsA("Folder") then
             local tagObj = unitFolder:FindFirstChild("Tag")
             local tagVal = tagObj and tostring(tagObj.Value) or ""
             table.insert(result, {
-                name     = unitFolder.Name,   -- ← Anzeigename (z.B. "BlackBeard")
-                tag      = tagVal,             -- ← interner Key (z.B. ":6\Xmlb30W")
-                instance = unitFolder          -- ← Instance für Remotes
+                name     = unitFolder.Name,
+                tag      = tagVal,
+                instance = unitFolder,
             })
         end
     end
     return result
 end
 
--- Hilfsfunktion: Einheit per Name ODER Tag finden
+-- Findet eine Einheit per Name oder Tag, gibt {name, tag, instance} zurück
 local function FindUnitInCollection(nameOrTag)
     local units = GetAllUnitsFromCollection()
     -- 1. Exakter Name
     for _, u in ipairs(units) do
         if u.name == nameOrTag then return u end
     end
-    -- 2. Exakter Tag (interner Fallback)
+    -- 2. Exakter Tag
     for _, u in ipairs(units) do
         if u.tag == nameOrTag then return u end
     end
@@ -73,69 +81,67 @@ local function FindUnitInCollection(nameOrTag)
     return nil
 end
 
--- ── Dateipfad (account-spezifisch) ──────────────────────────
--- REQUIRED: Dateiname basiert auf LP.Name → kein Account-Überschreiben
-local FOLDER     = "HazeHUB"
-local TEAMS_FILE = FOLDER .. "/" .. LP.Name .. "_teams.json"
-if makefolder then pcall(function() makefolder(FOLDER) end) end
-
 -- ── State ─────────────────────────────────────────────────────
 local TM_State = {
-    Teams  = {},   -- { name=string, slots={[1..6]=string|nil}, autoUpgrade={[1..6]=any}, savedAt=number }
+    Teams  = {},
     SelIdx = nil,
 }
 
 -- ── Remotes ───────────────────────────────────────────────────
--- REQUIRED: Remote.Server.Units.Equip / UnEquip / AutoUpgradeConfig
-local RemoteUnits = nil
-task.spawn(function()
-    pcall(function()
-        RemoteUnits = RS:WaitForChild("Remote", 15)
-                        :WaitForChild("Server", 15)
-                        :WaitForChild("Units",  15)
-    end)
-end)
-
--- ★ UnEquip ALLE Slots auf einmal
+-- ★ UnEquipAll: sendet keine Argumente, leert alle Slots serverseitig
 local function FireUnEquipAll()
-    pcall(function()
-        RS.Remote.Server.Units.UnEquipAll:FireServer()
-        print("[HazeHub/Teams] Alle Slots geleert.")
+    local ok, err = pcall(function()
+        RS:WaitForChild("Remote", 10)
+          :WaitForChild("Server", 10)
+          :WaitForChild("Units",  10)
+          :WaitForChild("UnEquipAll", 10)
+          :FireServer()
     end)
-    task.wait(0.5) -- kurz warten damit Server Slots freigibt
+    if not ok then
+        warn("[HazeHub/Teams] UnEquipAll Fehler: " .. tostring(err))
+    else
+        print("[HazeHub/Teams] UnEquipAll gefeuert.")
+    end
+    task.wait(0.5)
 end
 
--- ★ Equip: erwartet Instance-Objekt, NICHT String/Tag
+-- ★ Equip: erwartet Instance-Objekt aus Collection
 local function FireEquip(unitName)
     if not unitName or unitName == "" then return false end
     local u = FindUnitInCollection(unitName)
     if not u then
-        warn("[HazeHub/Teams] Equip: '" .. unitName .. "' nicht gefunden.")
+        warn("[HazeHub/Teams] Equip: '" .. unitName .. "' nicht in Collection gefunden.")
         return false
     end
     local ok, err = pcall(function()
-        RS.Remote.Server.Units.Equip:FireServer(u.instance)
+        RS:WaitForChild("Remote", 10)
+          :WaitForChild("Server", 10)
+          :WaitForChild("Units",  10)
+          :WaitForChild("Equip",  10)
+          :FireServer(u.instance)
     end)
     if not ok then
-        warn("[HazeHub/Teams] Equip FireServer Fehler: " .. tostring(err))
+        warn("[HazeHub/Teams] Equip FireServer Fehler für '" .. unitName .. "': " .. tostring(err))
         return false
     end
     return true
 end
 
--- AutoUpgrade: FireServer(Slot, Value)
+-- ★ AutoUpgrade: FireServer(Slot, Value)
 local function FireAutoUpgrade(slot, value)
     pcall(function()
-        RemoteUnits.AutoUpgradeConfig:FireServer(slot, value)
+        RS:WaitForChild("Remote", 10)
+          :WaitForChild("Server", 10)
+          :WaitForChild("Units",  10)
+          :WaitForChild("AutoUpgradeConfig", 10)
+          :FireServer(slot, value)
     end)
 end
 
--- ── Scan aktuelles Loadout ─────────────────────────────────────
--- Liest UnitLoadout1..6 aus Player_Data[LP.Name].Data
--- Liest AutoUpgradeConfig aus Player_Data[LP.Name].AutoUpgradeConfig
+-- ── Aktuelles Loadout scannen ─────────────────────────────────
 local function ScanCurrentLoadout()
-    local slots   = {}
-    local autoUp  = {}
+    local slots  = {}
+    local autoUp = {}
     pcall(function()
         local pd   = RS:WaitForChild("Player_Data", 5):WaitForChild(LP.Name, 5)
         local data = pd:WaitForChild("Data", 5)
@@ -145,9 +151,11 @@ local function ScanCurrentLoadout()
                 local v = tostring(lv.Value)
                 slots[i] = (v ~= "" and v ~= "nil") and v or nil
             end
-            -- AutoUpgradeConfig pro Slot
-            local auConf = pd:FindFirstChild("AutoUpgradeConfig")
-            if auConf then
+        end
+        -- AutoUpgradeConfig
+        local auConf = pd:FindFirstChild("AutoUpgradeConfig")
+        if auConf then
+            for i = 1, 6 do
                 local auSlot = auConf:FindFirstChild(tostring(i))
                 if auSlot then autoUp[i] = auSlot.Value end
             end
@@ -156,7 +164,19 @@ local function ScanCurrentLoadout()
     return slots, autoUp
 end
 
--- ── Datei speichern / laden ────────────────────────────────────
+-- ── Datei laden ───────────────────────────────────────────────
+local function LoadTeamsFile()
+    if not (isfile and isfile(TEAMS_FILE)) then return end
+    local ok, data = pcall(function()
+        return Svc.Http:JSONDecode(readfile(TEAMS_FILE))
+    end)
+    if ok and type(data) == "table" then
+        TM_State.Teams = data
+        print("[HazeHub/Teams] " .. #TM_State.Teams .. " Teams geladen.")
+    end
+end
+
+-- ── Datei speichern ───────────────────────────────────────────
 local function SaveTeamsFile()
     if not writefile then return end
     pcall(function()
@@ -164,14 +184,15 @@ local function SaveTeamsFile()
     end)
 end
 
+-- ── Team laden (Equip-Logik) ──────────────────────────────────
 local function LoadTeam(team)
     -- 1. Alle Slots leeren
     FireUnEquipAll()
     task.wait(0.8)
 
-    -- 2. Einheiten equippen (Slot 1–6)
+    -- 2. Einheiten der Reihe nach equippen
     for i = 1, 6 do
-        local unitName = team.slots[i]
+        local unitName = team.slots and team.slots[i]
         if unitName and unitName ~= "" then
             local success = FireEquip(unitName)
             if success then
@@ -186,9 +207,7 @@ local function LoadTeam(team)
         for i = 1, 6 do
             local v = team.autoUpgrade[i]
             if v ~= nil then
-                pcall(function()
-                    RS.Remote.Server.Units.AutoUpgradeConfig:FireServer(i, v)
-                end)
+                FireAutoUpgrade(i, v)
                 task.wait(0.15)
             end
         end
@@ -196,40 +215,27 @@ local function LoadTeam(team)
     print("[HazeHub/Teams] Team geladen: " .. (team.name or "?"))
 end
 
--- ── UnEquip alle aktuellen Slots ──────────────────────────────
-local function UnEquipAll()
-    local slots, _ = ScanCurrentLoadout()
-    for i = 1, 6 do
-        if slots[i] then
-            FireUnEquip(slots[i])
-            task.wait(0.25)
-        end
-    end
-end
-
--- ────────────────────────────────────────────────────────────────────
---  GUI AUFBAUEN
---  TeamsPage ist ein ScrollingFrame mit AutomaticCanvasSize=Y → mobile-friendly
--- ────────────────────────────────────────────────────────────────────
-
+-- ╔══════════════════════════════════════════════════════════╗
+--  GUI
+-- ╚══════════════════════════════════════════════════════════╝
 VList(TeamsPage, 8)
 
 MkLbl(TeamsPage, "⚔  Team Manager", 18, D.Cyan, true)
 MkLbl(TeamsPage, "Teams v" .. VERSION .. " | " .. LP.Name, 12, D.TextLow).Size = UDim2.new(1, 0, 0, 16)
 
--- ── Status-Label ──────────────────────────────────────────────
+-- Status-Label
 local tmStatusCard = Card(TeamsPage, 26); Pad(tmStatusCard, 4, 10, 4, 10)
 local tmStatusLbl  = Instance.new("TextLabel", tmStatusCard)
-tmStatusLbl.Size                  = UDim2.new(1, 0, 1, 0)
+tmStatusLbl.Size                   = UDim2.new(1, 0, 1, 0)
 tmStatusLbl.BackgroundTransparency = 1
-tmStatusLbl.Text                  = "⏳ Initialisiere..."
-tmStatusLbl.TextColor3            = D.Yellow
-tmStatusLbl.TextSize              = 13
-tmStatusLbl.Font                  = Enum.Font.GothamMedium
-tmStatusLbl.TextScaled            = false
-tmStatusLbl.RichText              = true
+tmStatusLbl.Text                   = "⏳ Initialisiere..."
+tmStatusLbl.TextColor3             = D.Yellow
+tmStatusLbl.TextSize               = 13
+tmStatusLbl.Font                   = Enum.Font.GothamMedium
+tmStatusLbl.TextScaled             = false
+tmStatusLbl.RichText               = true
 tmStatusLbl.TextStrokeTransparency = 1
-tmStatusLbl.TextXAlignment        = Enum.TextXAlignment.Left
+tmStatusLbl.TextXAlignment         = Enum.TextXAlignment.Left
 
 local function SetTMStatus(txt, col)
     pcall(function()
@@ -238,37 +244,36 @@ local function SetTMStatus(txt, col)
     end)
 end
 
--- ── Sektion: Aktuelles Loadout scannen & speichern ────────────
+-- ── Sektion: Speichern ────────────────────────────────────────
 local saveCard = Card(TeamsPage)
 Pad(saveCard, 10, 12, 10, 12); VList(saveCard, 8)
 SecLbl(saveCard, "💾  TEAM SPEICHERN")
 
--- Slot-Vorschau (6 Zeilen, read-only)
 local slotPreviewFrame = Instance.new("Frame", saveCard)
-slotPreviewFrame.Size                = UDim2.new(1, 0, 0, 0)
-slotPreviewFrame.AutomaticSize       = Enum.AutomaticSize.Y
+slotPreviewFrame.Size                  = UDim2.new(1, 0, 0, 0)
+slotPreviewFrame.AutomaticSize         = Enum.AutomaticSize.Y
 slotPreviewFrame.BackgroundTransparency = 1
 VList(slotPreviewFrame, 3)
 
 local slotPreviews = {}
 for i = 1, 6 do
     local row = Instance.new("Frame", slotPreviewFrame)
-    row.Size                    = UDim2.new(1, 0, 0, 24)
-    row.BackgroundColor3        = D.CardHover
-    row.BackgroundTransparency  = 0.5
-    row.BorderSizePixel         = 0
+    row.Size                   = UDim2.new(1, 0, 0, 24)
+    row.BackgroundColor3       = D.CardHover
+    row.BackgroundTransparency = 0.5
+    row.BorderSizePixel        = 0
     Corner(row, 6); Stroke(row, D.Border, 1, 0.5)
 
     local badge = Instance.new("TextLabel", row)
-    badge.Size                    = UDim2.new(0, 24, 1, 0)
-    badge.BackgroundColor3        = D.TabActive
-    badge.BackgroundTransparency  = 0.3
-    badge.Text                    = tostring(i)
-    badge.TextColor3              = D.CyanDim
-    badge.TextSize                = 11
-    badge.Font                    = Enum.Font.GothamBold
-    badge.TextXAlignment          = Enum.TextXAlignment.Center
-    badge.BorderSizePixel         = 0
+    badge.Size                   = UDim2.new(0, 24, 1, 0)
+    badge.BackgroundColor3       = D.TabActive
+    badge.BackgroundTransparency = 0.3
+    badge.Text                   = tostring(i)
+    badge.TextColor3             = D.CyanDim
+    badge.TextSize               = 11
+    badge.Font                   = Enum.Font.GothamBold
+    badge.TextXAlignment         = Enum.TextXAlignment.Center
+    badge.BorderSizePixel        = 0
     Corner(badge, 6)
 
     local lbl = Instance.new("TextLabel", row)
@@ -284,7 +289,6 @@ for i = 1, 6 do
     slotPreviews[i] = lbl
 end
 
--- Scan-Button
 local scanSaveBtn = NeonBtn(saveCard, "🔍  Loadout scannen", D.CyanDim, 30)
 
 local function RefreshSlotPreview()
@@ -315,9 +319,8 @@ scanSaveBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
--- Team-Name Input + Speichern-Button
 local nameRow = Instance.new("Frame", saveCard)
-nameRow.Size                = UDim2.new(1, 0, 0, 32)
+nameRow.Size                  = UDim2.new(1, 0, 0, 32)
 nameRow.BackgroundTransparency = 1
 HList(nameRow, 6)
 
@@ -347,7 +350,6 @@ confirmSaveBtn.MouseButton1Click:Connect(function()
         saveFeedback.TextColor3 = D.Orange
         return
     end
-    -- Loadout live scannen (nicht nur die Vorschau)
     local slots, autoUp = ScanCurrentLoadout()
     local unitCount = 0
     for i = 1, 6 do if slots[i] then unitCount = unitCount + 1 end end
@@ -356,7 +358,6 @@ confirmSaveBtn.MouseButton1Click:Connect(function()
         saveFeedback.TextColor3 = D.Orange
         return
     end
-    -- Überschreibe ggf. vorhandenes Team mit gleichem Namen
     local existIdx = nil
     for i, t in ipairs(TM_State.Teams) do
         if t.name == teamName then existIdx = i; break end
@@ -370,10 +371,10 @@ confirmSaveBtn.MouseButton1Click:Connect(function()
     }
     if existIdx then
         TM_State.Teams[existIdx] = entry
-        saveFeedback.Text        = "✅ Team '" .. teamName .. "' überschrieben! (" .. unitCount .. "/6 Einheiten)"
+        saveFeedback.Text        = "✅ Team '" .. teamName .. "' überschrieben! (" .. unitCount .. "/6)"
     else
         table.insert(TM_State.Teams, entry)
-        saveFeedback.Text        = "✅ Team '" .. teamName .. "' gespeichert! (" .. unitCount .. "/6 Einheiten)"
+        saveFeedback.Text        = "✅ Team '" .. teamName .. "' gespeichert! (" .. unitCount .. "/6)"
     end
     saveFeedback.TextColor3 = D.GreenBright
     nameBox.Text = ""
@@ -384,28 +385,27 @@ confirmSaveBtn.MouseButton1Click:Connect(function()
     pcall(_G._RebuildTeamsList)
 end)
 
--- ── Sektion: Gespeicherte Teams laden ─────────────────────────
+-- ── Sektion: Teams laden ──────────────────────────────────────
 local loadCard = Card(TeamsPage)
 Pad(loadCard, 10, 12, 10, 12); VList(loadCard, 8)
 SecLbl(loadCard, "📋  GESPEICHERTE TEAMS")
 
--- ★ Mobile-optimiertes ScrollingFrame mit AutomaticCanvasSize
 local teamListFrame = Instance.new("ScrollingFrame", loadCard)
-teamListFrame.Size                = UDim2.new(1, 0, 0, 230)
-teamListFrame.CanvasSize          = UDim2.new(0, 0, 0, 0)
-teamListFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-teamListFrame.ScrollBarThickness  = 5
-teamListFrame.ScrollBarImageColor3 = D.CyanDim
+teamListFrame.Size                  = UDim2.new(1, 0, 0, 230)
+teamListFrame.CanvasSize            = UDim2.new(0, 0, 0, 0)
+teamListFrame.AutomaticCanvasSize   = Enum.AutomaticSize.Y
+teamListFrame.ScrollBarThickness    = 5
+teamListFrame.ScrollBarImageColor3  = D.CyanDim
 teamListFrame.BackgroundTransparency = 1
-teamListFrame.BorderSizePixel     = 0
-teamListFrame.ScrollingEnabled    = true
-teamListFrame.ScrollingDirection  = Enum.ScrollingDirection.Y
+teamListFrame.BorderSizePixel       = 0
+teamListFrame.ScrollingEnabled      = true
+teamListFrame.ScrollingDirection    = Enum.ScrollingDirection.Y
 VList(teamListFrame, 5)
 
 local teamListEmpty = MkLbl(teamListFrame, "Keine Teams gespeichert.", 11, D.TextLow)
 teamListEmpty.Size = UDim2.new(1, 0, 0, 28)
 
--- ── Detail-Karte: Slots des gewählten Teams ────────────────────
+-- ── Detail-Karte ──────────────────────────────────────────────
 local detailCard = Card(TeamsPage)
 Pad(detailCard, 10, 12, 10, 12); VList(detailCard, 6)
 detailCard.Visible = false
@@ -433,15 +433,15 @@ for i = 1, 6 do
     Corner(db, 6)
 
     local dl = Instance.new("TextLabel", dRow)
-    dl.Position       = UDim2.new(0, 30, 0, 0)
-    dl.Size           = UDim2.new(1, -34, 1, 0)
+    dl.Position               = UDim2.new(0, 30, 0, 0)
+    dl.Size                   = UDim2.new(1, -34, 1, 0)
     dl.BackgroundTransparency = 1
-    dl.Text           = "—"
-    dl.TextColor3     = D.TextLow
-    dl.TextSize       = 11
-    dl.Font           = Enum.Font.GothamMedium
-    dl.TextXAlignment = Enum.TextXAlignment.Left
-    dl.TextTruncate   = Enum.TextTruncate.AtEnd
+    dl.Text                   = "—"
+    dl.TextColor3             = D.TextLow
+    dl.TextSize               = 11
+    dl.Font                   = Enum.Font.GothamMedium
+    dl.TextXAlignment         = Enum.TextXAlignment.Left
+    dl.TextTruncate           = Enum.TextTruncate.AtEnd
     detailSlotLabels[i] = dl
 end
 
@@ -470,50 +470,50 @@ local function RebuildTeamsList()
         Stroke(row, isSelected and D.Cyan or D.Border, 1.5, isSelected and 0 or 0.5)
 
         local nameLbl = Instance.new("TextLabel", row)
-        nameLbl.Position       = UDim2.new(0, 10, 0, 4)
-        nameLbl.Size           = UDim2.new(1, -90, 0, 20)
+        nameLbl.Position               = UDim2.new(0, 10, 0, 4)
+        nameLbl.Size                   = UDim2.new(1, -90, 0, 20)
         nameLbl.BackgroundTransparency = 1
-        nameLbl.Text           = "⚔  " .. team.name
-        nameLbl.TextColor3     = isSelected and D.Cyan or D.TextHi
-        nameLbl.TextSize       = 12
-        nameLbl.Font           = Enum.Font.GothamBold
-        nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-        nameLbl.TextTruncate   = Enum.TextTruncate.AtEnd
+        nameLbl.Text                   = "⚔  " .. team.name
+        nameLbl.TextColor3             = isSelected and D.Cyan or D.TextHi
+        nameLbl.TextSize               = 12
+        nameLbl.Font                   = Enum.Font.GothamBold
+        nameLbl.TextXAlignment         = Enum.TextXAlignment.Left
+        nameLbl.TextTruncate           = Enum.TextTruncate.AtEnd
 
         local unitCount = 0
         for i = 1, 6 do if team.slots and team.slots[i] then unitCount = unitCount + 1 end end
 
         local subLbl = Instance.new("TextLabel", row)
-        subLbl.Position       = UDim2.new(0, 10, 0, 26)
-        subLbl.Size           = UDim2.new(1, -90, 0, 14)
+        subLbl.Position               = UDim2.new(0, 10, 0, 26)
+        subLbl.Size                   = UDim2.new(1, -90, 0, 14)
         subLbl.BackgroundTransparency = 1
-        subLbl.Text           = unitCount .. "/6 Einheiten · " .. os.date("%d.%m.%Y", team.savedAt or 0)
-        subLbl.TextColor3     = D.TextMid
-        subLbl.TextSize       = 10
-        subLbl.Font           = Enum.Font.GothamMedium
-        subLbl.TextXAlignment = Enum.TextXAlignment.Left
+        subLbl.Text                   = unitCount .. "/6 Einheiten · " .. os.date("%d.%m.%Y", team.savedAt or 0)
+        subLbl.TextColor3             = D.TextMid
+        subLbl.TextSize               = 10
+        subLbl.Font                   = Enum.Font.GothamMedium
+        subLbl.TextXAlignment         = Enum.TextXAlignment.Left
 
         -- Löschen-Button
         local delBtn = Instance.new("TextButton", row)
-        delBtn.Size              = UDim2.new(0, 32, 0, 32)
-        delBtn.Position          = UDim2.new(1, -38, 0.5, -16)
-        delBtn.BackgroundColor3  = Color3.fromRGB(50, 12, 12)
-        delBtn.Text              = "✕"
-        delBtn.TextColor3        = D.Red
-        delBtn.TextSize          = 12
-        delBtn.Font              = Enum.Font.GothamBold
-        delBtn.AutoButtonColor   = false
-        delBtn.BorderSizePixel   = 0
+        delBtn.Size             = UDim2.new(0, 32, 0, 32)
+        delBtn.Position         = UDim2.new(1, -38, 0.5, -16)
+        delBtn.BackgroundColor3 = Color3.fromRGB(50, 12, 12)
+        delBtn.Text             = "✕"
+        delBtn.TextColor3       = D.Red
+        delBtn.TextSize         = 12
+        delBtn.Font             = Enum.Font.GothamBold
+        delBtn.AutoButtonColor  = false
+        delBtn.BorderSizePixel  = 0
         Corner(delBtn, 7); Stroke(delBtn, D.Red, 1, 0.4)
         delBtn.MouseEnter:Connect(function() Tw(delBtn, { BackgroundColor3 = D.RedDark or Color3.fromRGB(80, 20, 20) }) end)
         delBtn.MouseLeave:Connect(function() Tw(delBtn, { BackgroundColor3 = Color3.fromRGB(50, 12, 12) }) end)
 
-        -- Auswählen (ganzer Row außer Löschen-Button)
+        -- Auswählen
         local selBtn = Instance.new("TextButton", row)
-        selBtn.Size                  = UDim2.new(1, -40, 1, 0)
+        selBtn.Size                   = UDim2.new(1, -40, 1, 0)
         selBtn.BackgroundTransparency = 1
-        selBtn.Text                  = ""
-        selBtn.BorderSizePixel       = 0
+        selBtn.Text                   = ""
+        selBtn.BorderSizePixel        = 0
         local capIdx = idx
 
         selBtn.MouseButton1Click:Connect(function()
@@ -552,63 +552,54 @@ end
 _G._RebuildTeamsList = RebuildTeamsList
 
 -- ── Team laden (Equip-Logik) ──────────────────────────────────
--- 1) Hilfsfunktion: Findet den echten Namen zum Tag (Oben in teams.txt einfügen)
-local function GetUnitNameByTag(targetTag)
-    local collection = game:GetService("ReplicatedStorage").Player_Data[game.Players.LocalPlayer.Name].Collection
-    for _, unitFolder in ipairs(collection:GetChildren()) do
-        local tagObj = unitFolder:FindFirstChild("Tag")
-        if tagObj and tagObj.Value == targetTag then
-            return unitFolder.Name -- Gibt z.B. "BlackBeard" zurück
-        end
-    end
-    return nil
-end
-
--- 2) Korrigierte Lade-Funktion (Ersetzt deinen fehlerhaften Block)
 loadTeamBtn.MouseButton1Click:Connect(function()
-    -- SICHERHEITS-CHECK: Ist das Team vorhanden?
-    if not team or not team.units then 
-        loadFeedback.Text = "❌ Fehler: Team-Daten leer!"; 
-        return 
+    local idx = TM_State.SelIdx
+    if not idx or not TM_State.Teams[idx] then
+        loadFeedback.Text       = "⚠ Kein Team ausgewählt!"
+        loadFeedback.TextColor3 = D.Orange
+        return
     end
+    local team = TM_State.Teams[idx]
+    loadFeedback.Text       = "⏳ UnEquip alle..."
+    loadFeedback.TextColor3 = D.Yellow
+    loadTeamBtn.Text        = "⏳ Lade..."
+    loadTeamBtn.TextColor3  = D.Yellow
+    SetTMStatus("⏳ Lade Team '" .. team.name .. "'...", D.Yellow)
 
     task.spawn(function()
-        loadFeedback.Text = "⏳ Reset Slots..."
-        
-        -- ALLES AUSZIEHEN (UnEquipAll)
-        local unequipAll = game:GetService("ReplicatedStorage").Remote.Server.Units:FindFirstChild("UnEquipAll")
-        if unequipAll then 
-            unequipAll:FireServer() 
-            task.wait(0.5)
-        end
+        -- 1) UnEquip alle
+        FireUnEquipAll()
+        task.wait(0.5)
 
-        -- EINHEITEN PRO SLOT LADEN
+        -- 2) Einheiten equippen
+        loadFeedback.Text = "⏳ Equip gespeicherte Einheiten..."
         for i = 1, 6 do
-            local savedTag = team.units[i]
-            if savedTag and savedTag ~= "" then
-                local realName = GetUnitNameByTag(savedTag)
-                if realName then
-                    local unitObj = game:GetService("ReplicatedStorage").Player_Data[game.Players.LocalPlayer.Name].Collection:FindFirstChild(realName)
-                    local equipRemote = game:GetService("ReplicatedStorage").Remote.Server.Units:FindFirstChild("Equip")
-                    
-                    if equipRemote and unitObj then
-                        equipRemote:FireServer(unitObj)
-                        task.wait(0.2)
-                    end
-                end
+            local unit = team.slots and team.slots[i]
+            if unit and unit ~= "" then
+                pcall(function() FireEquip(unit) end)
+                task.wait(0.25)
             end
         end
+        task.wait(0.3)
 
-        -- AUTO-UPGRADE CONFIG
-        loadFeedback.Text = "⏳ Setze Upgrades..."
+        -- 3) AutoUpgrade
+        loadFeedback.Text = "⏳ Setze AutoUpgrade-Konfiguration..."
         for i = 1, 6 do
             local auVal = team.autoUpgrade and team.autoUpgrade[i]
             if auVal ~= nil then
                 pcall(function() FireAutoUpgrade(i, auVal) end)
-                task.wait(0.1)
+                task.wait(0.15)
             end
         end
-        loadFeedback.Text = "✅ Team geladen!"
+
+        loadFeedback.Text       = "✅ Team '" .. team.name .. "' geladen!"
+        loadFeedback.TextColor3 = D.GreenBright
+        loadTeamBtn.Text        = "⚡  Team laden (Equip)"
+        loadTeamBtn.TextColor3  = Color3.new(1, 1, 1)
+        SetTMStatus("✅ Team '" .. team.name .. "' aktiv.", D.Green)
+        task.delay(5, function()
+            pcall(function() loadFeedback.Text = "" end)
+        end)
     end)
 end)
 
@@ -616,12 +607,11 @@ end)
 pcall(LoadTeamsFile)
 pcall(RefreshSlotPreview)
 pcall(RebuildTeamsList)
-SetTMStatus("✅ Teams v" .. VERSION .. " geladen | " .. #TM_State.Teams .. " Teams", D.Green)
+SetTMStatus("✅ Teams v" .. VERSION .. " | " .. #TM_State.Teams .. " Teams", D.Green)
 
-print(string.format("[HazeHub] teams.lua v%s geladen | Spieler: %s | Teams: %d",
+print(string.format("[HazeHub] teams.lua v%s geladen | %s | Teams: %d",
     VERSION, LP.Name, #TM_State.Teams))
 
--- ★ FIX: Placeholder-Label entfernen + SetModuleLoaded aufrufen
 pcall(function()
     if _G._TeamsWaitLbl then
         _G._TeamsWaitLbl:Destroy()
@@ -633,9 +623,3 @@ pcall(function()
         _G.HazeShared.SetModuleLoaded(VERSION)
     end
 end)
-
--- Am Ende der Datei (NACH allen Funktionen):
-if _G.HazeShared and _G.HazeShared.SetModuleLoaded then
-    _G.HazeShared.SetModuleLoaded(VERSION)
-end
-return TM -- (Oder TM für Teams)
