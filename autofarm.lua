@@ -26,6 +26,24 @@ while not (_G.HazeShared and _G.HazeShared.Container and _G.HazeShared.SetModule
 end
 
 -- ============================================================
+--  WARTEN BIS DATEN BEREIT (max 15s)
+-- ============================================================
+waited = 0
+while not (_G.HazeHUB and _G.HazeHUB.DataReady == true) do
+    task.wait(0.5); waited = waited + 0.5
+    if waited >= 15 then 
+        warn("[HazeHub] Spieldaten nicht bereit - starte ohne Daten")
+        break
+    end
+end
+
+if _G.HazeHUB.DataReady then
+    print("[HazeHub] Spieldaten bereit - Autofarm kann starten")
+else
+    print("[HazeHub] Spieldaten nicht vollständig geladen - begrenzte Funktionalität")
+end
+
+-- ============================================================
 --  SHARED ALIASE
 -- ============================================================
 local HS          = _G.HazeShared
