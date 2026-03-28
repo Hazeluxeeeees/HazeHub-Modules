@@ -57,10 +57,25 @@ task.spawn(function()
 end)
 
 -- Equip: FireServer(Collection[UnitName])
-local function FireEquip(unitName)
+local function FireUnEquip(unitName)
+    if not unitName or unitName == "" then return end
     pcall(function()
-        local col = RS:WaitForChild("Player_Data", 5)[LP.Name].Collection
-        RemoteUnits.Equip:FireServer(col[unitName])
+        local col = RS:WaitForChild("Player_Data", 5)
+                      :WaitForChild(LP.Name, 5)
+                      :WaitForChild("Collection", 5)
+        local unitObj = col:FindFirstChild(unitName)
+        if not unitObj then
+            for _, ch in ipairs(col:GetChildren()) do
+                if ch.Name:lower() == unitName:lower() then
+                    unitObj = ch; break
+                end
+            end
+        end
+        if not unitObj then
+            warn("[HazeHub/Teams] UnEquip: nicht gefunden: " .. unitName)
+            return
+        end
+        RemoteUnits.UnEquip:FireServer(unitObj)
     end)
 end
 
