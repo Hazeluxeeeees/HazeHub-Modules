@@ -539,3 +539,16 @@ SetTMStatus("✅ Teams v" .. VERSION .. " geladen | " .. #TM_State.Teams .. " Te
 
 print(string.format("[HazeHub] teams.lua v%s geladen | Spieler: %s | Teams: %d",
     VERSION, LP.Name, #TM_State.Teams))
+
+-- ★ FIX: Placeholder-Label entfernen + SetModuleLoaded aufrufen
+pcall(function()
+    if _G._TeamsWaitLbl then
+        _G._TeamsWaitLbl:Destroy()
+        _G._TeamsWaitLbl = nil
+    end
+end)
+pcall(function()
+    if _G.HazeShared and _G.HazeShared.SetModuleLoaded then
+        _G.HazeShared.SetModuleLoaded(VERSION)
+    end
+end)
