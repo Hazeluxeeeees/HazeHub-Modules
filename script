@@ -250,7 +250,7 @@ _G.HazeHUB.UpdateStatus = function(status, color)
 end
 
 -- ============================================================
---  CHAPTERLEVELS SCANNER FÜR SPEZIFISCHEN PFAD
+--  CHAPTERLEVELS SCANNER - PRÄZISE KATEGORISIERUNG
 -- ============================================================
 local function ScanChapterLevels()
     local LP = game.Players.LocalPlayer
@@ -259,29 +259,20 @@ local function ScanChapterLevels()
         return false 
     end
     
-    local playerDataPath = "Player_Data." .. LP.Name .. ".ChapterLevels"
+    -- Dynamischer Pfad: ReplicatedStorage.Player_Data[PlayerName].ChapterLevels
     local chapterLevels = nil
-    
-    -- Pfad dynamisch auflösen
     local success, result = pcall(function()
-        local parts = {}
-        for part in string.gmatch(playerDataPath, "[^.]+") do
-            table.insert(parts, part)
-        end
+        local playerData = game:GetService("ReplicatedStorage"):WaitForChild("Player_Data", 3)
+        if not playerData then return nil end
         
-        local current = game:GetService("ReplicatedStorage")
-        for _, part in ipairs(parts) do
-            current = current:WaitForChild(part, 2)
-            if not current then
-                warn("[HazeHUB] Pfad nicht gefunden: " .. part .. " in " .. current:GetFullName())
-                return nil
-            end
-        end
-        return current
+        local playerFolder = playerData:WaitForChild(LP.Name, 3)
+        if not playerFolder then return nil end
+        
+        return playerFolder:WaitForChild("ChapterLevels", 3)
     end)
     
     if not success or not result then
-        warn("[HazeHUB] ChapterLevels Pfad nicht gefunden: " .. playerDataPath)
+        warn("[HazeHUB] ChapterLevels Pfad nicht gefunden: ReplicatedStorage.Player_Data." .. LP.Name .. ".ChapterLevels")
         return false
     end
     
@@ -289,81 +280,79 @@ local function ScanChapterLevels()
     
     -- Datenstruktur initialisieren
     local worldData = {
-        Story = {},
-        Ranger = {},
-        Calamity = {},
         Raids = {},
+        Calamity = {},
+        Ranger = {},
+        Story = {},
         timestamp = os.time(),
         version = "1.0"
     }
     
-    -- Alle Kinder scannen und kategorisieren
+    -- Alle Kinder scannen und präzise kategorisieren
     for _, child in pairs(chapterLevels:GetChildren()) do
         if child:IsA("Folder") or child:IsA("Model") or child:IsA("StringValue") then
-            local worldName = child.Name
-            local worldInfo = {
-                id = worldName,
-                label = worldName,
-                chapters = {},
-                stages = {}
-            }
+            local itemName = child.Name
             
-            -- Welten-Inhalt scannen
-            for _, subChild in pairs(child:GetChildren()) do
-                if subChild:IsA("Folder") or subChild:IsA("Model") then
-                    local itemName = subChild.Name
-                    
-                    -- Kategorisierung basierend auf Namen
-                    if string.find(itemName:lower(), "raid") or string.find(itemName:lower(), "boss") then
-                        -- Raids
-                        table.insert(worldData.Raids, {
-                            id = itemName,
-                            worldId = worldName,
-                            label = itemName,
-                            type = "Raid",
-                            path = child:GetFullName() .. "." .. itemName
-                        })
-                        
-                    elseif string.find(itemName:lower(), "calamity") or string.find(itemName:lower(), "nightmare") then
-                        -- Calamity
-                        table.insert(worldData.Calamity, {
-                            id = itemName,
-                            worldId = worldName,
-                            label = itemName,
-                            type = "Calamity",
-                            path = child:GetFullName() .. "." .. itemName
-                        })
-                        
-                    elseif string.find(itemName:lower(), "ranger") or string.find(itemName:lower(), "hunt") then
-                        -- Ranger
-                        table.insert(worldData.Ranger, {
-                            id = itemName,
-                            worldId = worldName,
-                            label = itemName,
-                            type = "Ranger",
-                            path = child:GetFullName() .. "." .. itemName
-                        })
-                        
-                    else
-                        -- Story (Standard)
-                        table.insert(worldData.Story, {
-                            id = itemName,
-                            worldId = worldName,
-                            label = itemName,
-                            type = "Story",
-                            path = child:GetFullName() .. "." .. itemName
-                        })
-                    end
-                end
+            -- Präzise Kategorisierung basierend auf Namensmustern
+            if string.find(itemName, "Raid") then
+                -- Raids: JJK_Raid_Chapter1, Esper_Raid_Chapter1
+                table.insert(worldData.Raids, {
+                    id = itemName,
+                    label = itemName,
+                    type = "Raid",
+                    path = child:GetFullName()
+                })
+                print("[HazeHUB] Raid gefunden: " .. itemName)
+                
+            elseif string.find(itemName, "Calamity") then
+                -- Calamity: Calamity_Chapter1
+                table.insert(worldData.Calamity, {
+                    id = itemName,
+                    label = itemName,
+                    type = "Calamity",
+                    path = child:GetFullName()
+                })
+                print("[HazeHUB] Calamity gefunden: " .. itemName)
+                
+            elseif string.find(itemName, "Ranger") then
+                -- Ranger: JJK_RangerStage1
+                table.insert(worldData.Ranger, {
+                    id = itemName,
+                    label = itemName,
+                    type = "Ranger",
+                    path = child:GetFullName()
+                })
+                print("[HazeHUB] Ranger gefunden: " .. itemName)
+                
+            elseif string.find(itemName, "Chapter") then
+                -- Story: JJK_Chapter1 (nur wenn kein Raid, Calamity oder Ranger)
+                table.insert(worldData.Story, {
+                    id = itemName,
+                    label = itemName,
+                    type = "Story",
+                    path = child:GetFullName()
+                })
+                print("[HazeHUB] Story gefunden: " .. itemName)
+                
+            else
+                -- Andere Einträge (für Debugging)
+                print("[HazeHUB] Unkategorisiert: " .. itemName)
             end
         end
     end
     
+    -- Sortieren für konsistente Reihenfolge
+    local function sortById(a, b) return a.id < b.id end
+    table.sort(worldData.Raids, sortById)
+    table.sort(worldData.Calamity, sortById)
+    table.sort(worldData.Ranger, sortById)
+    table.sort(worldData.Story, sortById)
+    
     print("[HazeHUB] ChapterLevels Scan abgeschlossen:")
-    print("  Story: " .. #worldData.Story .. " Einträge")
-    print("  Ranger: " .. #worldData.Ranger .. " Einträge") 
-    print("  Calamity: " .. #worldData.Calamity .. " Einträge")
     print("  Raids: " .. #worldData.Raids .. " Einträge")
+    print("  Calamity: " .. #worldData.Calamity .. " Einträge")
+    print("  Ranger: " .. #worldData.Ranger .. " Einträge")
+    print("  Story: " .. #worldData.Story .. " Einträge")
     
     return worldData
 end
@@ -2090,29 +2079,54 @@ RebuildWorldList=function()
     for _,v in pairs(H.UI.Fr.WorldBtns:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
     for _,v in pairs(H.UI.Fr.ChapRow:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
     H.UI.Fr.ChapBtns={}; S.SelWorld=nil; S.SelChap=nil
+    
+    -- WorldCache-Daten verwenden
+    local worldData = _G.HazeHUB.WorldData or {}
+    
     if S.SelMode=="Calamity" then
-        local cd=S.WorldData["Calamity"]
-        if cd and #cd.story>0 then S.SelWorld="Calamity"; RebuildChapBtns(cd.story); H.UI.Lbl.WorldStatus.Text="⚡ Calamity → Kapitel wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Orange
-        else H.UI.Lbl.WorldStatus.Text="⏳ Calamity lädt..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow end; return
+        local calamityList = worldData.Calamity or {}
+        if #calamityList > 0 then
+            S.SelWorld="Calamity"; RebuildChapBtns(calamityList)
+            H.UI.Lbl.WorldStatus.Text="⚡ Calamity → Kapitel wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Orange
+        else
+            H.UI.Lbl.WorldStatus.Text="⏳ Calamity lädt..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow
+        end
+        return
     end
+    
+    if S.SelMode=="Ranger" then
+        local rangerList = worldData.Ranger or {}
+        if #rangerList > 0 then
+            S.SelWorld="Ranger"; RebuildChapBtns(rangerList)
+            H.UI.Lbl.WorldStatus.Text="🏹 Ranger → Stage wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Green
+        else
+            H.UI.Lbl.WorldStatus.Text="⏳ Ranger-Daten laden..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow
+        end
+        return
+    end
+    
     if S.SelMode=="Raid" then
-        H.UI.Lbl.WorldStatus.Text="⚔ Raid Farm → Kapitel wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Purple
-        -- Raid nutzt Fallback-Kapitel; autofarm.lua befüllt ggf. WorldData["Raid"]
-        local rd=S.WorldData["Raid"]
-        if rd and (#rd.story>0 or #rd.ranger>0) then
-            S.SelWorld="Raid"; RebuildChapBtns(rd.story and #rd.story>0 and rd.story or rd.ranger)
-        else H.UI.Lbl.WorldStatus.Text="⏳ Raid-Daten laden..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow end; return
+        local raidList = worldData.Raids or {}
+        if #raidList > 0 then
+            S.SelWorld="Raid"; RebuildChapBtns(raidList)
+            H.UI.Lbl.WorldStatus.Text="⚔ Raid → Kapitel wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Purple
+        else
+            H.UI.Lbl.WorldStatus.Text="⏳ Raid-Daten laden..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow
+        end
+        return
     end
-    local avail={}
-    for _,wid in ipairs(S.WorldIds) do
-        if wid:lower():find("calamity") then continue end
-        if wid:lower():find("raid") then continue end
-        local wd=S.WorldData[wid] or {}; local list=(S.SelMode=="Story") and wd.story or wd.ranger
-        if list and #list>0 then table.insert(avail,wid) end
+    
+    -- Story Mode
+    local storyList = worldData.Story or {}
+    if #storyList > 0 then
+        -- Erstelle World-Buttons für Story-Kapitel
+        for _, chapter in ipairs(storyList) do
+            CreateWorldBtn(chapter.id, chapter.label)
+        end
+        H.UI.Lbl.WorldStatus.Text="📖 " .. #storyList .. " Story-Kapitel verfügbar"; H.UI.Lbl.WorldStatus.TextColor3=D.Cyan
+    else
+        H.UI.Lbl.WorldStatus.Text="⏳ Story-Daten laden..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow
     end
-    if #avail==0 then H.UI.Lbl.WorldStatus.Text="⏳ Welten laden..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow; return end
-    for _,wid in ipairs(avail) do CreateWorldBtn(wid) end
-    H.UI.Lbl.WorldStatus.Text="✅ "..#avail.." Welten verfügbar"; H.UI.Lbl.WorldStatus.TextColor3=D.Green
 end
 for _,def in ipairs(MODI) do
     local mb=Instance.new("TextButton",modeRow)
