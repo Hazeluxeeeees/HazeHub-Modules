@@ -1746,13 +1746,14 @@ end)
 -- ============================================================
 if isfile and isfile(DB_FILE) then
     local raw; pcall(function() raw=readfile(DB_FILE) end)
-    if raw and #raw<10 then AF.UI.Lbl.DBStatus.Text="⚠ DB korrupt!"; AF.UI.Lbl.DBStatus.TextColor3=D.Orange
+    if raw and #raw<10 then pcall(function() AF.UI.Lbl.DBStatus.Text="⚠ DB korrupt!"; AF.UI.Lbl.DBStatus.TextColor3=D.Orange end)
     elseif LoadDB() or BuildDBFromModuleData() then
-        local c=DBCount(); AF.UI.Lbl.DBStatus.Text=string.format("✅ DB: %d Chapters",c); AF.UI.Lbl.DBStatus.TextColor3=D.Green
+        local c=DBCount(); pcall(function() AF.UI.Lbl.DBStatus.Text=string.format("✅ DB: %d Chapters",c); AF.UI.Lbl.DBStatus.TextColor3=D.Green end)
         _G.HazeHUB_Database = AF.RewardDatabase
         task.delay(0.5, function() NotifyDBReady(c, string.format("Datenbank geladen! (%d Chapters)",c)) end)
+    else pcall(function() AF.UI.Lbl.DBStatus.Text="Keine DB."; AF.UI.Lbl.DBStatus.TextColor3=D.TextLow end)
     end
-else AF.UI.Lbl.DBStatus.Text="Keine DB."; AF.UI.Lbl.DBStatus.TextColor3=D.TextLow end
+else pcall(function() AF.UI.Lbl.DBStatus.Text="Keine DB."; AF.UI.Lbl.DBStatus.TextColor3=D.TextLow end)
 
 task.spawn(TryAutoResume)
 -- ============================================================
@@ -1779,13 +1780,8 @@ HS.TriggerResetRescan = function(onProgress)
     -- RAM-DB leeren (Datei wurde bereits vom Hauptskript gelöscht)
     ClearDB()
 
-    -- Status-Labels im Autofarm-UI zurücksetzen
+    -- Status-Labels im Autofarm-UI zurücksetzen (ohne DB-Status)
     pcall(function()
-        AF.UI.Lbl.DBStatus.Text       = "⏳ Reset & Rescan gestartet..."
-        AF.UI.Lbl.DBStatus.TextColor3 = D.Yellow
-        AF.UI.Fr.ScanBar.Visible      = true
-        AF.UI.Fr.ScanBarFill.Size     = UDim2.new(0, 0, 1, 0)
-        AF.UI.Fr.ScanBarFill.BackgroundColor3 = D.Purple
         AF.UI.Lbl.ScanProgress.Text   = "Reset & Rescan: startet..."
         AF.UI.Lbl.ScanProgress.TextColor3 = D.Yellow
         if AF.UI.Btn.ForceRescan then
@@ -1802,8 +1798,8 @@ HS.TriggerResetRescan = function(onProgress)
     task.spawn(function()
         local combinedProgress = function(msg)
             pcall(function()
-                AF.UI.Lbl.DBStatus.Text       = msg
-                AF.UI.Lbl.DBStatus.TextColor3 = D.Yellow
+                AF.UI.Lbl.ScanProgress.Text = msg
+                AF.UI.Lbl.ScanProgress.TextColor3 = D.Yellow
             end)
             if onProgress then pcall(function() onProgress(msg) end) end
         end
