@@ -21,8 +21,12 @@ local MAIN_URL   = "https://raw.githubusercontent.com/Hazeluxeeeees/Tap-Sim/refs
 -- ============================================================
 local waited = 0
 while not (_G.HazeShared and _G.HazeShared.Container and _G.HazeShared.SetModuleLoaded) do
-    task.wait(0.3); waited = waited + 0.3
-    if waited >= 10 then warn("[HazeHub] _G.HazeShared nicht bereit."); return end
+    task.wait(0.5)
+    waited = waited + 0.5
+    if waited >= 10 then 
+        warn("[HazeHub] Autofarm konnte HazeShared nicht finden. Lade trotzdem...") 
+        break 
+    end
 end
 
 -- ============================================================
