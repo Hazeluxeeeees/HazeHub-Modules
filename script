@@ -160,6 +160,9 @@ _G.GlobalSession = GlobalSession
 
 local AntiAFKEnabled = true
 
+-- Vorwärtsdeklarationen für UI-Funktionen
+local UpdateGoalsUI, UpdateSessionUI, RebuildWorldList, LoadWorldCache
+
 local function ToggleAntiAFK()
     AntiAFKEnabled = not AntiAFKEnabled
     -- UI-Update wird später durchgeführt, wenn UI-Elemente existieren
@@ -1174,9 +1177,7 @@ local function SetGUISize(mode)
     UpdateLayoutForMobile()
 end
 
-local UpdateGoalsUI; local UpdateSessionUI; local RebuildWorldList
-
--- ── Webhook (Gesamt-Session, kumuliert) ───────────────────────
+--- ── Webhook (Gesamt-Session, kumuliert) ───────────────────────
 local function SendWebhook(_a,_b,_c)
     if not S.WhEnabled then return end
     if not H.Config.WebhookURL or H.Config.WebhookURL=="" or not H.Config.WebhookURL:find("discord.com") then return end
@@ -2401,10 +2402,20 @@ if UpdateGoalsUI   then pcall(UpdateGoalsUI)   end
 
 -- ★ Startup: nur Cache laden, KEIN auto-rescan
 task.spawn(function()
-    local cacheLoaded=LoadWorldCache()
+    local cacheLoaded = false
+    if LoadWorldCache and type(LoadWorldCache) == "function" then
+        cacheLoaded = LoadWorldCache()
+    else
+        warn("[HazeHUB] LoadWorldCache Funktion nicht gefunden!")
+    end
+    
     if cacheLoaded then
         pcall(function() if H.UI.Lbl.ScanStatus then H.UI.Lbl.ScanStatus.Text="✅ "..#S.WorldIds.." Welten (Cache)"; H.UI.Lbl.ScanStatus.TextColor3=D.Cyan end end)
-        pcall(RebuildWorldList)
+        if RebuildWorldList and type(RebuildWorldList) == "function" then
+            pcall(RebuildWorldList)
+        else
+            warn("[HazeHUB] RebuildWorldList Funktion nicht gefunden!")
+        end
     else
         -- Versuche einmalig live zu lesen ohne zu scannen
         local f=GetChapterFolder()
@@ -2416,7 +2427,11 @@ task.spawn(function()
             pcall(function() if H.UI.Lbl.ScanStatus then H.UI.Lbl.ScanStatus.Text="⚠ Fallback-Daten"; H.UI.Lbl.ScanStatus.TextColor3=D.Orange end end)
         end
     end
-    pcall(RebuildWorldList)
+    if RebuildWorldList and type(RebuildWorldList) == "function" then
+        pcall(RebuildWorldList)
+    else
+        warn("[HazeHUB] RebuildWorldList Funktion nicht gefunden!")
+    end
 end)
 
 task.delay(8,function()
