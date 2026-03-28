@@ -567,20 +567,23 @@ loadTeamBtn.MouseButton1Click:Connect(function()
     SetTMStatus("⏳ Lade Team '" .. team.name .. "'...", D.Yellow)
 
     task.spawn(function()
-        -- 1) UnEquip alle aktuellen Einheiten
-        loadFeedback.Text = "⏳ UnEquip alle Slots..."
-        pcall(UnEquipAll)
-        task.wait(0.5)
+    -- 1) Zuerst alles ausziehen (UnEquipAll nutzen!)
+    local unequipRemote = RS.Remote.Server.Units:FindFirstChild("UnEquipAll")
+    if unequipRemote then
+    unequipRemote:FireServer()
+    task.wait(0.5) -- Warten, damit der Server die Slots leert
+end
 
-        -- 2) Equip gespeicherte Einheiten (Slot 1 → 6)
-        loadFeedback.Text = "⏳ Equip gespeicherte Einheiten..."
-        for i = 1, 6 do
-            local unit = team.slots and team.slots[i]
-            if unit and unit ~= "" then
-                pcall(function() FireEquip(unit) end)
-                task.wait(0.25)
-            end
+-- 2) Einheiten nacheinander anziehen (Equip mit Name statt Tag)
+    for slotIndex, savedTag in pairs(team.units) do
+    local unitName = GetUnitNameByTag(savedTag)
+    if unitName then
+        local unitObj = RS.Player_Data[LP.Name].Collection:FindFirstChild(unitName)
+        if unitObj then
+            RS.Remote.Server.Units.Equip:FireServer(unitObj)
+            task.wait(0.2) -- Kleiner Delay für Stabilität
         end
+    end
         task.wait(0.3)
 
         -- 3) AutoUpgradeConfig feuern (Slot 1 → 6)
