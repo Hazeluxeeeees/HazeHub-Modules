@@ -263,10 +263,30 @@ amtBox:GetPropertyChangedSignal("Text"):Connect(function()
     task.spawn(function() pcall(RebuildCraftList) end)
 end)
 
--- Rezept-Liste Container
+-- Rezept-Liste Container (2-3 Spalten Grid)
 SecLbl(CraftPage,"📜  VERFÜGBARE REZEPTE")
-Craft.UI.Fr.RecipeList=Instance.new("Frame",CraftPage); Craft.UI.Fr.RecipeList.Size=UDim2.new(1,0,0,0); Craft.UI.Fr.RecipeList.AutomaticSize=Enum.AutomaticSize.Y; Craft.UI.Fr.RecipeList.BackgroundTransparency=1; VList(Craft.UI.Fr.RecipeList,6)
-Craft.UI.Lbl.NoRecipes=MkLbl(Craft.UI.Fr.RecipeList,"Keine Rezepte gefunden.",12,D.TextLow); Craft.UI.Lbl.NoRecipes.Size=UDim2.new(1,0,0,30); Craft.UI.Lbl.NoRecipes.TextXAlignment=Enum.TextXAlignment.Center
+Craft.UI.Fr.RecipeList=Card(CraftPage); Pad(Craft.UI.Fr.RecipeList,8,10,8,10)
+Craft.UI.Fr.RecipeList.AutomaticSize=Enum.AutomaticSize.Y; Craft.UI.Fr.RecipeList.BackgroundTransparency=1
+
+-- 2-3 Spalten UIGridLayout für Rezepte
+local recipeGrid = Instance.new("UIGridLayout", Craft.UI.Fr.RecipeList)
+recipeGrid.CellSize = UDim2.new(0.5, -6, 0, 180)  -- 2 Spalten standard
+recipeGrid.CellPadding = UDim2.new(0, 6, 0, 6)
+recipeGrid.SortOrder = Enum.SortOrder.LayoutOrder
+recipeGrid.FillDirection = Enum.FillDirection.Horizontal
+recipeGrid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+recipeGrid.VerticalAlignment = Enum.VerticalAlignment.Top
+
+-- Mobile-Anpassung: 1-2 Spalten
+if HS._isTouchClient then
+    recipeGrid.CellSize = UDim2.new(1, 0, 0, 160)  -- 1 Spalte auf Mobile
+end
+
+Craft.UI.Lbl.NoRecipes=Instance.new("TextLabel",Craft.UI.Fr.RecipeList)
+Craft.UI.Lbl.NoRecipes.Size=UDim2.new(1,0,0,30); Craft.UI.Lbl.NoRecipes.BackgroundTransparency=1
+Craft.UI.Lbl.NoRecipes.Text="Keine Rezepte gefunden."; Craft.UI.Lbl.NoRecipes.TextColor3=D.TextLow
+Craft.UI.Lbl.NoRecipes.TextSize=12; Craft.UI.Lbl.NoRecipes.Font=Enum.Font.GothamMedium
+Craft.UI.Lbl.NoRecipes.TextXAlignment=Enum.TextXAlignment.Center
 
 -- Auto-Collector Queue
 local collCard=Card(CraftPage); Pad(collCard,10,10,10,10); VList(collCard,8); Stroke(collCard,D.Purple,1.5,0.3)
