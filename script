@@ -1,9 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB V20 – Hauptskript  v20.7
---  FIXES v20.7:
---    ✓ Mobile: Sidebar ~+25% (0.28→0.35), Touch-Tab-Text 12px, Tab-/Content-Scroll: Elastic Never
---    ✓ TabScroll + Content-Frames: CanvasSize via UIListLayout, ScrollBarThickness 0|3 (Touch)
---    ✓ TraitRoot: manuelles Canvas + TraitContentLayout für kompakteres Mobile-Padding
+--  HazeHUB V20 – Hauptskript  v20.6
 --  FIXES v20.6:
 --    ✓ Tab-Leiste: ScrollingFrame, CanvasSize via UIListLayout.AbsoluteContentSize, ScrollBar 0
 --    ✓ MainFrame / Content / Sidebar: UDim2.fromScale + UIAspectRatioConstraint (Fenster)
@@ -852,9 +848,9 @@ H.UI.Fr.TabScroll.ClipsDescendants = true
 H.UI.Fr.TabScroll.ScrollingDirection = Enum.ScrollingDirection.Y
 H.UI.Fr.TabScroll.ScrollBarThickness = 0
 H.UI.Fr.TabScroll.ScrollingEnabled = true
-H.UI.Fr.TabScroll.ElasticBehavior = Enum.ElasticBehavior.Never
 H.UI.Fr.TabScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-H.UI.Fr.TabScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+H.UI.Fr.TabScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+H.UI.Fr.TabScroll.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
 H.UI.Fr.TabHolder = Instance.new("Frame", H.UI.Fr.TabScroll)
 H.UI.Fr.TabHolder.Name = "TabHolder"
 H.UI.Fr.TabHolder.Size = UDim2.new(1, 0, 0, 0)
@@ -864,8 +860,12 @@ H.UI.Fr.TabHolder.BorderSizePixel = 0
 local tabBarList = VList(H.UI.Fr.TabHolder, 3)
 Pad(H.UI.Fr.TabHolder, 3, 5, 3, 5)
 local function SyncTabScrollCanvas()
+    -- AutomaticCanvasSize=Y übernimmt das Canvas; manueller Sync nur als Fallback
     pcall(function()
-        H.UI.Fr.TabScroll.CanvasSize = UDim2.new(0, 0, 0, tabBarList.AbsoluteContentSize.Y + 12)
+        local needed = tabBarList.AbsoluteContentSize.Y + 12
+        if H.UI.Fr.TabScroll.AutomaticCanvasSize == Enum.AutomaticSize.None then
+            H.UI.Fr.TabScroll.CanvasSize = UDim2.new(0, 0, 0, needed)
+        end
     end)
 end
 tabBarList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(SyncTabScrollCanvas)
@@ -890,8 +890,9 @@ end
 local function MakeTab(name,icon)
     local B=Instance.new("TextButton",H.UI.Fr.TabHolder)
     B.Size=UDim2.new(1,0,0,30); B.BackgroundColor3=D.TabInactive; B.BackgroundTransparency=D.GlassPane
-    B.Text=icon.."  "..name; B.TextColor3=D.TextMid; B.TextSize=Svc.Input.TouchEnabled and 12 or 14
+    B.Text=icon.."  "..name; B.TextColor3=D.TextMid; B.TextSize=13
     B.Font=Enum.Font.GothamMedium; B.TextScaled=false; B.RichText=true; B.TextStrokeTransparency=1
+    B.TextTruncate=Enum.TextTruncate.AtEnd
     B.AutoButtonColor=false; B.BorderSizePixel=0
     Corner(B,8); Stroke(B,D.Accent,1,1)
     B.MouseEnter:Connect(function() if S.ActiveTab~=name then Tw(B,{BackgroundColor3=D.CardHover}) end end)
@@ -899,20 +900,9 @@ local function MakeTab(name,icon)
     local P=Instance.new("ScrollingFrame",H.UI.Fr.Content)
     P.Name=name; P.Size=UDim2.new(1,0,1,0); P.Visible=false
     P.BackgroundTransparency=1; P.ScrollBarThickness=0
-    P.ScrollingEnabled=true; P.ScrollingDirection=Enum.ScrollingDirection.Y
-    P.ElasticBehavior=Enum.ElasticBehavior.Never
-    P.ScrollBarImageColor3=D.CyanDim; P.AutomaticCanvasSize=Enum.AutomaticSize.None
-    P.CanvasSize=UDim2.new(0,0,0,0); P.BorderSizePixel=0
-    local tabContentList=VList(P,8); Pad(P,10,10,10,10)
-    local function syncPCanvas()
-        pcall(function()
-            local pad=P:FindFirstChildOfClass("UIPadding")
-            local extra=0; if pad then extra=pad.PaddingTop.Offset+pad.PaddingBottom.Offset end
-            P.CanvasSize=UDim2.new(0,0,0,tabContentList.AbsoluteContentSize.Y+extra)
-        end)
-    end
-    tabContentList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncPCanvas)
-    task.defer(syncPCanvas)
+    P.ScrollingEnabled=true
+    P.ScrollBarImageColor3=D.CyanDim; P.AutomaticCanvasSize=Enum.AutomaticSize.Y
+    P.BorderSizePixel=0; VList(P,8); Pad(P,10,10,10,10)
     H.Tabs[name]=P; H.TBtns[name]=B; B.MouseButton1Click:Connect(function() SelectTab(name) end)
     return P
 end
@@ -924,7 +914,7 @@ local function MakeTraitsTab(name, icon)
     B.BackgroundTransparency = D.GlassPane
     B.Text = icon .. "  " .. name
     B.TextColor3 = D.TextMid
-    B.TextSize = Svc.Input.TouchEnabled and 12 or 14
+    B.TextSize = 14
     B.Font = Enum.Font.GothamMedium
     B.TextScaled = false; B.RichText = true; B.TextStrokeTransparency = 1
     B.AutoButtonColor = false
@@ -945,9 +935,9 @@ local function MakeTraitsTab(name, icon)
     TraitRoot.ScrollBarThickness = 0
     TraitRoot.ScrollBarImageColor3 = D.CyanDim
     TraitRoot.ScrollingEnabled = true
-    TraitRoot.AutomaticCanvasSize = Enum.AutomaticSize.None
+    TraitRoot.AutomaticCanvasSize = Enum.AutomaticSize.Y
     TraitRoot.CanvasSize = UDim2.new(0, 0, 0, 0)
-    TraitRoot.ElasticBehavior = Enum.ElasticBehavior.Never
+    TraitRoot.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
 
     local TraitContent = Instance.new("Frame", TraitRoot)
     TraitContent.Name = "TraitContent"
@@ -961,17 +951,6 @@ local function MakeTraitsTab(name, icon)
     rootList.SortOrder = Enum.SortOrder.LayoutOrder
     rootList.Padding = UDim.new(0, 6)
     rootList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-    local function syncTraitRootCanvas()
-        pcall(function()
-            local y = rootList.AbsoluteContentSize.Y
-            TraitRoot.CanvasSize = UDim2.new(0, 0, 0, y + 10)
-        end)
-    end
-    rootList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncTraitRootCanvas)
-    TraitContent:GetPropertyChangedSignal("AbsoluteSize"):Connect(syncTraitRootCanvas)
-    task.defer(syncTraitRootCanvas)
-    _G.HazeShared.TraitContentLayout = rootList
 
     local TraitSticky = Instance.new("Frame", TraitContent)
     TraitSticky.Name = "TraitSticky"
@@ -1022,29 +1001,19 @@ local function UpdateLayoutForMobile()
     local touch = Svc.Input.TouchEnabled
     H._isTouchClient = touch
     _G.HazeShared._isTouchClient = touch
-    local barThick = touch and 3 or 0
+    -- TabScroll: bei Touch dünne Scrollbar für Feedback, sonst unsichtbar
     pcall(function()
-        H.UI.Fr.TabScroll.ScrollBarThickness = barThick
-        H.UI.Fr.TabScroll.ElasticBehavior = Enum.ElasticBehavior.Never
+        H.UI.Fr.TabScroll.ScrollBarThickness = touch and 3 or 0
+        H.UI.Fr.TabScroll.ScrollingEnabled = true
+        H.UI.Fr.TabScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
     end)
     pcall(SyncTabScrollCanvas)
     pcall(function()
-        for _, b in pairs(H.TBtns) do
-            if b and b:IsA("GuiButton") then b.TextSize = touch and 12 or 14 end
-        end
-    end)
-    pcall(function()
-        for _, tab in pairs(H.Tabs) do
-            if tab and tab:IsA("ScrollingFrame") then
-                tab.ScrollBarThickness = barThick
-                tab.ElasticBehavior = Enum.ElasticBehavior.Never
-            end
-        end
-    end)
-    pcall(function()
-        local tcl = _G.HazeShared.TraitContentLayout
-        if tcl and tcl:IsA("UIListLayout") then
-            tcl.Padding = UDim.new(0, touch and 3 or 6)
+        local traitsTab = H.UI.Fr.Content:FindFirstChild("Traits")
+        if traitsTab and traitsTab:IsA("ScrollingFrame") then
+            traitsTab.ScrollBarThickness = touch and 6 or 0
+            traitsTab.ScrollingEnabled = true
+            traitsTab.AutomaticCanvasSize = Enum.AutomaticSize.Y
         end
     end)
     if _G.HazeShared._ApplyTraitResponsiveLayout then
@@ -1057,9 +1026,6 @@ end
 local PC_FRAME_SCALE_X, PC_FRAME_SCALE_Y = 0.40, 0.48
 local MOBILE_FRAME = UDim2.new(PC_FRAME_SCALE_X * 0.7, 0, PC_FRAME_SCALE_Y * 0.8, 0)
 local TOUCH_MAIN_UI_SCALE = 0.85
--- Sidebar: Desktop ~0.22; Touch/Mobile +25% gegenüber früher 0.28 → 0.35
-local PC_SIDEBAR_SCALE = 0.22
-local MOBILE_SIDEBAR_SCALE = 0.28 * 1.25
 
 local function SetGUISize(mode)
     H.Config.UISize=mode; SaveConfig()
@@ -1075,15 +1041,15 @@ local function SetGUISize(mode)
     if useCompact then
         MainFrame.Size = MOBILE_FRAME
         if ma then ma.AspectRatio = (PC_FRAME_SCALE_X * 0.7) / (PC_FRAME_SCALE_Y * 0.8) end
-        H.UI.Fr.Sidebar.Size=UDim2.new(MOBILE_SIDEBAR_SCALE, 0, 1, 0)
-        H.UI.Fr.Content.Position=UDim2.new(MOBILE_SIDEBAR_SCALE, 4, 0, 25)
-        H.UI.Fr.Content.Size=UDim2.new(1 - MOBILE_SIDEBAR_SCALE, -6, 1, -33)
+        H.UI.Fr.Sidebar.Size=UDim2.new(0.30, 0, 1, 0)
+        H.UI.Fr.Content.Position=UDim2.new(0.30, 4, 0, 25)
+        H.UI.Fr.Content.Size=UDim2.new(0.70, -6, 1, -33)
     else
         MainFrame.Size=UDim2.fromScale(PC_FRAME_SCALE_X, PC_FRAME_SCALE_Y)
         if ma then ma.AspectRatio = 580 / 450 end
-        H.UI.Fr.Sidebar.Size=UDim2.new(PC_SIDEBAR_SCALE, 0, 1, 0)
-        H.UI.Fr.Content.Position=UDim2.new(PC_SIDEBAR_SCALE, 6, 0, 25)
-        H.UI.Fr.Content.Size=UDim2.new(1 - PC_SIDEBAR_SCALE, -8, 1, -33)
+        H.UI.Fr.Sidebar.Size=UDim2.new(0.22, 0, 1, 0)
+        H.UI.Fr.Content.Position=UDim2.new(0.22, 6, 0, 25)
+        H.UI.Fr.Content.Size=UDim2.new(0.78, -8, 1, -33)
     end
     us.Scale = touch and TOUCH_MAIN_UI_SCALE or 1
     UpdateLayoutForMobile()
@@ -1892,6 +1858,113 @@ NeonBtn(SettPage,"⏏  GUI vollständig entladen",D.Red,34).MouseButton1Click:Co
     pcall(function() if HazeHubBlur and HazeHubBlur.Parent then HazeHubBlur:Destroy() end end)
     pcall(function() ScreenGui:Destroy() end); pcall(function() H.UI.Fr.MiniBtn:Destroy() end)
 end)
+
+-- ── DATA WIPE (3-sekündiger Hold) ────────────────────────────────────────────
+do
+    local wipeCard = Card(SettPage); Pad(wipeCard, 10, 10, 10, 10); VList(wipeCard, 6)
+    Stroke(wipeCard, D.Red, 1.5, 0.2)
+    local wipeHdr = Instance.new("TextLabel", wipeCard)
+    wipeHdr.Size = UDim2.new(1, 0, 0, 14); wipeHdr.BackgroundTransparency = 1
+    wipeHdr.Text = "⚠  GEFAHRENZONE"; wipeHdr.TextColor3 = D.Red
+    wipeHdr.TextSize = 10; wipeHdr.Font = Enum.Font.GothamBold
+    wipeHdr.TextXAlignment = Enum.TextXAlignment.Left
+    local wipeLbl = MkLbl(wipeCard, "Löscht alle lokalen JSON-Dateien dieses Accounts.\nHalte den Button 3 Sekunden gedrückt.", 9, D.TextLow)
+    wipeLbl.Size = UDim2.new(1, 0, 0, 28)
+
+    -- Hold-Fortschrittsbalken
+    local wipeBarBg = Instance.new("Frame", wipeCard)
+    wipeBarBg.Size = UDim2.new(1, 0, 0, 4); wipeBarBg.BackgroundColor3 = Color3.fromRGB(40, 10, 10)
+    wipeBarBg.BorderSizePixel = 0; Corner(wipeBarBg, 2); wipeBarBg.Visible = false
+    local wipeBarFill = Instance.new("Frame", wipeBarBg)
+    wipeBarFill.Size = UDim2.new(0, 0, 1, 0); wipeBarFill.BackgroundColor3 = D.Red
+    wipeBarFill.BorderSizePixel = 0; Corner(wipeBarFill, 2)
+
+    local wipeBtn = Instance.new("TextButton", wipeCard)
+    wipeBtn.Size = UDim2.new(1, 0, 0, 38); wipeBtn.BackgroundColor3 = D.RedDark
+    wipeBtn.Text = "⚠️ ALLE BENUTZERDATEN LÖSCHEN"; wipeBtn.TextColor3 = D.Red
+    wipeBtn.TextSize = 13; wipeBtn.Font = Enum.Font.GothamBold
+    wipeBtn.AutoButtonColor = false; wipeBtn.BorderSizePixel = 0
+    Corner(wipeBtn, 8); Stroke(wipeBtn, D.Red, 1.5, 0.3)
+
+    local wipeFeedback = MkLbl(wipeCard, "", 10, D.TextLow)
+    wipeFeedback.Size = UDim2.new(1, 0, 0, 16)
+
+    local _wipeHolding = false
+    local _wipeConn = nil
+    local HOLD_DURATION = 3.0
+
+    local function DoWipe()
+        wipeBtn.Text = "⏳ Lösche Daten..."; wipeBtn.TextColor3 = D.Orange
+        local files = {
+            K.FOLDER .. "/" .. LP.Name .. "_settings.json",
+            K.FOLDER .. "/" .. LP.Name .. "_teams.json",
+            K.FOLDER .. "/" .. LP.Name .. "_autosave.json",
+        }
+        local deleted = 0
+        for _, fpath in ipairs(files) do
+            pcall(function()
+                if isfile and isfile(fpath) then
+                    delfile(fpath)
+                    deleted = deleted + 1
+                end
+            end)
+        end
+        wipeFeedback.Text = "✅ " .. deleted .. " Datei(en) gelöscht. UI wird geschlossen..."
+        wipeFeedback.TextColor3 = D.GreenBright
+        task.delay(1.2, function()
+            pcall(function()
+                S.Running = false; S.WhEnabled = false
+                if HazeHubBlur and HazeHubBlur.Parent then HazeHubBlur:Destroy() end
+                ScreenGui:Destroy()
+                pcall(function() H.UI.Fr.MiniBtn:Destroy() end)
+            end)
+        end)
+    end
+
+    wipeBtn.MouseButton1Down:Connect(function()
+        if _wipeHolding then return end
+        _wipeHolding = true
+        wipeBarBg.Visible = true
+        wipeBtn.Text = "⏳ Halten... (3s)"; wipeBtn.TextColor3 = D.Orange
+        Stroke(wipeBtn, D.Orange, 2, 0)
+        local t0 = os.clock()
+        local loop
+        loop = game:GetService("RunService").Heartbeat:Connect(function()
+            if not _wipeHolding then
+                loop:Disconnect(); return
+            end
+            local elapsed = os.clock() - t0
+            local pct = math.min(1, elapsed / HOLD_DURATION)
+            wipeBarFill.Size = UDim2.new(pct, 0, 1, 0)
+            if elapsed >= HOLD_DURATION then
+                loop:Disconnect()
+                _wipeHolding = false
+                wipeBarBg.Visible = false
+                wipeBarFill.Size = UDim2.new(0, 0, 1, 0)
+                DoWipe()
+            end
+        end)
+        _wipeConn = loop
+    end)
+
+    local function CancelWipe()
+        if not _wipeHolding then return end
+        _wipeHolding = false
+        if _wipeConn then pcall(function() _wipeConn:Disconnect() end); _wipeConn = nil end
+        wipeBarBg.Visible = false
+        wipeBarFill.Size = UDim2.new(0, 0, 1, 0)
+        wipeBtn.Text = "⚠️ ALLE BENUTZERDATEN LÖSCHEN"; wipeBtn.TextColor3 = D.Red
+        Stroke(wipeBtn, D.Red, 1.5, 0.3)
+    end
+    wipeBtn.MouseButton1Up:Connect(CancelWipe)
+    wipeBtn.MouseLeave:Connect(CancelWipe)
+    wipeBtn.MouseEnter:Connect(function()
+        if not _wipeHolding then Tw(wipeBtn, {BackgroundColor3 = Color3.fromRGB(60, 14, 14)}) end
+    end)
+    wipeBtn.MouseLeave:Connect(function()
+        if not _wipeHolding then Tw(wipeBtn, {BackgroundColor3 = D.RedDark}) end
+    end)
+end
 end) -- end pcall Settings Tab
 
 -- ── Mobile Button (rund, links mittig, Haze-Logo PNG zentriert) ──────────────
