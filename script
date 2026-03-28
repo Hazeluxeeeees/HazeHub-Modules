@@ -1,5 +1,11 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB V20 – Hauptskript  v20.5
+--  HazeHUB V20 – Hauptskript  v20.6
+--  FIXES v20.6:
+--    ✓ Tab-Leiste: ScrollingFrame, CanvasSize via UIListLayout.AbsoluteContentSize, ScrollBar 0
+--    ✓ MainFrame / Content / Sidebar: UDim2.fromScale + UIAspectRatioConstraint (Fenster)
+--    ✓ UpdateLayoutForMobile(): TouchEnabled → Tab-Canvas + Trait-Layout (HS._isTouchClient)
+--    ✓ Welt-Cache: HazeHUB/<LP.Name>_WorldCache.json + SaveWorldCache für Autofarm-Rescan
+--    ✓ MakeTab-Inhalte: ScrollBarThickness 0, AutomaticCanvasSize Y
 --  FIXES v20.5:
 --    ✓ Multi-Selection Stat-Reroll: Checkboxen für alle Ratings
 --      (C-, C, C+, B-, B, B+, A-, A, A+, S-, S, S+, SS, SSS, O-, O, O+)
@@ -281,11 +287,12 @@ local function FireCreateAndStart(worldId,mode,chapId)
 end
 
 -- ── World-Scan ────────────────────────────────────────────────
-local WORLD_CACHE_FILE="HazeHUB/HazeHUB_WorldCache.json"
+-- Account-spezifischer Cache (wie Queue/DB), weiterhin LP.Name in allen Pfaden
+local WORLD_CACHE_FILE = K.FOLDER .. "/" .. LP.Name .. "_WorldCache.json"
 local function SaveWorldData()
     if not writefile then return end
-    if not S.ScanDone or next(S.WorldData)==nil then return end
-    pcall(function() writefile(WORLD_CACHE_FILE,Svc.Http:JSONEncode({worlds=S.WorldData,ids=S.WorldIds,ts=os.time()})) end)
+    if next(S.WorldData) == nil then return end
+    pcall(function() writefile(WORLD_CACHE_FILE, Svc.Http:JSONEncode({ worlds = S.WorldData, ids = S.WorldIds, ts = os.time() })) end)
 end
 local function LoadWorldCache()
     if not (isfile and isfile(WORLD_CACHE_FILE)) then return false end
@@ -776,9 +783,14 @@ end)
 H.UI.Fr.Main=Instance.new("Frame",ScreenGui)
 H.UI.Fr.Main.Name="MainFrame"
 local MainFrame=H.UI.Fr.Main
-MainFrame.Size=UDim2.new(0,580,0,450)
+MainFrame.Size=UDim2.fromScale(0.40, 0.48)
 MainFrame.AnchorPoint=Vector2.new(0.5,0.5)
 MainFrame.Position=UDim2.new(0.5,0,0.5,0)
+local MainAspect = Instance.new("UIAspectRatioConstraint", MainFrame)
+MainAspect.Name = "MainAspect"
+MainAspect.AspectRatio = 580 / 450
+MainAspect.AspectType = Enum.AspectType.ScaleWithParentSize
+MainAspect.DominantAxis = Enum.DominantAxis.Width
 MainFrame.BackgroundColor3=D.BG
 MainFrame.BackgroundTransparency=0.18
 MainFrame.BorderSizePixel=0
@@ -822,9 +834,33 @@ Instance.new("UIGradient",sStripe).Color=ColorSequence.new({ColorSequenceKeypoin
 local lf=Instance.new("Frame",H.UI.Fr.Sidebar)
 lf.Size=UDim2.new(1,0,0,46); lf.Position=UDim2.new(0,0,0,2); lf.BackgroundTransparency=1
 local sl=BuildMoonLogo(lf,32,0,7); sl.AnchorPoint=Vector2.new(0.5,0); sl.Position=UDim2.new(0.5,0,0,7)
-H.UI.Fr.TabHolder=Instance.new("Frame",H.UI.Fr.Sidebar)
-H.UI.Fr.TabHolder.Position=UDim2.new(0,0,0,52); H.UI.Fr.TabHolder.Size=UDim2.new(1,0,1,-56)
-H.UI.Fr.TabHolder.BackgroundTransparency=1; VList(H.UI.Fr.TabHolder,3); Pad(H.UI.Fr.TabHolder,3,5,3,5)
+H.UI.Fr.TabScroll = Instance.new("ScrollingFrame", H.UI.Fr.Sidebar)
+H.UI.Fr.TabScroll.Name = "TabScroll"
+H.UI.Fr.TabScroll.Position = UDim2.new(0, 0, 0, 52)
+H.UI.Fr.TabScroll.Size = UDim2.new(1, 0, 1, -56)
+H.UI.Fr.TabScroll.BackgroundTransparency = 1
+H.UI.Fr.TabScroll.BorderSizePixel = 0
+H.UI.Fr.TabScroll.ClipsDescendants = true
+H.UI.Fr.TabScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+H.UI.Fr.TabScroll.ScrollBarThickness = 0
+H.UI.Fr.TabScroll.ScrollingEnabled = true
+H.UI.Fr.TabScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+H.UI.Fr.TabScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+H.UI.Fr.TabHolder = Instance.new("Frame", H.UI.Fr.TabScroll)
+H.UI.Fr.TabHolder.Name = "TabHolder"
+H.UI.Fr.TabHolder.Size = UDim2.new(1, 0, 0, 0)
+H.UI.Fr.TabHolder.AutomaticSize = Enum.AutomaticSize.Y
+H.UI.Fr.TabHolder.BackgroundTransparency = 1
+H.UI.Fr.TabHolder.BorderSizePixel = 0
+local tabBarList = VList(H.UI.Fr.TabHolder, 3)
+Pad(H.UI.Fr.TabHolder, 3, 5, 3, 5)
+local function SyncTabScrollCanvas()
+    pcall(function()
+        H.UI.Fr.TabScroll.CanvasSize = UDim2.new(0, 0, 0, tabBarList.AbsoluteContentSize.Y + 12)
+    end)
+end
+tabBarList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(SyncTabScrollCanvas)
+task.defer(SyncTabScrollCanvas)
 H.UI.Fr.Content=Instance.new("Frame",MainFrame); H.UI.Fr.Content.Name="Content"; H.UI.Fr.Content.BackgroundTransparency=1
 
 -- ── Tab-System ────────────────────────────────────────────────
@@ -853,7 +889,7 @@ local function MakeTab(name,icon)
     B.MouseLeave:Connect(function() if S.ActiveTab~=name then Tw(B,{BackgroundColor3=D.TabInactive}) end end)
     local P=Instance.new("ScrollingFrame",H.UI.Fr.Content)
     P.Name=name; P.Size=UDim2.new(1,0,1,0); P.Visible=false
-    P.BackgroundTransparency=1; P.ScrollBarThickness=3
+    P.BackgroundTransparency=1; P.ScrollBarThickness=0
     P.ScrollingEnabled=true
     P.ScrollBarImageColor3=D.CyanDim; P.AutomaticCanvasSize=Enum.AutomaticSize.Y
     P.BorderSizePixel=0; VList(P,8); Pad(P,10,10,10,10)
@@ -902,7 +938,7 @@ local function MakeTraitsTab(name, icon)
     TraitScroll.Size = UDim2.new(1, 0, 0, 200)
     TraitScroll.BackgroundTransparency = 1
     TraitScroll.BorderSizePixel = 0
-    TraitScroll.ScrollBarThickness = 4
+    TraitScroll.ScrollBarThickness = 0
     TraitScroll.ScrollingEnabled = true
     TraitScroll.ScrollBarImageColor3 = D.CyanDim
     TraitScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -951,18 +987,36 @@ _G.HazeShared.TraitSticky   = TraitSticky
 _G.HazeShared.TraitPageRoot = TraitRoot
 _G.HazeShared.TeamsPage     = TeamsPage
 
+-- ── Touch / Mobile Layout Sync (Tabs + Trait-Modul) ───────────
+local function UpdateLayoutForMobile()
+    local touch = Svc.Input.TouchEnabled
+    H._isTouchClient = touch
+    _G.HazeShared._isTouchClient = touch
+    pcall(SyncTabScrollCanvas)
+    if _G.HazeShared._ApplyTraitResponsiveLayout then
+        task.defer(function() pcall(_G.HazeShared._ApplyTraitResponsiveLayout) end)
+    end
+end
+
 -- ── GUI-Resize ────────────────────────────────────────────────
 local function SetGUISize(mode)
     H.Config.UISize=mode; SaveConfig()
+    local ma = MainFrame:FindFirstChild("MainAspect")
+    H.UI.Fr.Sidebar.Position=UDim2.new(0,0,0,0)
     if mode=="Mobile" then
-        MainFrame.Size=UDim2.new(0,370,0,340)
-        H.UI.Fr.Sidebar.Size=UDim2.new(0,92,1,0); H.UI.Fr.Sidebar.Position=UDim2.new(0,0,0,0)
-        H.UI.Fr.Content.Position=UDim2.new(0,100,0,25); H.UI.Fr.Content.Size=UDim2.new(1,-108,1,-33)
+        MainFrame.Size=UDim2.fromScale(0.54, 0.60)
+        if ma then ma.AspectRatio = 0.95 end
+        H.UI.Fr.Sidebar.Size=UDim2.new(0.28, 0, 1, 0)
+        H.UI.Fr.Content.Position=UDim2.new(0.28, 4, 0, 25)
+        H.UI.Fr.Content.Size=UDim2.new(0.72, -6, 1, -33)
     else
-        MainFrame.Size=UDim2.new(0,580,0,450)
-        H.UI.Fr.Sidebar.Size=UDim2.new(0,130,1,0); H.UI.Fr.Sidebar.Position=UDim2.new(0,0,0,0)
-        H.UI.Fr.Content.Position=UDim2.new(0,138,0,25); H.UI.Fr.Content.Size=UDim2.new(1,-148,1,-33)
+        MainFrame.Size=UDim2.fromScale(0.40, 0.48)
+        if ma then ma.AspectRatio = 580 / 450 end
+        H.UI.Fr.Sidebar.Size=UDim2.new(0.22, 0, 1, 0)
+        H.UI.Fr.Content.Position=UDim2.new(0.22, 6, 0, 25)
+        H.UI.Fr.Content.Size=UDim2.new(0.78, -8, 1, -33)
     end
+    UpdateLayoutForMobile()
 end
 
 local UpdateGoalsUI; local UpdateSessionUI; local RebuildWorldList
@@ -1729,8 +1783,10 @@ pcall(function()
 MkLbl(SettPage,"⚙  Einstellungen",14,D.Cyan,true)
 local szCard=Card(SettPage); Pad(szCard,10,10,10,10); VList(szCard,8); SecLbl(szCard,"FENSTERGRÖSSE")
 local szRow=Instance.new("Frame",szCard); szRow.Size=UDim2.new(1,0,0,34); szRow.BackgroundTransparency=1; HList(szRow,8)
-H.UI.Btn.PCBtn=Instance.new("TextButton",szRow); H.UI.Btn.PCBtn.Size=UDim2.new(0.48,0,0,34); H.UI.Btn.PCBtn.BackgroundColor3=D.CardHover; H.UI.Btn.PCBtn.Text="🖥  PC"; H.UI.Btn.PCBtn.TextColor3=D.TextHi; H.UI.Btn.PCBtn.TextSize=12; H.UI.Btn.PCBtn.Font=Enum.Font.GothamBold; H.UI.Btn.PCBtn.AutoButtonColor=false; H.UI.Btn.PCBtn.BorderSizePixel=0; Corner(H.UI.Btn.PCBtn,7); Stroke(H.UI.Btn.PCBtn,D.Cyan,1,0.3)
-H.UI.Btn.MobBtn=Instance.new("TextButton",szRow); H.UI.Btn.MobBtn.Size=UDim2.new(0.48,0,0,34); H.UI.Btn.MobBtn.BackgroundColor3=D.CardHover; H.UI.Btn.MobBtn.Text="📱  Mobile"; H.UI.Btn.MobBtn.TextColor3=D.TextHi; H.UI.Btn.MobBtn.TextSize=12; H.UI.Btn.MobBtn.Font=Enum.Font.GothamBold; H.UI.Btn.MobBtn.AutoButtonColor=false; H.UI.Btn.MobBtn.BorderSizePixel=0; Corner(H.UI.Btn.MobBtn,7); Stroke(H.UI.Btn.MobBtn,D.Border,1,0.3)
+H.UI.Btn.PCBtn=Instance.new("TextButton",szRow); H.UI.Btn.PCBtn.Size=UDim2.new(0.48,0,1,0); H.UI.Btn.PCBtn.BackgroundColor3=D.CardHover; H.UI.Btn.PCBtn.Text="🖥  PC"; H.UI.Btn.PCBtn.TextColor3=D.TextHi; H.UI.Btn.PCBtn.TextSize=12; H.UI.Btn.PCBtn.Font=Enum.Font.GothamBold; H.UI.Btn.PCBtn.AutoButtonColor=false; H.UI.Btn.PCBtn.BorderSizePixel=0; Corner(H.UI.Btn.PCBtn,7); Stroke(H.UI.Btn.PCBtn,D.Cyan,1,0.3)
+local _pcAsp = Instance.new("UIAspectRatioConstraint", H.UI.Btn.PCBtn); _pcAsp.AspectRatio = 2.4; _pcAsp.DominantAxis = Enum.DominantAxis.Height
+H.UI.Btn.MobBtn=Instance.new("TextButton",szRow); H.UI.Btn.MobBtn.Size=UDim2.new(0.48,0,1,0); H.UI.Btn.MobBtn.BackgroundColor3=D.CardHover; H.UI.Btn.MobBtn.Text="📱  Mobile"; H.UI.Btn.MobBtn.TextColor3=D.TextHi; H.UI.Btn.MobBtn.TextSize=12; H.UI.Btn.MobBtn.Font=Enum.Font.GothamBold; H.UI.Btn.MobBtn.AutoButtonColor=false; H.UI.Btn.MobBtn.BorderSizePixel=0; Corner(H.UI.Btn.MobBtn,7); Stroke(H.UI.Btn.MobBtn,D.Border,1,0.3)
+local _mobAsp = Instance.new("UIAspectRatioConstraint", H.UI.Btn.MobBtn); _mobAsp.AspectRatio = 2.4; _mobAsp.DominantAxis = Enum.DominantAxis.Height
 H.UI.Btn.PCBtn.MouseButton1Click:Connect(function() SetGUISize("PC"); Stroke(H.UI.Btn.PCBtn,D.Cyan,1,0.3); Stroke(H.UI.Btn.MobBtn,D.Border,1,0.3) end)
 H.UI.Btn.MobBtn.MouseButton1Click:Connect(function() SetGUISize("Mobile"); Stroke(H.UI.Btn.MobBtn,D.Cyan,1,0.3); Stroke(H.UI.Btn.PCBtn,D.Border,1,0.3) end)
 local lobCard=Card(SettPage); Pad(lobCard,10,10,10,10); VList(lobCard,8); SecLbl(lobCard,"LOBBY-TELEPORT")
@@ -1770,8 +1826,9 @@ end) -- end pcall Settings Tab
 
 -- ── Mobile Button (rund, links mittig, Haze-Logo PNG zentriert) ──────────────
 H.UI.Fr.MiniBtn=Instance.new("TextButton",ScreenGui)
-H.UI.Fr.MiniBtn.Name="MiniBtn"; H.UI.Fr.MiniBtn.Size=UDim2.new(0,50,0,50)
-H.UI.Fr.MiniBtn.AnchorPoint=Vector2.new(0,0.5); H.UI.Fr.MiniBtn.Position=UDim2.new(0,10,0.5,-25)
+H.UI.Fr.MiniBtn.Name="MiniBtn"; H.UI.Fr.MiniBtn.Size=UDim2.new(0.042,0,0.075,0)
+H.UI.Fr.MiniBtn.AnchorPoint=Vector2.new(0,0.5); H.UI.Fr.MiniBtn.Position=UDim2.new(0.012,0,0.5,0)
+local MiniAsp = Instance.new("UIAspectRatioConstraint", H.UI.Fr.MiniBtn); MiniAsp.AspectRatio = 1
 H.UI.Fr.MiniBtn.BackgroundColor3=D.BG; H.UI.Fr.MiniBtn.BackgroundTransparency=0.2
 H.UI.Fr.MiniBtn.Text=""; H.UI.Fr.MiniBtn.AutoButtonColor=false; H.UI.Fr.MiniBtn.BorderSizePixel=0; Corner(H.UI.Fr.MiniBtn,99)
 local MBRing=Instance.new("Frame",H.UI.Fr.MiniBtn); MBRing.Size=UDim2.new(1,10,1,10); MBRing.Position=UDim2.new(0.5,0,0.5,0); MBRing.AnchorPoint=Vector2.new(0.5,0.5)
@@ -1802,8 +1859,8 @@ local function OnMiniBtnClick()
 end
 H.UI.Fr.MiniBtn.MouseEnter:Connect(function() Tw(H.UI.Fr.MiniBtn,{BackgroundTransparency=0.08},TM); Stroke(MBRing,D.Accent,2,0.25) end)
 H.UI.Fr.MiniBtn.MouseLeave:Connect(function() Tw(H.UI.Fr.MiniBtn,{BackgroundTransparency=0.2},TM); Stroke(MBRing,D.Border,1.5,0.45) end)
-H.UI.Fr.MiniBtn.MouseButton1Down:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0,44,0,44)},TF) end)
-H.UI.Fr.MiniBtn.MouseButton1Up:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0,50,0,50)},TF) end)
+H.UI.Fr.MiniBtn.MouseButton1Down:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0.038,0,0.068,0)},TF) end)
+H.UI.Fr.MiniBtn.MouseButton1Up:Connect(function() Tw(H.UI.Fr.MiniBtn,{Size=UDim2.new(0.042,0,0.075,0)},TF) end)
 H.UI.Fr.MiniBtn.MouseButton1Click:Connect(OnMiniBtnClick)
 MakeDraggable(H.UI.Fr.Main,MainFrame)
 MakeDraggable(H.UI.Fr.MiniBtn,H.UI.Fr.MiniBtn)
@@ -1872,6 +1929,7 @@ _G.HazeShared.IsInLobby          = IsInLobby
 _G.HazeShared.TeleportToLobby    = TeleportToLobby
 _G.HazeShared.SaveConfig         = SaveConfig
 _G.HazeShared.SaveSettings       = SaveSettings
+_G.HazeShared.SaveWorldCache     = SaveWorldData
 _G.HazeShared.GetSettingsFilePath = GetSettingsFilePath
 _G.HazeShared.GetAutoSaveFilePath = GetAutoSaveFilePath
 _G.HazeShared.SendWebhook        = SendWebhook
