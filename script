@@ -2261,7 +2261,7 @@ _G.HazeShared.CraftPage     = CraftPage
 _G.HazeShared.TraitPage     = TraitPage
 
 _G.HazeShared.OnDBReady=function(chapCount,msg)
-    pcall(function() S.DBReady=true; -- Database confirmation removed - status now in header end)
+    pcall(function() S.DBReady=true; -- Database confirmation removed - status now in header end))
 end
 _G.HazeShared.SetModuleLoaded=function(version)
     pcall(function()
