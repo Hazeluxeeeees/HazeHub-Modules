@@ -2389,15 +2389,19 @@ local function CheckAllGoals()
 end
 
 -- ╔══════════════════════════════════════════════════════════╗
---  GAME TAB
+-- ╔══════════════════════════════════════════════════════════╗
+--  GAME TAB  (v4.0 – UI-only, Callbacks auf _G.HazeHUB)
 -- ╚══════════════════════════════════════════════════════════╝
+-- HINWEIS: Alle spielbezogenen Logik-Funktionen wurden nach
+-- autofarm.lua migriert. Dieser Tab enthält ausschließlich
+-- UI-Elemente und Callbacks auf _G.HazeHUB.* .
 pcall(function()
 MkLbl(GamePage,"🎮  Game",14,D.Cyan,true)
 
 -- === STATUS-ANZEIGEN (horizontal nebeneinander) ===
-local statusRow=Instance.new("Frame",GamePage); statusRow.Size=UDim2.new(1,0,0,30); statusRow.BackgroundTransparency=1; HList(statusRow,10)
+local statusRow=Instance.new("Frame",GamePage)
+statusRow.Size=UDim2.new(1,0,0,30); statusRow.BackgroundTransparency=1; HList(statusRow,10)
 
--- Autofarm-Modul Status
 local afStatusCard=Card(statusRow,30); afStatusCard.Size=UDim2.new(0.5,-5,1,0); Pad(afStatusCard,8,8,8,8)
 H.UI.Lbl.ModulStatus=Instance.new("TextLabel",afStatusCard)
 H.UI.Lbl.ModulStatus.Size=UDim2.new(1,0,1,0); H.UI.Lbl.ModulStatus.BackgroundTransparency=1
@@ -2405,7 +2409,6 @@ H.UI.Lbl.ModulStatus.Text="⏳  Autofarm-Modul lädt..."; H.UI.Lbl.ModulStatus.T
 H.UI.Lbl.ModulStatus.TextSize=10; H.UI.Lbl.ModulStatus.Font=Enum.Font.GothamSemibold
 H.UI.Lbl.ModulStatus.TextXAlignment=Enum.TextXAlignment.Center
 
--- Datenbank Status
 local dbStatusCard=Card(statusRow,30); dbStatusCard.Size=UDim2.new(0.5,-5,1,0); Pad(dbStatusCard,8,8,8,8)
 H.UI.Lbl.DBStatus=Instance.new("TextLabel",dbStatusCard)
 H.UI.Lbl.DBStatus.Size=UDim2.new(1,0,1,0); H.UI.Lbl.DBStatus.BackgroundTransparency=1
@@ -2413,229 +2416,34 @@ H.UI.Lbl.DBStatus.Text="⏳  Datenbank lädt..."; H.UI.Lbl.DBStatus.TextColor3=D
 H.UI.Lbl.DBStatus.TextSize=10; H.UI.Lbl.DBStatus.Font=Enum.Font.GothamSemibold
 H.UI.Lbl.DBStatus.TextXAlignment=Enum.TextXAlignment.Center
 
--- === RAID FARM SEKTION (ganz oben) ===
-local raidCard=Card(GamePage); Pad(raidCard,10,10,10,10); VList(raidCard,8); SecLbl(raidCard,"⚔ RAID FARM")
-local raidRow=Instance.new("Frame",raidCard); raidRow.Size=UDim2.new(1,0,0,36); raidRow.BackgroundTransparency=1; HList(raidRow,10)
+-- === AUTOFARM-INJECTION FRAME ===
+-- Das autofarm.lua-Modul injiziert hier seine komplette UI
+-- (WELT & KAPITEL AUSWAHL inkl. Raid & Challenge, Queue,
+--  Scan-Fortschritt, Schwierigkeit usw.)
+-- Spielbezogene Logik (FireStartRoom, Raid-Scan, Challenge-Start
+-- etc.) läuft ausschließlich im autofarm.lua-Modul über _G.HazeHUB.
+H.UI.Fr.AutofarmInjection=Instance.new("Frame",GamePage)
+H.UI.Fr.AutofarmInjection.Name="AutofarmInjection"
+H.UI.Fr.AutofarmInjection.Size=UDim2.new(1,0,0,0)
+H.UI.Fr.AutofarmInjection.AutomaticSize=Enum.AutomaticSize.Y
+H.UI.Fr.AutofarmInjection.BackgroundTransparency=1
+H.UI.Fr.AutofarmInjection.BorderSizePixel=0
+_G.HazeShared.Container = H.UI.Fr.AutofarmInjection
 
--- Esper Raid Button
-local esperBtn=NeonBtn(raidRow,"🔮 ESPER RAID",D.Purple,32); esperBtn.Size=UDim2.new(0.5,-5,1,0)
-esperBtn.MouseButton1Click:Connect(function()
-    if _G.HazeHUB.StartRaid and type(_G.HazeHUB.StartRaid) == "function" then
-        _G.HazeHUB.StartRaid()
-    else
-        warn("[HazeHUB] StartRaid Funktion nicht gefunden!")
-    end
-end)
-
--- JJK Raid Button
-local jjkBtn=NeonBtn(raidRow,"🗡️ JJK RAID",D.Red,32); jjkBtn.Size=UDim2.new(0.5,-5,1,0)
-jjkBtn.MouseButton1Click:Connect(function()
-    if _G.HazeHUB.StartRaid and type(_G.HazeHUB.StartRaid) == "function" then
-        _G.HazeHUB.StartRaid()
-    else
-        warn("[HazeHUB] StartRaid Funktion nicht gefunden!")
-    end
-end)
-
--- === WELT & KAPITEL AUSWAHL (ohne Raid) ===
-local wCard=Card(GamePage); Pad(wCard,10,10,10,10); VList(wCard,8); SecLbl(wCard,"WELT & KAPITEL AUSWAHL")
-H.UI.Lbl.WorldStatus=Instance.new("TextLabel",wCard)
-H.UI.Lbl.WorldStatus.Size=UDim2.new(1,0,0,16); H.UI.Lbl.WorldStatus.BackgroundTransparency=1
-H.UI.Lbl.WorldStatus.Text="Modus → Welt → Kapitel"; H.UI.Lbl.WorldStatus.TextColor3=D.TextLow
-H.UI.Lbl.WorldStatus.TextSize=11; H.UI.Lbl.WorldStatus.Font=Enum.Font.GothamSemibold
-H.UI.Lbl.WorldStatus.TextXAlignment=Enum.TextXAlignment.Left
-
--- Welten-Refresh Button
-local refreshRow=Instance.new("Frame",wCard); refreshRow.Size=UDim2.new(1,0,0,32); refreshRow.BackgroundTransparency=1; HList(refreshRow,6)
-local refreshBtn=NeonBtn(refreshRow,"🔄 Welten neu scannen",D.Cyan,28)
-refreshBtn.Size=UDim2.new(1,0,0,32)
-refreshBtn.MouseButton1Click:Connect(function()
-    if _G.HazeHUB.RefreshWorldCache and type(_G.HazeHUB.RefreshWorldCache) == "function" then
-        pcall(_G.HazeHUB.RefreshWorldCache)
-    else
-        warn("[HazeHUB] RefreshWorldCache Funktion nicht gefunden!")
-    end
-end)
-SecLbl(wCard,"SPIELMODUS")
-local modeRow=Instance.new("Frame",wCard); modeRow.Size=UDim2.new(1,0,0,28); modeRow.BackgroundTransparency=1; HList(modeRow,6)
-local MODI={{id="Story",label="📖 Story",color=D.Cyan},{id="Ranger",label="🏹 Ranger",color=D.Green},{id="Calamity",label="⚡ Calamity",color=D.Orange}}
-H.UI.Btn.ModeBtns={}
-local function HighlightMode(activeId)
-    for _,def in ipairs(MODI) do
-        local mb=H.UI.Btn.ModeBtns[def.id]; if not mb then continue end
-        if def.id==activeId then
-            local c=def.color
-            Tw(mb,{BackgroundColor3=Color3.fromRGB(math.clamp(math.floor(c.R*255*0.22),0,255),math.clamp(math.floor(c.G*255*0.22),0,255),math.clamp(math.floor(c.B*255*0.22),0,255))})
-            Stroke(mb,c,1.5,0)
-        else
-            Tw(mb,{BackgroundColor3=D.CardHover}); Stroke(mb,D.Border,1,0.5)
-        end
-    end
-end
-H.UI.Fr.DiffCard=Card(wCard); Pad(H.UI.Fr.DiffCard,8,8,8,8); VList(H.UI.Fr.DiffCard,5); H.UI.Fr.DiffCard.Visible=true; SecLbl(H.UI.Fr.DiffCard,"SCHWIERIGKEIT")
-local diffRow=Instance.new("Frame",H.UI.Fr.DiffCard); diffRow.Size=UDim2.new(1,0,0,26); diffRow.BackgroundTransparency=1; HList(diffRow,6)
-local DC={Normal=D.Green,Hard=D.Orange,Nightmare=D.Red}; local diffBtns={}
-for _,diff in ipairs({"Normal","Hard","Nightmare"}) do
-    local db=Instance.new("TextButton",diffRow); db.Size=UDim2.new(0.32,0,0,24); db.BackgroundColor3=D.CardHover
-    db.Text=diff; db.TextColor3=DC[diff]; db.TextSize=10; db.Font=Enum.Font.GothamBold
-    db.AutoButtonColor=false; db.BorderSizePixel=0; Corner(db,7); Stroke(db,DC[diff],1,0.4)
-    db.MouseButton1Click:Connect(function()
-        PR("Change-Difficulty",{Difficulty=diff})
-        for _,b in pairs(diffBtns) do Tw(b,{BackgroundColor3=D.CardHover}); local s=b:FindFirstChildOfClass("UIStroke"); if s then s.Transparency=0.4 end end
-        Tw(db,{BackgroundColor3=Color3.fromRGB(math.clamp(math.floor(DC[diff].R*255*0.25),0,255),math.clamp(math.floor(DC[diff].G*255*0.25),0,255),math.clamp(math.floor(DC[diff].B*255*0.25),0,255))})
-        local s=db:FindFirstChildOfClass("UIStroke"); if s then s.Transparency=0 end
-    end)
-    diffBtns[diff]=db
-end
-local chapCard=Card(wCard); Pad(chapCard,8,8,8,8); VList(chapCard,5); SecLbl(chapCard,"KAPITEL / STAGE")
-H.UI.Fr.ChapRow=Instance.new("Frame",chapCard); H.UI.Fr.ChapRow.Size=UDim2.new(1,0,0,0)
-H.UI.Fr.ChapRow.AutomaticSize=Enum.AutomaticSize.Y; H.UI.Fr.ChapRow.BackgroundTransparency=1; HList(H.UI.Fr.ChapRow,4); H.UI.Fr.ChapBtns={}
-local function RebuildChapBtns(chapList)
-    for _,v in pairs(H.UI.Fr.ChapRow:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
-    H.UI.Fr.ChapBtns={}; if not chapList or #chapList==0 then return end
-    S.SelChap=chapList[1]
-    for i,cid in ipairs(chapList) do
-        local num=cid:match("(%d+)$") or tostring(i)
-        local cb=Instance.new("TextButton",H.UI.Fr.ChapRow)
-        cb.Size=UDim2.new(0,34,0,26); cb.BackgroundColor3=D.CardHover; cb.Text=num
-        cb.TextColor3=D.TextHi; cb.TextSize=12; cb.Font=Enum.Font.GothamBold
-        cb.AutoButtonColor=false; cb.BorderSizePixel=0; Corner(cb,7); Stroke(cb,D.Border,1,0.4)
-        local capCid=cid
-        cb.MouseButton1Click:Connect(function()
-            S.SelChap=capCid
-            for _,b in pairs(H.UI.Fr.ChapBtns) do Tw(b,{BackgroundColor3=D.CardHover}); local s=b:FindFirstChildOfClass("UIStroke"); if s then s.Color=D.Border; s.Transparency=0.4 end end
-            Tw(cb,{BackgroundColor3=D.RowSelect}); Stroke(cb,D.Accent,1.5,0)
-            H.UI.Lbl.WorldStatus.Text=string.format("⚙ %s [%s] → %s",S.SelWorld or "?",S.SelMode,capCid); H.UI.Lbl.WorldStatus.TextColor3=D.Cyan
-        end)
-        H.UI.Fr.ChapBtns[i]=cb
-    end
-    if H.UI.Fr.ChapBtns[1] then Tw(H.UI.Fr.ChapBtns[1],{BackgroundColor3=D.RowSelect}); Stroke(H.UI.Fr.ChapBtns[1],D.Accent,1.5,0) end
-end
-SecLbl(wCard,"WELTEN"); H.UI.Fr.WorldBtns=Instance.new("Frame",wCard)
-H.UI.Fr.WorldBtns.Size=UDim2.new(1,0,0,0); H.UI.Fr.WorldBtns.AutomaticSize=Enum.AutomaticSize.Y
-H.UI.Fr.WorldBtns.BackgroundTransparency=1; VList(H.UI.Fr.WorldBtns,4)
-local function CreateWorldBtn(wid)
-    local wb=Instance.new("TextButton",H.UI.Fr.WorldBtns)
-    wb.Size=UDim2.new(1,0,0,30); wb.BackgroundColor3=D.CardHover; wb.Text="🌍  "..wid
-    wb.TextColor3=D.TextHi; wb.TextSize=11; wb.Font=Enum.Font.GothamSemibold
-    wb.AutoButtonColor=false; wb.BorderSizePixel=0; Corner(wb,7); Stroke(wb,D.Border,1,0.4)
-    wb.MouseEnter:Connect(function() if S.SelWorld~=wid then Tw(wb,{BackgroundColor3=D.CardHover}) end end)
-    wb.MouseLeave:Connect(function() if S.SelWorld~=wid then Tw(wb,{BackgroundColor3=D.CardHover}) end end)
-    wb.MouseButton1Click:Connect(function()
-        S.SelWorld=wid
-        for _,b in pairs(H.UI.Fr.WorldBtns:GetChildren()) do
-            if b:IsA("TextButton") then Tw(b,{BackgroundColor3=D.CardHover}); local s=b:FindFirstChildOfClass("UIStroke"); if s then s.Color=D.Border; s.Transparency=0.4 end end
-        end
-        Tw(wb,{BackgroundColor3=D.RowSelect}); Stroke(wb,D.Accent,1.5,0)
-        H.UI.Lbl.WorldStatus.Text="🌍 "..wid.." ["..S.SelMode.."] → Kapitel wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow
-        local wd=S.WorldData[wid] or {}; local cl=(S.SelMode=="Story" or S.SelMode=="Calamity") and wd.story or wd.ranger; RebuildChapBtns(cl or {})
-    end)
-end
-RebuildWorldList=function()
-    for _,v in pairs(H.UI.Fr.WorldBtns:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
-    for _,v in pairs(H.UI.Fr.ChapRow:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
-    H.UI.Fr.ChapBtns={}; S.SelWorld=nil; S.SelChap=nil
-    
-    -- WorldCache-Daten verwenden
-    local worldData = _G.HazeHUB.WorldData or {}
-    
-    if S.SelMode=="Calamity" then
-        local calamityList = worldData.Calamity or {}
-        if #calamityList > 0 then
-            S.SelWorld="Calamity"; RebuildChapBtns(calamityList)
-            H.UI.Lbl.WorldStatus.Text="⚡ Calamity → Kapitel wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Orange
-        else
-            H.UI.Lbl.WorldStatus.Text="⏳ Calamity lädt..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow
-        end
-        return
-    end
-    
-    if S.SelMode=="Ranger" then
-        local rangerList = worldData.Ranger or {}
-        if #rangerList > 0 then
-            S.SelWorld="Ranger"; RebuildChapBtns(rangerList)
-            H.UI.Lbl.WorldStatus.Text="🏹 Ranger → Stage wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Green
-        else
-            H.UI.Lbl.WorldStatus.Text="⏳ Ranger-Daten laden..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow
-        end
-        return
-    end
-    
-    if S.SelMode=="Raid" then
-        local raidList = worldData.Raids or {}
-        if #raidList > 0 then
-            S.SelWorld="Raid"; RebuildChapBtns(raidList)
-            H.UI.Lbl.WorldStatus.Text="⚔ Raid → Kapitel wählen"; H.UI.Lbl.WorldStatus.TextColor3=D.Purple
-        else
-            H.UI.Lbl.WorldStatus.Text="⏳ Raid-Daten laden..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow
-        end
-        return
-    end
-    
-    -- Story Mode
-    local storyList = worldData.Story or {}
-    if #storyList > 0 then
-        -- Erstelle World-Buttons für Story-Kapitel
-        for _, chapter in ipairs(storyList) do
-            CreateWorldBtn(chapter.id, chapter.label)
-        end
-        H.UI.Lbl.WorldStatus.Text="📖 " .. #storyList .. " Story-Kapitel verfügbar"; H.UI.Lbl.WorldStatus.TextColor3=D.Cyan
-    else
-        H.UI.Lbl.WorldStatus.Text="⏳ Story-Daten laden..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow
-    end
-end
-for _,def in ipairs(MODI) do
-    local mb=Instance.new("TextButton",modeRow)
-    mb.Size=UDim2.new(0.24,0,0,26); mb.BackgroundColor3=D.CardHover; mb.Text=def.label
-    mb.TextColor3=def.color; mb.TextSize=10; mb.Font=Enum.Font.GothamBold
-    mb.AutoButtonColor=false; mb.BorderSizePixel=0; Corner(mb,7); Stroke(mb,D.Border,1,0.5)
-    local capId=def.id
-    mb.MouseButton1Click:Connect(function()
-        S.SelMode=capId; HighlightMode(capId)
-        H.UI.Fr.DiffCard.Visible=(capId=="Story" or capId=="Raid")
-        RebuildWorldList()
-    end)
-    H.UI.Btn.ModeBtns[def.id]=mb
-end
-HighlightMode("Story")
-H.UI.Btn.CreateStart=NeonBtn(wCard,"🚀  Create & Start Room",D.Green,36)
-H.UI.Btn.CreateStart.MouseButton1Click:Connect(function()
-    if not S.SelChap then H.UI.Lbl.WorldStatus.Text="⚠ Welt & Kapitel wählen!"; H.UI.Lbl.WorldStatus.TextColor3=D.Red; return end
-    H.UI.Lbl.WorldStatus.Text="⚙ Erstelle: "..S.SelChap; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow; H.UI.Btn.CreateStart.Text="⏳ Gestartet..."
-    FireCreateAndStart(S.SelWorld or "Unknown",S.SelMode,S.SelChap)
-    task.delay(2.5,function() pcall(function() H.UI.Btn.CreateStart.Text="🚀  Create & Start Room"; H.UI.Lbl.WorldStatus.Text="✅ "..S.SelChap; H.UI.Lbl.WorldStatus.TextColor3=D.Green end) end)
-end)
-NeonBtn(wCard,"🔄  Welten neu scannen",D.CyanDim,26).MouseButton1Click:Connect(function()
-    H.UI.Lbl.WorldStatus.Text="⏳ Scanne..."; H.UI.Lbl.WorldStatus.TextColor3=D.Yellow; S.ChapFolderRef=nil
-    pcall(function() if isfile and isfile(WORLD_CACHE_FILE) then delfile(WORLD_CACHE_FILE) end end)
-    task.spawn(function()
-        local f=GetChapterFolder()
-        if f then ScanChapterFolder(f); pcall(function() H.UI.Lbl.ScanStatus.Text="✅ "..#S.WorldIds.." Welten"; H.UI.Lbl.ScanStatus.TextColor3=D.Green end)
-        else ApplyFallback() end
-        pcall(RebuildWorldList)
-    end)
-end)
-
--- Modul-Status + DB-Confirm nebeneinander
-local dbStatusRow=Instance.new("Frame",GamePage); dbStatusRow.Size=UDim2.new(1,0,0,34); dbStatusRow.BackgroundTransparency=1; HList(dbStatusRow,6)
-local modulStatusCard=Instance.new("Frame",dbStatusRow); modulStatusCard.Size=UDim2.new(0.5,-3,1,0); modulStatusCard.BackgroundColor3=D.Card; modulStatusCard.BackgroundTransparency=D.GlassPane; modulStatusCard.BorderSizePixel=0; Corner(modulStatusCard,8); Stroke(modulStatusCard,D.Border,1,D.GlassStroke); Pad(modulStatusCard,4,8,4,8)
+-- Modul-Status-Karte (unten im Game-Tab)
+local dbStatusRow=Instance.new("Frame",GamePage)
+dbStatusRow.Size=UDim2.new(1,0,0,34); dbStatusRow.BackgroundTransparency=1; HList(dbStatusRow,6)
+local modulStatusCard=Instance.new("Frame",dbStatusRow)
+modulStatusCard.Size=UDim2.new(1,0,1,0)
+modulStatusCard.BackgroundColor3=D.Card; modulStatusCard.BackgroundTransparency=D.GlassPane
+modulStatusCard.BorderSizePixel=0; Corner(modulStatusCard,8)
+Stroke(modulStatusCard,D.Border,1,D.GlassStroke); Pad(modulStatusCard,4,8,4,8)
 H.UI.Lbl.ModulStatus=Instance.new("TextLabel",modulStatusCard)
 H.UI.Lbl.ModulStatus.Size=UDim2.new(1,0,1,0); H.UI.Lbl.ModulStatus.BackgroundTransparency=1
-H.UI.Lbl.ModulStatus.Text="🔴  Autofarm-Modul nicht geladen"; H.UI.Lbl.ModulStatus.TextColor3=D.Red
-H.UI.Lbl.ModulStatus.TextSize=10; H.UI.Lbl.ModulStatus.Font=Enum.Font.GothamBold; H.UI.Lbl.ModulStatus.TextXAlignment=Enum.TextXAlignment.Left
-
--- Database confirmation removed - status now shown in header
-pcall(function()
-        if H.UI.Lbl.ModulStatus then
-            H.UI.Lbl.ModulStatus.Text = "🟢  Autofarm-Modul aktiv [DB: OK]"
-            H.UI.Lbl.ModulStatus.TextColor3 = D.GreenBright
-        end
-    end)
-
-H.UI.Fr.AutofarmInjection=Instance.new("Frame",GamePage)
-H.UI.Fr.AutofarmInjection.Name="AutofarmInjection"; H.UI.Fr.AutofarmInjection.Size=UDim2.new(1,0,0,0)
-H.UI.Fr.AutofarmInjection.AutomaticSize=Enum.AutomaticSize.Y; H.UI.Fr.AutofarmInjection.BackgroundTransparency=1; H.UI.Fr.AutofarmInjection.BorderSizePixel=0
-_G.HazeShared.Container=H.UI.Fr.AutofarmInjection
+H.UI.Lbl.ModulStatus.Text="🔴  Autofarm-Modul nicht geladen"
+H.UI.Lbl.ModulStatus.TextColor3=D.Red; H.UI.Lbl.ModulStatus.TextSize=10
+H.UI.Lbl.ModulStatus.Font=Enum.Font.GothamBold
+H.UI.Lbl.ModulStatus.TextXAlignment=Enum.TextXAlignment.Left
 
 end) -- end pcall Game Tab
 
