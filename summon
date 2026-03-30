@@ -1,1 +1,507 @@
-summon
+-- ╔══════════════════════════════════════════════════════════╗
+--  HazeHUB – summon.lua  v1.0.0
+--  GitHub: Hazeluxeeeees/HazeHub-Modules  (main/summon)
+--
+--  Features:
+--    • Banner-Auswahl: Standard | Rate-Up | Sol
+--    • Pity-Anzeige mit Fortschrittsbalken
+--    • Auto-Sell Checkboxen (Rare / Epic / Legendary / Mythic)
+--    • Gacha-Buttons 1x / 10x / 50x
+--    • Auto-Summon Loop mit einstellbarem Interval
+--    • Bypass: "Click to continue"-Screen nach Summon
+-- ╚══════════════════════════════════════════════════════════╝
+
+local VERSION = "1.0.0"
+
+-- ============================================================
+--  WARTEN BIS SHARED BEREIT
+-- ============================================================
+local waited = 0
+while not (_G.HazeShared and _G.HazeShared.SummonPage
+        and _G.HazeShared.Card and _G.HazeShared.MkLbl) do
+    task.wait(0.3); waited = waited + 0.3
+    if waited >= 20 then
+        warn("[HazeHub-Summon] HazeShared nicht bereit nach 20s – abgebrochen.")
+        return
+    end
+end
+
+-- ============================================================
+--  SHARED ALIASE
+-- ============================================================
+local HS      = _G.HazeShared
+local D       = HS.D
+local TF      = HS.TF;  local TM = HS.TM;  local Tw = HS.Tw
+local Svc     = HS.Svc
+local Card    = HS.Card;    local NeonBtn  = HS.NeonBtn
+local MkLbl   = HS.MkLbl;  local SecLbl   = HS.SecLbl
+local MkInput = HS.MkInput; local VList    = HS.VList
+local HList   = HS.HList;   local Pad      = HS.Pad
+local Corner  = HS.Corner;  local Stroke   = HS.Stroke
+
+-- ============================================================
+--  SERVICES & LOCALS
+-- ============================================================
+local RS = game:GetService("ReplicatedStorage")
+local LP = game:GetService("Players").LocalPlayer
+
+-- ============================================================
+--  KONSTANTEN
+-- ============================================================
+local SOL_PITY_PATHS = {
+    { key="SolMythicPity", label="Mythic Pity",  max=200  },
+    { key="SolRangerPity", label="Ranger Pity",  max=100  },
+    { key="SolSecretPity", label="Secret Pity",  max=500  },
+}
+local STD_PITY = { subKey="Pity", label="Banner Pity", max=3500 }
+
+local BANNERS = {
+    { display="STANDARD BANNER", remote="Standard" },
+    { display="Rate-UP Banner",  remote="Rateup"   },
+    { display="SOL BANNER",      remote="Sol"       },
+}
+local RARITIES = { "Rare", "Epic", "Legendary", "Mythic" }
+
+-- ============================================================
+--  LOKALER STATE
+-- ============================================================
+local selectedBannerIdx = 1
+local autoSellState = { Rare=false, Epic=false, Legendary=false, Mythic=false }
+local summonDebounce = false
+local autoSumEnabled  = false
+local autoSumAmount   = 10
+local autoSumInterval = 3
+
+-- ============================================================
+--  HILFSFUNKTIONEN
+-- ============================================================
+local function ReadPlayerPath(...)
+    local val = nil
+    pcall(function()
+        local node = RS:WaitForChild("Player_Data",3):WaitForChild(LP.Name,3)
+        for _, part in ipairs({...}) do node = node:WaitForChild(part,2) end
+        val = tonumber(node.Value)
+    end)
+    return val
+end
+
+local function GetActiveAutoSells()
+    local t = {}
+    for _, rar in ipairs(RARITIES) do
+        if autoSellState[rar] then t[rar] = true end
+    end
+    return t
+end
+
+-- Bypass: schließt den "Click anywhere"-Screen nach dem Summon
+local function BypassClickScreen()
+    task.spawn(function()
+        for attempt = 1, 12 do
+            task.wait(0.4)
+            local closed = false
+            -- Variante 1: PlayerGui nach Click/Continue Buttons scannen
+            pcall(function()
+                local pg = LP:WaitForChild("PlayerGui",2)
+                for _, desc in ipairs(pg:GetDescendants()) do
+                    if desc:IsA("TextButton") or desc:IsA("ImageButton") then
+                        local n = desc.Name:lower()
+                        if n:find("click") or n:find("continue") or n:find("anywhere") then
+                            pcall(function() desc.Parent.Visible = false end)
+                            closed = true
+                        end
+                    end
+                    -- Frame-basierter Result-Screen
+                    if desc:IsA("Frame") and desc.Visible then
+                        local n = desc.Name:lower()
+                        if n:find("result") or n:find("gacha") or n:find("reward") then
+                            pcall(function()
+                                local center = desc.AbsolutePosition + desc.AbsoluteSize * 0.5
+                                game:GetService("VirtualInputManager"):SendMouseButtonEvent(
+                                    math.floor(center.X), math.floor(center.Y), 0, true, game, 0)
+                                task.wait(0.05)
+                                game:GetService("VirtualInputManager"):SendMouseButtonEvent(
+                                    math.floor(center.X), math.floor(center.Y), 0, false, game, 0)
+                            end)
+                            closed = true
+                        end
+                    end
+                end
+            end)
+            if closed then break end
+        end
+    end)
+end
+
+-- ============================================================
+--  UI AUFBAU
+-- ============================================================
+local SummonPage = HS.SummonPage
+
+local titleLbl = Instance.new("TextLabel", SummonPage)
+titleLbl.Size=UDim2.new(1,0,0,13); titleLbl.BackgroundTransparency=1
+titleLbl.Text="🟣  Summon-Modul v"..VERSION.." | "..LP.Name
+titleLbl.TextColor3=D.Purple; titleLbl.TextSize=9; titleLbl.Font=Enum.Font.GothamMedium
+titleLbl.TextXAlignment=Enum.TextXAlignment.Left; titleLbl.TextScaled=false
+titleLbl.RichText=true; titleLbl.TextStrokeTransparency=1
+
+-- ─────────────────────────────────────────────
+-- BANNER-AUSWAHL
+-- ─────────────────────────────────────────────
+local bannerCard = Card(SummonPage); Pad(bannerCard,10,12,10,12); VList(bannerCard,8)
+SecLbl(bannerCard,"🎴  BANNER AUSWAHL")
+
+local activeBannerLbl = MkLbl(bannerCard,"Aktiv: STANDARD BANNER",11,D.Purple,true)
+activeBannerLbl.Size = UDim2.new(1,0,0,18)
+
+local bannerBtns = {}
+local bannerRow = Instance.new("Frame",bannerCard)
+bannerRow.Size=UDim2.new(1,0,0,34); bannerRow.BackgroundTransparency=1; HList(bannerRow,5)
+
+local function UpdateBannerSelection()
+    for i, btn in ipairs(bannerBtns) do
+        if i == selectedBannerIdx then
+            btn.BackgroundColor3=D.Purple; btn.BackgroundTransparency=0.12
+            btn.TextColor3=Color3.new(1,1,1); Stroke(btn,D.Purple,2,0)
+        else
+            btn.BackgroundColor3=D.CardHover; btn.BackgroundTransparency=D.GlassPane or 0.18
+            btn.TextColor3=D.TextMid; Stroke(btn,D.Border,1,0.4)
+        end
+    end
+    activeBannerLbl.Text="Aktiv: "..BANNERS[selectedBannerIdx].display
+end
+
+for i, ban in ipairs(BANNERS) do
+    local btn = Instance.new("TextButton",bannerRow)
+    btn.Size=UDim2.new(0.32,-4,0,34); btn.BackgroundColor3=D.CardHover
+    btn.BackgroundTransparency=D.GlassPane or 0.18; btn.Text=ban.display
+    btn.TextColor3=D.TextMid; btn.TextSize=9; btn.Font=Enum.Font.GothamBold
+    btn.AutoButtonColor=false; btn.BorderSizePixel=0; btn.TextScaled=false
+    btn.RichText=true; btn.TextStrokeTransparency=1; btn.TextWrapped=true
+    Corner(btn,8); Stroke(btn,D.Border,1,0.4)
+    local capIdx = i
+    btn.MouseButton1Click:Connect(function()
+        selectedBannerIdx = capIdx
+        UpdateBannerSelection()
+    end)
+    bannerBtns[i] = btn
+end
+UpdateBannerSelection()
+
+-- ─────────────────────────────────────────────
+-- PITY TRACKER
+-- ─────────────────────────────────────────────
+local pityCard = Card(SummonPage); Pad(pityCard,10,12,10,12); VList(pityCard,8)
+SecLbl(pityCard,"📊  PITY TRACKER")
+
+local pityUI = {}
+
+local function BuildPityBar(parent, label, color)
+    color = color or D.Purple
+    local row = Instance.new("Frame",parent)
+    row.Size=UDim2.new(1,0,0,42); row.BackgroundColor3=D.CardHover
+    row.BorderSizePixel=0; Corner(row,7); Stroke(row,color,1,0.5)
+    local acBar = Instance.new("Frame",row)
+    acBar.Size=UDim2.new(0,3,1,0); acBar.BackgroundColor3=color; acBar.BorderSizePixel=0; Corner(acBar,2)
+    -- Name
+    local nameLbl = Instance.new("TextLabel",row)
+    nameLbl.Position=UDim2.new(0,10,0,4); nameLbl.Size=UDim2.new(0.6,-10,0,14)
+    nameLbl.BackgroundTransparency=1; nameLbl.Text=label; nameLbl.TextColor3=color
+    nameLbl.TextSize=11; nameLbl.Font=Enum.Font.GothamBold; nameLbl.TextXAlignment=Enum.TextXAlignment.Left
+    -- Wert
+    local valLbl = Instance.new("TextLabel",row)
+    valLbl.Position=UDim2.new(0.6,0,0,4); valLbl.Size=UDim2.new(0.39,-6,0,14)
+    valLbl.BackgroundTransparency=1; valLbl.Text="0 / –"; valLbl.TextColor3=D.TextHi
+    valLbl.TextSize=11; valLbl.Font=Enum.Font.GothamBold; valLbl.TextXAlignment=Enum.TextXAlignment.Right
+    -- Balken-Hintergrund
+    local barBg = Instance.new("Frame",row)
+    barBg.Position=UDim2.new(0,10,0,24); barBg.Size=UDim2.new(1,-16,0,10)
+    barBg.BackgroundColor3=Color3.fromRGB(20,15,40); barBg.BorderSizePixel=0; Corner(barBg,5)
+    -- Balken-Füllung
+    local barFill = Instance.new("Frame",barBg)
+    barFill.Size=UDim2.new(0,0,1,0); barFill.BackgroundColor3=color; barFill.BorderSizePixel=0; Corner(barFill,5)
+    local grad = Instance.new("UIGradient",barFill)
+    grad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, color),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(
+            math.min(255, math.floor(color.R*255*1.5)),
+            math.min(255, math.floor(color.G*255*1.5)),
+            math.min(255, math.floor(color.B*255*1.5))
+        )),
+    })
+    return valLbl, barFill
+end
+
+-- SOL Pity-Farben
+local solColors = { D.Gold, D.Purple, D.Red }
+local solPityContainer = Instance.new("Frame",pityCard)
+solPityContainer.Size=UDim2.new(1,0,0,0); solPityContainer.AutomaticSize=Enum.AutomaticSize.Y
+solPityContainer.BackgroundTransparency=1; VList(solPityContainer,5)
+
+for i, pp in ipairs(SOL_PITY_PATHS) do
+    local col = solColors[i] or D.Purple
+    local vLbl, bFill = BuildPityBar(solPityContainer, "☀️ "..pp.label, col)
+    pityUI[pp.key] = { lbl=vLbl, fill=bFill, max=pp.max }
+end
+
+-- Standard/Rate-Up Pity
+local stdPityContainer = Instance.new("Frame",pityCard)
+stdPityContainer.Size=UDim2.new(1,0,0,0); stdPityContainer.AutomaticSize=Enum.AutomaticSize.Y
+stdPityContainer.BackgroundTransparency=1; VList(stdPityContainer,5)
+
+do
+    local vLbl, bFill = BuildPityBar(stdPityContainer, "🎴 "..STD_PITY.label, D.Cyan)
+    pityUI["BannerPity"] = { lbl=vLbl, fill=bFill, max=STD_PITY.max }
+end
+
+-- Pity aktualisieren
+local function RefreshPity()
+    for _, pp in ipairs(SOL_PITY_PATHS) do
+        local e = pityUI[pp.key]; if not e then continue end
+        pcall(function()
+            local val = ReadPlayerPath("Profile", pp.key) or 0
+            local pct = math.max(0, math.min(1, val/math.max(1,e.max)))
+            e.lbl.Text = tostring(val).." / "..tostring(e.max)
+            Tw(e.fill, {Size=UDim2.new(pct,0,1,0)})
+        end)
+    end
+    pcall(function()
+        local e = pityUI["BannerPity"]; if not e then return end
+        local val = ReadPlayerPath("BannerPity","Pity") or 0
+        local pct = math.max(0, math.min(1, val/math.max(1,e.max)))
+        e.lbl.Text = tostring(val).." / "..tostring(e.max)
+        Tw(e.fill, {Size=UDim2.new(pct,0,1,0)})
+    end)
+end
+
+NeonBtn(pityCard,"🔄  Pity aktualisieren",D.CyanDim,28).MouseButton1Click:Connect(function()
+    task.spawn(function() pcall(RefreshPity) end)
+end)
+
+-- ─────────────────────────────────────────────
+-- AUTO-SELL EINSTELLUNGEN
+-- ─────────────────────────────────────────────
+local sellCard = Card(SummonPage); Pad(sellCard,10,12,10,12); VList(sellCard,8)
+SecLbl(sellCard,"🗑️  AUTO-SELL NACH SUMMON")
+
+local rarityColors = {
+    Rare      = D.Cyan   or Color3.fromRGB(0,200,255),
+    Epic      = D.Purple or Color3.fromRGB(160,0,255),
+    Legendary = D.Gold   or Color3.fromRGB(255,200,0),
+    Mythic    = D.Red    or Color3.fromRGB(255,60,80),
+}
+
+local sellGrid = Instance.new("Frame",sellCard)
+sellGrid.Size=UDim2.new(1,0,0,0); sellGrid.AutomaticSize=Enum.AutomaticSize.Y
+sellGrid.BackgroundTransparency=1
+local sg = Instance.new("UIGridLayout",sellGrid)
+sg.CellSize=UDim2.new(0.5,-4,0,34); sg.CellPadding=UDim2.new(0,4,0,4)
+sg.FillDirection=Enum.FillDirection.Horizontal; sg.SortOrder=Enum.SortOrder.LayoutOrder
+
+local function FireAutoSell(rarity, state)
+    pcall(function()
+        RS:WaitForChild("Remote",3)
+          :WaitForChild("Server",3)
+          :WaitForChild("Settings",3)
+          :WaitForChild("Setting_Event",3)
+          :FireServer(table.unpack({
+              [1] = "Sell Auto "..rarity,
+              [2] = state,
+          }))
+    end)
+    print(string.format("[HazeHub-Summon] AutoSell %s → %s", rarity, tostring(state)))
+end
+
+for i, rar in ipairs(RARITIES) do
+    local col = rarityColors[rar] or D.TextMid
+    local cbF = Instance.new("Frame",sellGrid)
+    cbF.Size=UDim2.new(0.5,-4,0,34); cbF.BackgroundColor3=D.CardHover
+    cbF.BorderSizePixel=0; cbF.LayoutOrder=i; Corner(cbF,8); Stroke(cbF,col,1,0.5)
+    local cbBtn = Instance.new("TextButton",cbF)
+    cbBtn.Size=UDim2.new(1,0,1,0); cbBtn.BackgroundTransparency=1
+    cbBtn.Text="⬜  "..rar; cbBtn.TextColor3=col; cbBtn.TextSize=11
+    cbBtn.Font=Enum.Font.GothamBold; cbBtn.AutoButtonColor=false; cbBtn.BorderSizePixel=0
+    cbBtn.TextXAlignment=Enum.TextXAlignment.Center; cbBtn.TextScaled=false
+    cbBtn.RichText=true; cbBtn.TextStrokeTransparency=1
+    local capRar=rar; local capFrame=cbF; local capBtn=cbBtn; local capCol=col
+    cbBtn.MouseButton1Click:Connect(function()
+        autoSellState[capRar] = not autoSellState[capRar]
+        FireAutoSell(capRar, autoSellState[capRar])
+        if autoSellState[capRar] then
+            capBtn.Text="✅  "..capRar; capBtn.TextColor3=Color3.new(1,1,1)
+            capFrame.BackgroundColor3=Color3.fromRGB(
+                math.clamp(math.floor(capCol.R*255*0.28),0,255),
+                math.clamp(math.floor(capCol.G*255*0.28),0,255),
+                math.clamp(math.floor(capCol.B*255*0.28),0,255))
+            Stroke(capFrame,capCol,2,0)
+        else
+            capBtn.Text="⬜  "..capRar; capBtn.TextColor3=capCol
+            capFrame.BackgroundColor3=D.CardHover; Stroke(capFrame,capCol,1,0.5)
+        end
+    end)
+end
+
+-- ─────────────────────────────────────────────
+-- SUMMON AUSFÜHREN (1x / 10x / 50x)
+-- ─────────────────────────────────────────────
+local summonCard = Card(SummonPage); Pad(summonCard,10,12,10,12); VList(summonCard,8)
+SecLbl(summonCard,"✨  SUMMON AUSFÜHREN")
+
+local sumStatusLbl = MkLbl(summonCard,"Bereit zum Summonen.",11,D.TextMid)
+sumStatusLbl.Size = UDim2.new(1,0,0,18)
+
+local function DoSummon(amount)
+    if summonDebounce then
+        sumStatusLbl.Text="⚠ Warte auf vorherigen Summon..."; sumStatusLbl.TextColor3=D.Orange
+        return
+    end
+    summonDebounce = true
+    local bannerDef = BANNERS[selectedBannerIdx]
+    local amountStr = tostring(amount).."x"
+    sumStatusLbl.Text=string.format("⏳ Summone %dx auf %s...", amount, bannerDef.display)
+    sumStatusLbl.TextColor3=D.Yellow
+
+    task.spawn(function()
+        local ok, err = pcall(function()
+            RS:WaitForChild("Remote",3)
+              :WaitForChild("Server",3)
+              :WaitForChild("Gambling",3)
+              :WaitForChild("UnitsGacha",3)
+              :FireServer(table.unpack({
+                  [1] = amountStr,
+                  [2] = bannerDef.remote,
+                  [3] = GetActiveAutoSells(),
+              }))
+        end)
+
+        if ok then
+            sumStatusLbl.Text=string.format("✅ %dx auf '%s' gesummont!", amount, bannerDef.display)
+            sumStatusLbl.TextColor3=D.GreenBright
+            task.delay(1.5, function() pcall(RefreshPity) end)
+        else
+            sumStatusLbl.Text="❌ Fehler: "..tostring(err):sub(1,60)
+            sumStatusLbl.TextColor3=D.Red
+        end
+
+        BypassClickScreen()
+
+        task.wait(2.5)
+        summonDebounce = false
+        sumStatusLbl.Text="Bereit zum Summonen."
+        sumStatusLbl.TextColor3=D.TextMid
+    end)
+end
+
+local sumBtnRow = Instance.new("Frame",summonCard)
+sumBtnRow.Size=UDim2.new(1,0,0,38); sumBtnRow.BackgroundTransparency=1; HList(sumBtnRow,6)
+
+local SUMMON_DEFS = {
+    {amt=1,  label="✨ 1×",  color=D.CyanDim},
+    {amt=10, label="✨ 10×", color=D.Purple },
+    {amt=50, label="✨ 50×", color=D.Gold  },
+}
+for _, sd in ipairs(SUMMON_DEFS) do
+    local btn = NeonBtn(sumBtnRow, sd.label, sd.color, 38)
+    btn.Size=UDim2.new(0.32,-4,0,38)
+    local capAmt = sd.amt
+    btn.MouseButton1Click:Connect(function() DoSummon(capAmt) end)
+end
+
+-- ─────────────────────────────────────────────
+-- AUTO-SUMMON LOOP
+-- ─────────────────────────────────────────────
+local autoCard = Card(SummonPage); Pad(autoCard,10,12,10,12); VList(autoCard,8)
+SecLbl(autoCard,"🔁  AUTO-SUMMON (Loop)")
+
+-- Menge-Auswahl
+local aMengeRow = Instance.new("Frame",autoCard)
+aMengeRow.Size=UDim2.new(1,0,0,30); aMengeRow.BackgroundTransparency=1; HList(aMengeRow,6)
+MkLbl(aMengeRow,"Menge pro Summon:",11,D.TextLow).Size=UDim2.new(0.5,0,1,0)
+
+local aMengeBtns = {}
+for _, sd in ipairs(SUMMON_DEFS) do
+    local btn = Instance.new("TextButton",aMengeRow)
+    btn.Size=UDim2.new(0.16,-4,0,30); btn.BackgroundColor3=D.CardHover
+    btn.BackgroundTransparency=D.GlassPane or 0.18; btn.Text=tostring(sd.amt).."×"
+    btn.TextColor3=sd.color; btn.TextSize=11; btn.Font=Enum.Font.GothamBold
+    btn.AutoButtonColor=false; btn.BorderSizePixel=0; Corner(btn,8); Stroke(btn,sd.color,1,0.4)
+    btn.TextScaled=false; btn.RichText=true; btn.TextStrokeTransparency=1
+    local capAmt=sd.amt; local capBtn=btn; local capCol=sd.color
+    btn.MouseButton1Click:Connect(function()
+        autoSumAmount = capAmt
+        for _, b in ipairs(aMengeBtns) do
+            b.BackgroundColor3=D.CardHover; b.BackgroundTransparency=D.GlassPane or 0.18
+        end
+        capBtn.BackgroundColor3=capCol; capBtn.BackgroundTransparency=0.25
+    end)
+    table.insert(aMengeBtns, btn)
+end
+
+-- Interval-Eingabe
+local intRow = Instance.new("Frame",autoCard)
+intRow.Size=UDim2.new(1,0,0,30); intRow.BackgroundTransparency=1; HList(intRow,6)
+MkLbl(intRow,"Pause zwischen Summons (s):",11,D.TextLow).Size=UDim2.new(0.7,0,1,0)
+local intOuter, intBox = MkInput(intRow,"3"); intOuter.Size=UDim2.new(0.28,0,0,30)
+intBox.Text="3"
+intBox:GetPropertyChangedSignal("Text"):Connect(function()
+    autoSumInterval = math.max(1, math.floor(tonumber(intBox.Text) or 3))
+end)
+
+-- Status + Toggle
+local aStatusRow = Instance.new("Frame",autoCard)
+aStatusRow.Size=UDim2.new(1,0,0,22); aStatusRow.BackgroundTransparency=1; HList(aStatusRow,8)
+local aDot = Instance.new("Frame",aStatusRow)
+aDot.Size=UDim2.new(0,10,0,10); aDot.BackgroundColor3=D.TextLow; aDot.BorderSizePixel=0; Corner(aDot,99)
+local aStatusLbl = Instance.new("TextLabel",aStatusRow)
+aStatusLbl.Size=UDim2.new(1,-20,1,0); aStatusLbl.BackgroundTransparency=1
+aStatusLbl.Text="Auto-Summon  —  Inaktiv"; aStatusLbl.TextColor3=D.TextLow
+aStatusLbl.TextSize=12; aStatusLbl.Font=Enum.Font.GothamBold; aStatusLbl.TextXAlignment=Enum.TextXAlignment.Left
+
+local aToggle = NeonBtn(autoCard,"▶  Auto-Summon AN",D.Purple,34)
+aToggle.MouseButton1Click:Connect(function()
+    autoSumEnabled = not autoSumEnabled
+    if autoSumEnabled then
+        aDot.BackgroundColor3=D.Purple
+        aStatusLbl.Text="Auto-Summon  —  Aktiv"; aStatusLbl.TextColor3=D.Purple
+        aToggle.Text="⏹  Auto-Summon AUS"; aToggle.TextColor3=D.Red; Stroke(aToggle,D.Red,1,0.4)
+    else
+        aDot.BackgroundColor3=D.TextLow
+        aStatusLbl.Text="Auto-Summon  —  Inaktiv"; aStatusLbl.TextColor3=D.TextLow
+        aToggle.Text="▶  Auto-Summon AN"; aToggle.TextColor3=D.Purple; Stroke(aToggle,D.Purple,1,0.4)
+    end
+end)
+
+-- Puls-Animation
+task.spawn(function()
+    while SummonPage.Parent do
+        if autoSumEnabled then
+            Tw(aDot,{BackgroundTransparency=0.6}); task.wait(0.8)
+            Tw(aDot,{BackgroundTransparency=0});   task.wait(0.8)
+        else task.wait(0.5) end
+    end
+end)
+
+-- Auto-Summon Loop
+task.spawn(function()
+    while SummonPage.Parent do
+        if autoSumEnabled and not summonDebounce then
+            DoSummon(autoSumAmount)
+            task.wait(math.max(1, autoSumInterval))
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+-- ============================================================
+-- INIT: Pity beim Start laden, alle 10s aktualisieren
+-- ============================================================
+task.spawn(function()
+    task.wait(1.5)
+    pcall(RefreshPity)
+    while SummonPage.Parent do
+        task.wait(10)
+        pcall(RefreshPity)
+    end
+end)
+
+print(string.format("[HazeHub-Summon] v%s geladen | %s", VERSION, LP.Name))
