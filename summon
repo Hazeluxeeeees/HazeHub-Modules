@@ -15,29 +15,64 @@ local VERSION = "1.0.0"
 
 -- ============================================================
 --  WARTEN BIS SHARED BEREIT
+--  Wichtig: NICHT auf SummonPage warten (Race-Condition).
+--  Nur auf die Kern-UI-Funktionen warten, dann SummonPage
+--  separat mit kurzem Timeout prüfen.
 -- ============================================================
 local waited = 0
-while not (_G.HazeShared and _G.HazeShared.SummonPage
-        and _G.HazeShared.Card and _G.HazeShared.MkLbl) do
+while not (_G.HazeShared and _G.HazeShared.Card
+        and _G.HazeShared.MkLbl and _G.HazeShared.Tw) do
     task.wait(0.3); waited = waited + 0.3
     if waited >= 20 then
-        warn("[HazeHub-Summon] HazeShared nicht bereit nach 20s – abgebrochen.")
+        warn("[HazeHub-Summon] HazeShared Kern-Funktionen nicht bereit nach 20s – abgebrochen.")
+        return
+    end
+end
+
+-- Separater Wait für SummonPage
+local spWait = 0
+while not (_G.HazeShared.SummonPage) do
+    task.wait(0.3); spWait = spWait + 0.3
+    if spWait >= 12 then
+        warn("[HazeHub-Summon] SummonPage Container nicht bereit nach 12s – abgebrochen.")
         return
     end
 end
 
 -- ============================================================
---  SHARED ALIASE
+--  SHARED ALIASE (alle nil-gesichert)
 -- ============================================================
-local HS      = _G.HazeShared
-local D       = HS.D
-local TF      = HS.TF;  local TM = HS.TM;  local Tw = HS.Tw
-local Svc     = HS.Svc
-local Card    = HS.Card;    local NeonBtn  = HS.NeonBtn
-local MkLbl   = HS.MkLbl;  local SecLbl   = HS.SecLbl
-local MkInput = HS.MkInput; local VList    = HS.VList
-local HList   = HS.HList;   local Pad      = HS.Pad
-local Corner  = HS.Corner;  local Stroke   = HS.Stroke
+local HS = _G.HazeShared
+
+-- Farb-Palette
+local D = HS.D or {
+    Card=Color3.fromRGB(15,15,18), CardHover=Color3.fromRGB(22,22,28),
+    BG=Color3.fromRGB(8,8,10), Input=Color3.fromRGB(20,20,25),
+    Border=Color3.fromRGB(50,50,65), GlassPane=0.18, GlassStroke=0.55,
+    Accent=Color3.fromRGB(80,160,255), AccentDim=Color3.fromRGB(40,80,160),
+    Purple=Color3.fromRGB(120,40,220), Cyan=Color3.fromRGB(0,200,240),
+    CyanDim=Color3.fromRGB(0,120,160), Gold=Color3.fromRGB(255,195,0),
+    Red=Color3.fromRGB(220,50,60), RedDark=Color3.fromRGB(60,10,12),
+    Green=Color3.fromRGB(0,200,100), GreenBright=Color3.fromRGB(80,255,140),
+    GreenDark=Color3.fromRGB(0,55,28), Yellow=Color3.fromRGB(255,215,0),
+    TextHi=Color3.fromRGB(240,240,248), TextMid=Color3.fromRGB(170,170,185),
+    TextLow=Color3.fromRGB(90,90,110),
+}
+
+local TF      = HS.TF or 0.12
+local TM      = HS.TM or 0.18
+local Tw      = HS.Tw or function() end
+local Svc     = HS.Svc or {}
+local Card    = HS.Card    or function(p) local f=Instance.new("Frame",p); f.AutomaticSize=Enum.AutomaticSize.Y; return f end
+local NeonBtn = HS.NeonBtn or function(p,t,c,h) local b=Instance.new("TextButton",p); b.Text=t; b.Size=UDim2.new(1,0,0,h or 34); return b end
+local MkLbl   = HS.MkLbl   or function(p,t,s,c) local l=Instance.new("TextLabel",p); l.Text=t; l.BackgroundTransparency=1; l.TextSize=s or 12; return l end
+local SecLbl  = HS.SecLbl  or function(p,t) return MkLbl(p,t,10) end
+local MkInput = HS.MkInput or function(p,ph,h) local f=Instance.new("Frame",p); f.Size=UDim2.new(1,0,0,h or 30); local b=Instance.new("TextBox",f); b.PlaceholderText=ph or ""; b.Size=UDim2.new(1,0,1,0); b.BackgroundTransparency=1; return f,b end
+local VList   = HS.VList   or function(p,gap) local l=Instance.new("UIListLayout",p); l.FillDirection=Enum.FillDirection.Vertical; l.Padding=UDim.new(0,gap or 6); return l end
+local HList   = HS.HList   or function(p,gap) local l=Instance.new("UIListLayout",p); l.FillDirection=Enum.FillDirection.Horizontal; l.Padding=UDim.new(0,gap or 6); return l end
+local Pad     = HS.Pad     or function(p,pt,pr,pb,pl) local u=Instance.new("UIPadding",p); u.PaddingTop=UDim.new(0,pt or 6); u.PaddingRight=UDim.new(0,pr or 6); u.PaddingBottom=UDim.new(0,pb or 6); u.PaddingLeft=UDim.new(0,pl or 6) end
+local Corner  = HS.Corner  or function(f,r) local c=Instance.new("UICorner",f); c.CornerRadius=UDim.new(0,r or 8) end
+local Stroke  = HS.Stroke  or function(f,c,t,tr) local s=Instance.new("UIStroke",f); s.Color=c or Color3.new(1,1,1); s.Thickness=t or 1; s.Transparency=tr or 0 end
 
 -- ============================================================
 --  SERVICES & LOCALS
