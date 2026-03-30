@@ -151,216 +151,153 @@ verLbl.TextScaled = false; verLbl.RichText = true; verLbl.TextStrokeTransparency
 verLbl.TextXAlignment = Enum.TextXAlignment.Left
 
 -- ============================================================
---  ★ MULTI-ITEM AUTO-BUY  (persistent, 15-Minuten-Loop)
+--  ★ AUTOBUY PERSISTENCE  (eigene JSON-Datei pro UserId)
+--  Datei: HazeHUB/HazeHUB_Shop_Config_<UserId>.json
 -- ============================================================
--- Globale Item-Liste (aus SaveConfig befüllt oder leer)
+local _shopConfigFile = "HazeHUB/HazeHUB_Shop_Config_" .. tostring(LP.UserId) .. ".json"
 _G._AutoBuyList = _G._AutoBuyList or {}
--- Shop-Registry: jeder BuildShop trägt sich selbst ein
 _G._ShopRegistry = _G._ShopRegistry or {}
 
-local AB_INTERVAL = 15 * 60   -- 15 Minuten
-local _abEnabled  = false
-local _abDeadline = 0
-
--- Helper: Währungs-Balance aus RS.Player_Data.[LP.Name].Data.[key]
-local function ReadBalance(key)
-    local v = nil
+local function ShopSaveConfig()
+    if not writefile then return end
+    local items = {}
+    for name,_ in pairs(_G._AutoBuyList) do table.insert(items, name) end
+    local data = { items = items, userId = LP.UserId, ts = os.time() }
     pcall(function()
-        v = RS:WaitForChild("Player_Data",3)
-             :WaitForChild(LP.Name,3)
-             :WaitForChild("Data",3)
-             :WaitForChild(key,2).Value
+        writefile(_shopConfigFile, game:GetService("HttpService"):JSONEncode(data))
     end)
-    return tonumber(v) or 0
+    print(string.format("[HazeHub-Shops] AutoBuy gespeichert: %d Items", #items))
 end
 
--- ── UI Card ──────────────────────────────────────────────────
-local abCard = Card(ShopPage); Pad(abCard,10,12,10,12); VList(abCard,8)
-Stroke(abCard, D.Gold, 1.5, 0.2)
-
--- Titel-Zeile
-local abTitleRow = Instance.new("Frame",abCard)
-abTitleRow.Size=UDim2.new(1,0,0,24); abTitleRow.BackgroundTransparency=1; HList(abTitleRow,8)
-local abDot = Instance.new("Frame",abTitleRow)
-abDot.Size=UDim2.new(0,10,0,10); abDot.BackgroundColor3=D.TextLow; abDot.BorderSizePixel=0; Corner(abDot,99)
-local abTitleLbl = Instance.new("TextLabel",abTitleRow)
-abTitleLbl.Size=UDim2.new(1,-20,1,0); abTitleLbl.BackgroundTransparency=1
-abTitleLbl.Text="🛒  Auto-Buy  —  Inaktiv"; abTitleLbl.TextColor3=D.TextLow
-abTitleLbl.TextSize=13; abTitleLbl.Font=Enum.Font.GothamBold; abTitleLbl.TextXAlignment=Enum.TextXAlignment.Left
-abTitleLbl.TextScaled=false; abTitleLbl.RichText=true; abTitleLbl.TextStrokeTransparency=1
-
--- Countdown-Label
-local abCdLbl = Instance.new("TextLabel",abCard)
-abCdLbl.Size=UDim2.new(1,0,0,16); abCdLbl.BackgroundTransparency=1
-abCdLbl.Text="Nächster Kauf in: –"; abCdLbl.TextColor3=D.TextMid
-abCdLbl.TextSize=10; abCdLbl.Font=Enum.Font.GothamMedium; abCdLbl.TextXAlignment=Enum.TextXAlignment.Left
-abCdLbl.TextScaled=false; abCdLbl.RichText=true; abCdLbl.TextStrokeTransparency=1
-
--- Eingabe-Zeile
-SecLbl(abCard,"ITEM-LISTE  (wird alle 15min in allen Shops gesucht)")
-local addRow = Instance.new("Frame",abCard)
-addRow.Size=UDim2.new(1,0,0,30); addRow.BackgroundTransparency=1; HList(addRow,5)
-
-local inOuter = Instance.new("Frame",addRow)
-inOuter.Size=UDim2.new(0.72,0,0,30); inOuter.BackgroundColor3=D.Input
-inOuter.BackgroundTransparency=D.GlassPane or 0.18; inOuter.BorderSizePixel=0
-Corner(inOuter,8); Stroke(inOuter,D.Border,1,0.3)
-local inBox = Instance.new("TextBox",inOuter)
-inBox.Size=UDim2.new(1,0,1,0); inBox.BackgroundTransparency=1
-inBox.PlaceholderText="Item-Name eingeben..."; inBox.PlaceholderColor3=D.TextLow
-inBox.Text=""; inBox.TextColor3=D.TextHi; inBox.TextSize=11; inBox.Font=Enum.Font.GothamMedium
-inBox.ClearTextOnFocus=false; Pad(inBox,0,6,0,6)
-inBox.TextScaled=false; inBox.RichText=true; inBox.TextStrokeTransparency=1
-
-local addBtn = Instance.new("TextButton",addRow)
-addBtn.Size=UDim2.new(0.27,0,0,30); addBtn.BackgroundColor3=D.CardHover
-addBtn.BackgroundTransparency=D.GlassPane or 0.18; addBtn.Text="+ Hinzufügen"
-addBtn.TextColor3=D.Gold; addBtn.TextSize=10; addBtn.Font=Enum.Font.GothamBold
-addBtn.AutoButtonColor=false; addBtn.BorderSizePixel=0; Corner(addBtn,8); Stroke(addBtn,D.Gold,1,0.3)
-addBtn.TextScaled=false; addBtn.RichText=true; addBtn.TextStrokeTransparency=1
-addBtn.MouseEnter:Connect(function() Tw(addBtn,{BackgroundColor3=Color3.fromRGB(60,45,10)}) end)
-addBtn.MouseLeave:Connect(function() Tw(addBtn,{BackgroundColor3=D.CardHover}) end)
-
--- Item-Listen-Frame
-local abListFrame = Instance.new("Frame",abCard)
-abListFrame.Size=UDim2.new(1,0,0,0); abListFrame.AutomaticSize=Enum.AutomaticSize.Y
-abListFrame.BackgroundTransparency=1; VList(abListFrame,4)
-local abEmptyLbl = MkLbl(abListFrame,"Keine Items eingetragen.",10,D.TextLow)
-abEmptyLbl.Size=UDim2.new(1,0,0,20)
-
--- Toggle-Button
-local abToggle = NeonBtn(abCard,"▶  Auto-Buy AN",D.Gold,32)
-
--- ── Interne Helpers ──────────────────────────────────────────
-local function SaveABList()
-    -- Speichern über globale SaveConfig-Referenz
-    if _G.HazeShared and _G.HazeShared.SaveConfig then
-        pcall(_G.HazeShared.SaveConfig)
-    end
-end
-
-local function RebuildABList()
-    for _,v in pairs(abListFrame:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
-    local count = 0
-    for iname,_ in pairs(_G._AutoBuyList) do
-        count = count + 1
-        local row = Instance.new("Frame",abListFrame)
-        row.Size=UDim2.new(1,0,0,28); row.BackgroundColor3=D.CardHover; row.BorderSizePixel=0; Corner(row,7); Stroke(row,D.Gold,1,0.4)
-        local nL = Instance.new("TextLabel",row)
-        nL.Position=UDim2.new(0,8,0,0); nL.Size=UDim2.new(1,-38,1,0); nL.BackgroundTransparency=1
-        nL.Text="🛒 "..iname; nL.TextColor3=D.TextHi; nL.TextSize=11; nL.Font=Enum.Font.GothamMedium
-        nL.TextXAlignment=Enum.TextXAlignment.Left; nL.TextScaled=false; nL.RichText=true; nL.TextStrokeTransparency=1
-        local xb = Instance.new("TextButton",row)
-        xb.Size=UDim2.new(0,26,0,26); xb.Position=UDim2.new(1,-28,0.5,-13); xb.BackgroundColor3=Color3.fromRGB(50,12,12)
-        xb.Text="✕"; xb.TextColor3=D.Red; xb.TextSize=11; xb.Font=Enum.Font.GothamBold
-        xb.AutoButtonColor=false; xb.BorderSizePixel=0; Corner(xb,6)
-        local capName = iname
-        xb.MouseButton1Click:Connect(function()
-            _G._AutoBuyList[capName] = nil
-            RebuildABList(); SaveABList()
-        end)
-    end
-    abEmptyLbl.Visible = (count == 0)
-end
-
-local function AddItem()
-    local name = (inBox.Text or ""):match("^%s*(.-)%s*$")
-    if name == "" then return end
-    _G._AutoBuyList[name] = true
-    inBox.Text = ""; RebuildABList(); SaveABList()
-end
-addBtn.MouseButton1Click:Connect(AddItem)
-inBox.FocusLost:Connect(function(enter) if enter then AddItem() end end)
-
--- ── Auto-Buy Kern: alle Shops × alle Items ───────────────────
-local function RunAutoBuy()
-    for iname,_ in pairs(_G._AutoBuyList) do
-        for _, shop in ipairs(_G._ShopRegistry) do
-            pcall(function()
-                -- Ordner holen
-                local folder = shop.folderGetter()
-                if not folder then return end
-                local itemInst = folder:FindFirstChild(iname)
-                if not itemInst then return end
-
-                -- Preis auslesen
-                local cost = 0
-                pcall(function()
-                    local cv = itemInst:FindFirstChild("CurrencyAmount")
-                          or itemInst:FindFirstChild("Cost") or itemInst:FindFirstChild("Price")
-                    if cv then cost = tonumber(cv.Value) or 0 end
-                end)
-
-                -- Währungs-Check via RS.Player_Data.[LP.Name].Data.[currencyKey]
-                local balance = ReadBalance(shop.currencyKey)
-                if cost > 0 and balance < cost then
-                    print(string.format("[HazeHub-AutoBuy] Skip '%s' @ %s (bal:%d < cost:%d)", iname, shop.name, balance, cost))
-                    return
-                end
-
-                -- Kauf ausführen
-                local args = shop.extraArgs(iname, 1)
-                pcall(function()
-                    RS:WaitForChild("Remote",3):WaitForChild("Server",3)
-                      :WaitForChild(shop.remoteName,3):FireServer(table.unpack(args))
-                end)
-                print(string.format("[HazeHub-AutoBuy] Gekauft: '%s' aus '%s'", iname, shop.name))
-                task.wait(0.25)
-            end)
+local function ShopLoadConfig()
+    if not (isfile and isfile(_shopConfigFile)) then return end
+    local ok, data = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(readfile(_shopConfigFile))
+    end)
+    if not ok or not data or not data.items then return end
+    for _, name in ipairs(data.items) do
+        if type(name) == "string" and name ~= "" then
+            _G._AutoBuyList[name] = true
         end
     end
+    print(string.format("[HazeHub-Shops] AutoBuy geladen: %d Items (UserId: %d)", #data.items, LP.UserId))
 end
 
--- ── UI Update ────────────────────────────────────────────────
-local function UpdateAbUI()
-    if _abEnabled then
-        abDot.BackgroundColor3=D.Gold; abTitleLbl.Text="🛒  Auto-Buy  —  Aktiv"; abTitleLbl.TextColor3=D.Gold
-        abToggle.Text="⏹  Auto-Buy AUS"; abToggle.TextColor3=D.Red; Stroke(abToggle,D.Red,1,0.4)
-    else
-        abDot.BackgroundColor3=D.TextLow; abTitleLbl.Text="🛒  Auto-Buy  —  Inaktiv"; abTitleLbl.TextColor3=D.TextLow
-        abCdLbl.Text="Nächster Kauf in: –"; abCdLbl.TextColor3=D.TextMid
-        abToggle.Text="▶  Auto-Buy AN"; abToggle.TextColor3=D.Gold; Stroke(abToggle,D.Gold,1,0.4)
+-- Beim Start laden
+pcall(ShopLoadConfig)
+
+-- Für Hauptskript zugänglich
+if _G.HazeShared then
+    _G.HazeShared.ShopSaveConfig = ShopSaveConfig
+    _G.HazeShared.ShopLoadConfig = ShopLoadConfig
+end
+-- ============================================================
+--  ★ MULTI-ITEM AUTO-BUY UI  (15-Min Loop, persistent)
+-- ============================================================
+do
+    local AB_INTERVAL = 15 * 60
+    local _abEnabled  = false
+    local _abDeadline = 0
+    local abCard = Card(ShopPage); Pad(abCard,10,12,10,12); VList(abCard,8)
+    Stroke(abCard, D.Gold, 1.5, 0.2)
+    local abTRow=Instance.new("Frame",abCard); abTRow.Size=UDim2.new(1,0,0,24); abTRow.BackgroundTransparency=1; HList(abTRow,8)
+    local abDot=Instance.new("Frame",abTRow); abDot.Size=UDim2.new(0,10,0,10); abDot.BackgroundColor3=D.TextLow; abDot.BorderSizePixel=0; Corner(abDot,99)
+    local abTLbl=Instance.new("TextLabel",abTRow); abTLbl.Size=UDim2.new(1,-20,1,0); abTLbl.BackgroundTransparency=1
+    abTLbl.Text="🛒  Auto-Buy  —  Inaktiv"; abTLbl.TextColor3=D.TextLow
+    abTLbl.TextSize=13; abTLbl.Font=Enum.Font.GothamBold; abTLbl.TextXAlignment=Enum.TextXAlignment.Left
+    abTLbl.TextScaled=false; abTLbl.RichText=true; abTLbl.TextStrokeTransparency=1
+    local abCdLbl=Instance.new("TextLabel",abCard); abCdLbl.Size=UDim2.new(1,0,0,16); abCdLbl.BackgroundTransparency=1
+    abCdLbl.Text="Nächster Kauf in: –"; abCdLbl.TextColor3=D.TextMid
+    abCdLbl.TextSize=10; abCdLbl.Font=Enum.Font.GothamMedium; abCdLbl.TextXAlignment=Enum.TextXAlignment.Left
+    abCdLbl.TextScaled=false; abCdLbl.RichText=true; abCdLbl.TextStrokeTransparency=1
+    SecLbl(abCard,"ITEM-LISTE  (alle 15 min in allen Shops gesucht)")
+    local addRow=Instance.new("Frame",abCard); addRow.Size=UDim2.new(1,0,0,30); addRow.BackgroundTransparency=1; HList(addRow,5)
+    local inOuter=Instance.new("Frame",addRow); inOuter.Size=UDim2.new(0.72,0,0,30); inOuter.BackgroundColor3=D.Input
+    inOuter.BackgroundTransparency=D.GlassPane or 0.18; inOuter.BorderSizePixel=0; Corner(inOuter,8); Stroke(inOuter,D.Border,1,0.3)
+    local inBox=Instance.new("TextBox",inOuter); inBox.Size=UDim2.new(1,0,1,0); inBox.BackgroundTransparency=1
+    inBox.PlaceholderText="Item-Name eingeben..."; inBox.PlaceholderColor3=D.TextLow
+    inBox.Text=""; inBox.TextColor3=D.TextHi; inBox.TextSize=11; inBox.Font=Enum.Font.GothamMedium
+    inBox.ClearTextOnFocus=false; Pad(inBox,0,6,0,6); inBox.TextScaled=false; inBox.RichText=true; inBox.TextStrokeTransparency=1
+    local addBtn=Instance.new("TextButton",addRow); addBtn.Size=UDim2.new(0.27,0,0,30); addBtn.BackgroundColor3=D.CardHover
+    addBtn.BackgroundTransparency=D.GlassPane or 0.18; addBtn.Text="+ Hinzufügen"; addBtn.TextColor3=D.Gold
+    addBtn.TextSize=10; addBtn.Font=Enum.Font.GothamBold; addBtn.AutoButtonColor=false; addBtn.BorderSizePixel=0
+    Corner(addBtn,8); Stroke(addBtn,D.Gold,1,0.3); addBtn.TextScaled=false; addBtn.RichText=true; addBtn.TextStrokeTransparency=1
+    addBtn.MouseEnter:Connect(function() Tw(addBtn,{BackgroundColor3=Color3.fromRGB(60,45,10)}) end)
+    addBtn.MouseLeave:Connect(function() Tw(addBtn,{BackgroundColor3=D.CardHover}) end)
+    local abListFrame=Instance.new("Frame",abCard); abListFrame.Size=UDim2.new(1,0,0,0); abListFrame.AutomaticSize=Enum.AutomaticSize.Y
+    abListFrame.BackgroundTransparency=1; VList(abListFrame,4)
+    local abEmptyLbl=MkLbl(abListFrame,"Keine Items eingetragen.",10,D.TextLow); abEmptyLbl.Size=UDim2.new(1,0,0,20)
+    local abToggle=NeonBtn(abCard,"▶  Auto-Buy AN",D.Gold,32)
+
+    local function RebuildABList()
+        for _,v in pairs(abListFrame:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
+        local count=0
+        for iname,_ in pairs(_G._AutoBuyList) do
+            count=count+1
+            local row=Instance.new("Frame",abListFrame); row.Size=UDim2.new(1,0,0,28); row.BackgroundColor3=D.CardHover; row.BorderSizePixel=0; Corner(row,7); Stroke(row,D.Gold,1,0.4)
+            local nL=Instance.new("TextLabel",row); nL.Position=UDim2.new(0,8,0,0); nL.Size=UDim2.new(1,-38,1,0); nL.BackgroundTransparency=1
+            nL.Text="🛒 "..iname; nL.TextColor3=D.TextHi; nL.TextSize=11; nL.Font=Enum.Font.GothamMedium
+            nL.TextXAlignment=Enum.TextXAlignment.Left; nL.TextScaled=false; nL.RichText=true; nL.TextStrokeTransparency=1
+            local xb=Instance.new("TextButton",row); xb.Size=UDim2.new(0,26,0,26); xb.Position=UDim2.new(1,-28,0.5,-13)
+            xb.BackgroundColor3=Color3.fromRGB(50,12,12); xb.Text="✕"; xb.TextColor3=D.Red; xb.TextSize=11
+            xb.Font=Enum.Font.GothamBold; xb.AutoButtonColor=false; xb.BorderSizePixel=0; Corner(xb,6)
+            local cap=iname
+            xb.MouseButton1Click:Connect(function() _G._AutoBuyList[cap]=nil; RebuildABList(); ShopSaveConfig() end)
+        end
+        abEmptyLbl.Visible=(count==0)
     end
-end
 
-abToggle.MouseButton1Click:Connect(function()
-    _abEnabled = not _abEnabled
-    if _abEnabled then _abDeadline = os.time() + AB_INTERVAL end
-    UpdateAbUI()
-end)
+    local function AddItem()
+        local name=(inBox.Text or ""):match("^%s*(.-)%s*$")
+        if name=="" then return end
+        _G._AutoBuyList[name]=true; inBox.Text=""; RebuildABList(); ShopSaveConfig()
+    end
+    addBtn.MouseButton1Click:Connect(AddItem)
+    inBox.FocusLost:Connect(function(enter) if enter then AddItem() end end)
 
--- Countdown-Loop
-task.spawn(function()
-    while ShopPage.Parent do
-        if _abEnabled then
-            local remain = math.max(0, _abDeadline - os.time())
-            local m, s = math.floor(remain/60), remain%60
-            abCdLbl.Text = string.format("Nächster Kauf in: %d:%02d", m, s)
-            abCdLbl.TextColor3 = remain < 60 and D.Orange or D.TextMid
-            if remain == 0 then
-                abCdLbl.Text="⏳ Kaufe Items..."; abCdLbl.TextColor3=D.Gold
-                task.spawn(RunAutoBuy)
-                _abDeadline = os.time() + AB_INTERVAL
+    local function RunAutoBuy()
+        local registry=_G._ShopRegistry or {}
+        for iname,_ in pairs(_G._AutoBuyList) do
+            for _,shop in ipairs(registry) do
+                pcall(function()
+                    local folder=shop.folderGetter(); if not folder then return end
+                    local itemInst=folder:FindFirstChild(iname); if not itemInst then return end
+                    local cost=0; pcall(function() local cv=itemInst:FindFirstChild("CurrencyAmount") or itemInst:FindFirstChild("Cost") or itemInst:FindFirstChild("Price"); if cv then cost=tonumber(cv.Value) or 0 end end)
+                    local balance=0; pcall(function() local v=RS:WaitForChild("Player_Data",3):WaitForChild(LP.Name,3):WaitForChild("Data",3):WaitForChild(shop.currencyKey,2); if v then balance=tonumber(v.Value) or 0 end end)
+                    if cost>0 and balance<cost then print(string.format("[AutoBuy] Skip '%s'@%s bal:%d<cost:%d",iname,shop.name,balance,cost)); return end
+                    local args=shop.extraArgs(iname,1)
+                    pcall(function() RS:WaitForChild("Remote",3):WaitForChild("Server",3):WaitForChild(shop.remoteName,3):FireServer(table.unpack(args)) end)
+                    print(string.format("[AutoBuy] Gekauft:'%s' aus '%s'",iname,shop.name)); task.wait(0.25)
+                end)
             end
         end
-        task.wait(1)
     end
-end)
--- Puls
-task.spawn(function()
-    while ShopPage.Parent do
-        if _abEnabled then Tw(abDot,{BackgroundTransparency=0.6}); task.wait(0.8); Tw(abDot,{BackgroundTransparency=0}); task.wait(0.8)
-        else task.wait(0.5) end
-    end
-end)
 
--- Gespeicherte Liste beim Start anzeigen
-RebuildABList()
+    local function UpdateAbUI()
+        if _abEnabled then abDot.BackgroundColor3=D.Gold; abTLbl.Text="🛒  Auto-Buy  —  Aktiv"; abTLbl.TextColor3=D.Gold; abToggle.Text="⏹  Auto-Buy AUS"; abToggle.TextColor3=D.Red; Stroke(abToggle,D.Red,1,0.4)
+        else abDot.BackgroundColor3=D.TextLow; abTLbl.Text="🛒  Auto-Buy  —  Inaktiv"; abTLbl.TextColor3=D.TextLow; abCdLbl.Text="Nächster Kauf in: –"; abCdLbl.TextColor3=D.TextMid; abToggle.Text="▶  Auto-Buy AN"; abToggle.TextColor3=D.Gold; Stroke(abToggle,D.Gold,1,0.4) end
+    end
+    abToggle.MouseButton1Click:Connect(function() _abEnabled=not _abEnabled; if _abEnabled then _abDeadline=os.time()+AB_INTERVAL end; UpdateAbUI() end)
+
+    task.spawn(function()
+        while ShopPage.Parent do
+            if _abEnabled then
+                local remain=math.max(0,_abDeadline-os.time()); local m,s=math.floor(remain/60),remain%60
+                abCdLbl.Text=string.format("Nächster Kauf in: %d:%02d",m,s); abCdLbl.TextColor3=remain<60 and D.Orange or D.TextMid
+                if remain==0 then abCdLbl.Text="⏳ Kaufe Items..."; abCdLbl.TextColor3=D.Gold; task.spawn(RunAutoBuy); _abDeadline=os.time()+AB_INTERVAL end
+            end; task.wait(1)
+        end
+    end)
+    task.spawn(function()
+        while ShopPage.Parent do
+            if _abEnabled then Tw(abDot,{BackgroundTransparency=0.6}); task.wait(0.8); Tw(abDot,{BackgroundTransparency=0}); task.wait(0.8) else task.wait(0.5) end
+        end
+    end)
+    RebuildABList()
+end  -- end Auto-Buy
 
 -- ============================================================
 --  RESET-TIMER WIDGET
--- ============================================================
-local function BuildResetTimer(parent, timerType)
     local tc = Instance.new("Frame", parent)
     tc.Size = UDim2.new(1,0,0,32); tc.BackgroundColor3 = D.Input
     tc.BackgroundTransparency = D.GlassPane or 0.18
@@ -630,7 +567,8 @@ end
 --  SHOP BUILDER HELPER
 -- ============================================================
 local function BuildShop(opts)
-    -- ★ In globaler Registry registrieren (für Auto-Buy)
+    -- ★ In Shop-Registry eintragen (für Auto-Buy RunAutoBuy)
+    if not _G._ShopRegistry then _G._ShopRegistry = {} end
     table.insert(_G._ShopRegistry, {
         name         = opts.name,
         currencyKey  = opts.currencyKey,
