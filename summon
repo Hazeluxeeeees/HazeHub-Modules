@@ -1,791 +1,677 @@
--- ╔══════════════════════════════════════════════════════════════╗
---  HazeHUB  –  summon.lua  v3.0.0
---  Externes Modul: Banner · Pity · Auto-Sell · Gacha · Bypass
--- ╚══════════════════════════════════════════════════════════════╝
+-- ╔════════════════════════════════════════════════════════════╗
+--  HazeHUB  –  summon.lua   v4.0.0
+--  Rückgabe: { Init, Refresh, Version }
+--  Lädt vollständig eigenständig; braucht nur _G.HazeShared.
+-- ╚════════════════════════════════════════════════════════════╝
+local VERSION = "4.0.0"
 
--- ================================================================
---  GUARD: Verhindert Doppel-Load
--- ================================================================
-if _G._SummonLoaded then
-    print("[Summon] bereits geladen – überspringe")
-    return
+-- ════════════════════════════════════════════════════════════
+--  0. Doppel-Load-Schutz
+-- ════════════════════════════════════════════════════════════
+if _G._SummonModuleLoaded then
+    return _G._SummonModuleLoaded   -- bereits geladene Tabelle zurückgeben
 end
-_G._SummonLoaded = true
 
--- ================================================================
---  SCHRITT 1: Warte auf _G.HazeHUB  UND  _G.HazeShared
---  Beide Globals müssen existieren UND HazeShared muss die
---  Kern-UI-Funktionen (Card, Tw, D) bereits gesetzt haben.
---  KEIN SummonPage in dieser Bedingung (Race-Condition).
--- ================================================================
-local _waitT = 0
-repeat
-    task.wait(0.25)
-    _waitT = _waitT + 0.25
-    if _waitT > 25 then
-        warn("[Summon] HazeHUB / HazeShared nicht bereit nach 25s – Abbruch")
-        _G._SummonLoaded = false
-        return
+-- ════════════════════════════════════════════════════════════
+--  1. Dependency Check – _G.HazeShared Kern
+--     (KEIN SummonPage hier – Race-Condition)
+-- ════════════════════════════════════════════════════════════
+do
+    local waited = 0
+    while true do
+        if _G.HazeHUB   ~= nil
+        and _G.HazeShared ~= nil
+        and type(_G.HazeShared.Card) == "function"
+        and type(_G.HazeShared.Tw)   == "function"
+        and _G.HazeShared.D          ~= nil
+        then break end
+        task.wait(0.3)
+        waited = waited + 0.3
+        if waited > 25 then
+            warn("[Summon] _G.HazeShared Kern nicht bereit nach 25s")
+            return { Version = VERSION, Init = function() end, Refresh = function() end }
+        end
     end
-until (
-    _G.HazeHUB   ~= nil and
-    _G.HazeShared ~= nil and
-    type(_G.HazeShared.Card) == "function" and
-    type(_G.HazeShared.Tw)   == "function" and
-    _G.HazeShared.D ~= nil
-)
+end
 
--- ================================================================
---  SCHRITT 2: Warte separat auf SummonPage (eigener Timeout)
--- ================================================================
-local _spT = 0
-repeat
-    task.wait(0.25)
-    _spT = _spT + 0.25
-    if _spT > 15 then
-        warn("[Summon] SummonPage nicht bereit nach 15s – Abbruch")
-        _G._SummonLoaded = false
-        return
+-- ════════════════════════════════════════════════════════════
+--  2. SummonPage separat abwarten
+-- ════════════════════════════════════════════════════════════
+do
+    local waited = 0
+    while not (_G.HazeShared.SummonPage) do
+        task.wait(0.3)
+        waited = waited + 0.3
+        if waited > 15 then
+            warn("[Summon] SummonPage nicht bereit nach 15s")
+            return { Version = VERSION, Init = function() end, Refresh = function() end }
+        end
     end
-until (_G.HazeShared.SummonPage ~= nil)
+end
 
--- ================================================================
---  ALIASE  –  aus HazeShared übernehmen (exakt wie Shops/Traits)
--- ================================================================
-local HS  = _G.HazeShared
-local D   = HS.D                    -- Exakte Farbpalette des Hauptskripts
-
--- TweenInfo-Objekte
-local TF  = HS.TF                   -- 0.15s Quick
-local TM  = HS.TM                   -- 0.25s Medium
-local Tw  = HS.Tw                   -- Tw(obj, props, ti?)
-
--- UI-Factories (identische Signaturen wie Hauptskript)
-local Card    = HS.Card             -- Card(parent, fixedH?, transparency?)
-local NeonBtn = HS.NeonBtn          -- NeonBtn(parent, text, accent, h?)
-local MkLbl   = HS.MkLbl            -- MkLbl(parent, text, size, color, bold?, xa?)
-local SecLbl  = HS.SecLbl           -- SecLbl(parent, text)
-local MkInput = HS.MkInput          -- MkInput(parent, placeholder, h?) → outer, box
-local VList   = HS.VList            -- VList(parent, gap?)
-local HList   = HS.HList            -- HList(parent, gap?)
-local Pad     = HS.Pad              -- Pad(parent, top, right, bottom, left)
-local Corner  = HS.Corner           -- Corner(parent, radius?)
-local Stroke  = HS.Stroke           -- Stroke(parent, color, thickness, transparency)
-
--- Services
+-- ════════════════════════════════════════════════════════════
+--  3. ReplicatedStorage.Player_Data Check
+--     (Dependency Check: Daten müssen existieren)
+-- ════════════════════════════════════════════════════════════
 local RS = game:GetService("ReplicatedStorage")
 local LP = game:GetService("Players").LocalPlayer
 
--- ================================================================
---  KONSTANTEN
--- ================================================================
--- Banner-Definitionen (display = UI-Text, remote = Remote-Parameter)
+do
+    local waited = 0
+    local ok = false
+    repeat
+        task.wait(0.5)
+        waited = waited + 0.5
+        pcall(function()
+            RS:WaitForChild("Player_Data", 2):WaitForChild(LP.Name, 2)
+            ok = true
+        end)
+    until ok or waited > 20
+    if not ok then
+        warn("[Summon] Player_Data/" .. LP.Name .. " nicht erreichbar – fahre trotzdem fort")
+    end
+end
+
+-- ════════════════════════════════════════════════════════════
+--  4. Remote-Validator
+--     Prüft ob UnitsGacha und Setting_Event existieren.
+--     Gibt Warnungen aus, blockiert aber nicht.
+-- ════════════════════════════════════════════════════════════
+local REMOTE_GACHA    = nil   -- wird lazy geholt
+local REMOTE_SETTINGS = nil
+
+local function GetGachaRemote()
+    if REMOTE_GACHA then return REMOTE_GACHA end
+    local ok, r = pcall(function()
+        return RS:WaitForChild("Remote",   3)
+                  :WaitForChild("Server",  3)
+                  :WaitForChild("Gambling",3)
+                  :WaitForChild("UnitsGacha", 3)
+    end)
+    if ok and r then
+        REMOTE_GACHA = r
+        return r
+    end
+    warn("[Summon] Remote-Validator: UnitsGacha nicht gefunden")
+    return nil
+end
+
+local function GetSettingsRemote()
+    if REMOTE_SETTINGS then return REMOTE_SETTINGS end
+    local ok, r = pcall(function()
+        return RS:WaitForChild("Remote",   3)
+                  :WaitForChild("Server",  3)
+                  :WaitForChild("Settings",3)
+                  :WaitForChild("Setting_Event", 3)
+    end)
+    if ok and r then
+        REMOTE_SETTINGS = r
+        return r
+    end
+    warn("[Summon] Remote-Validator: Setting_Event nicht gefunden")
+    return nil
+end
+
+-- Remote-Check im Hintergrund (blockiert nicht)
+task.spawn(function()
+    task.wait(2)
+    if GetGachaRemote() then
+        print("[Summon] ✅ Remote UnitsGacha verifiziert")
+    end
+    if GetSettingsRemote() then
+        print("[Summon] ✅ Remote Setting_Event verifiziert")
+    end
+end)
+
+-- ════════════════════════════════════════════════════════════
+--  5. UI-Aliase (aus HazeShared, exakt wie Hauptskript)
+-- ════════════════════════════════════════════════════════════
+local HS      = _G.HazeShared
+local D       = HS.D
+local TF      = HS.TF
+local TM      = HS.TM
+local Tw      = HS.Tw
+local Card    = HS.Card
+local NeonBtn = HS.NeonBtn
+local MkLbl   = HS.MkLbl
+local SecLbl  = HS.SecLbl
+local MkInput = HS.MkInput
+local VList   = HS.VList
+local HList   = HS.HList
+local Pad     = HS.Pad
+local Corner  = HS.Corner
+local Stroke  = HS.Stroke
+
+-- ════════════════════════════════════════════════════════════
+--  6. Konstanten
+-- ════════════════════════════════════════════════════════════
 local BANNERS = {
-    { id = 1, display = "STANDARD",  remote = "Standard" },
-    { id = 2, display = "RATE-UP",   remote = "Rateup"   },
-    { id = 3, display = "SOL",       remote = "Sol"       },
+    { display = "STANDARD", remote = "Standard" },
+    { display = "RATE-UP",  remote = "Rateup"   },
+    { display = "SOL",      remote = "Sol"       },
 }
-
--- Gacha-Mengen
-local AMOUNTS = { "1x", "10x", "50x" }
-
--- Seltenheiten für Auto-Sell
+local AMOUNTS  = { "1x", "10x", "50x" }
 local RARITIES = { "Rare", "Epic", "Legendary", "Mythic" }
 local RAR_COL  = {
-    Rare      = D.Cyan,
-    Epic      = D.Purple,
-    Legendary = D.Gold,
-    Mythic    = D.Red,
+    Rare = D.Cyan, Epic = D.Purple, Legendary = D.Gold, Mythic = D.Red
 }
 
--- Pity-Pfade
--- SOL: drei separate Werte unter BannerPity.*
+-- Pity-Pfade (alle unter RS.Player_Data[LP.Name].BannerPity.*)
 local SOL_PITY = {
-    { key = "SolMythicPity", label = "Mythic Pity",  max = 200,  col = D.Gold   },
-    { key = "SolRangerPity", label = "Ranger Pity",  max = 100,  col = D.Purple },
-    { key = "SolSecretPity", label = "Secret Pity",  max = 500,  col = D.Red    },
+    { key = "SolMythicPity", label = "Mythic Pity", max = 200,  col = D.Gold   },
+    { key = "SolRangerPity", label = "Ranger Pity", max = 100,  col = D.Purple },
+    { key = "SolSecretPity", label = "Secret Pity", max = 500,  col = D.Red    },
 }
--- Standard/Rate-Up: gemeinsamer Wert BannerPity.Pity
 local STD_PITY = { key = "Pity", label = "Banner Pity", max = 3500, col = D.Cyan }
 
--- ================================================================
---  STATE
--- ================================================================
-local selectedBanner   = 1          -- Index in BANNERS
-local selectedAmount   = "10x"      -- Aktuell gewählte Menge
-local autoSellActive   = {          -- Auto-Sell Zustände
-    Rare      = false,
-    Epic      = false,
-    Legendary = false,
-    Mythic    = false,
-}
-local summonBusy       = false      -- Debounce
-local autoSummonOn     = false
-local autoSummonDelay  = 3
+-- ════════════════════════════════════════════════════════════
+--  7. State
+-- ════════════════════════════════════════════════════════════
+local selBanner   = 1       -- Index in BANNERS
+local selAmount   = "10x"
+local autoSell    = { Rare=false, Epic=false, Legendary=false, Mythic=false }
+local sumBusy     = false
+local autoOn      = false
+local autoDelay   = 3
 
--- ================================================================
---  HELPER-FUNKTIONEN
--- ================================================================
-
--- Liest einen IntValue/NumberValue-Wert aus dem Pfad
--- RS.Player_Data[LP.Name].BannerPity.<key>
-local function ReadBannerPity(key)
-    local val = 0
+-- ════════════════════════════════════════════════════════════
+--  8. Pity-Reader  (RS.Player_Data[LP.Name].BannerPity.<key>)
+-- ════════════════════════════════════════════════════════════
+local function ReadPity(key)
+    local v = 0
     pcall(function()
-        val = tonumber(
+        v = tonumber(
             RS:WaitForChild("Player_Data", 3)
               :WaitForChild(LP.Name, 3)
               :WaitForChild("BannerPity", 3)
               :WaitForChild(key, 2).Value
         ) or 0
     end)
-    return val
+    return v
 end
 
--- Gibt eine Tabelle der aktiven Auto-Sell-Raritäten zurück
--- Format: { ["Rare"] = true, ["Epic"] = true, ... }
-local function BuildAutoSellTable()
-    local t = {}
-    for _, rar in ipairs(RARITIES) do
-        if autoSellActive[rar] then
-            t[rar] = true
-        end
-    end
-    return t
-end
+-- ════════════════════════════════════════════════════════════
+--  9. UI-Aufbau  (innerhalb task.defer → Parent garantiert bereit)
+-- ════════════════════════════════════════════════════════════
+local pityRefs  = {}   -- key → { lbl, fill, max }
+local banBtns   = {}
+local amtBtns   = {}
+local sellRefs  = {}   -- rar → { frame, btn, col }
+local sumStatusLbl = nil
+local sumInfoLbl   = nil
+local autoStatusLbl = nil
+local autoDot       = nil
+local autoToggleBtn = nil
 
--- Feuert den Setting_Event Remote
-local function FireAutoSellRemote(rarity, state)
-    pcall(function()
-        RS:WaitForChild("Remote", 3)
-          :WaitForChild("Server", 3)
-          :WaitForChild("Settings", 3)
-          :WaitForChild("Setting_Event", 3)
-          :FireServer("Sell Auto " .. rarity, state)
-    end)
-end
-
--- Baut eine Fortschrittsbalken-Zeile (gibt ValueLabel + FillFrame zurück)
-local function BuildProgressRow(parent, label, col, layoutOrder)
+local function BuildProgressRow(parent, label, col, lo)
     local row = Instance.new("Frame", parent)
-    row.Name            = "PityRow_" .. label
-    row.Size            = UDim2.new(1, 0, 0, 46)
-    row.BackgroundColor3= D.CardHover
+    row.Name = "PRow_"..label; row.LayoutOrder = lo or 0
+    row.Size = UDim2.new(1,0,0,46)
+    row.BackgroundColor3 = D.CardHover
     row.BackgroundTransparency = D.GlassPane
     row.BorderSizePixel = 0
-    row.LayoutOrder     = layoutOrder or 0
-    Corner(row, 8)
-    Stroke(row, col, 1, 0.45)
+    Corner(row, 8); Stroke(row, col, 1, 0.45)
 
-    -- Farbstreifen links
-    local bar = Instance.new("Frame", row)
-    bar.Size            = UDim2.new(0, 3, 1, 0)
-    bar.BackgroundColor3= col
-    bar.BorderSizePixel = 0
-    Corner(bar, 2)
+    local side = Instance.new("Frame",row)
+    side.Size=UDim2.new(0,3,1,0); side.BackgroundColor3=col; side.BorderSizePixel=0; Corner(side,2)
 
-    -- Label-Text
-    local nameLbl = Instance.new("TextLabel", row)
-    nameLbl.Position    = UDim2.new(0, 10, 0, 4)
-    nameLbl.Size        = UDim2.new(0.62, -10, 0, 16)
-    nameLbl.BackgroundTransparency = 1
-    nameLbl.Text        = label
-    nameLbl.TextColor3  = col
-    nameLbl.TextSize    = 11
-    nameLbl.Font        = Enum.Font.GothamBold
-    nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-    nameLbl.TextScaled  = false
-    nameLbl.RichText    = true
-    nameLbl.TextStrokeTransparency = 1
+    local nL = Instance.new("TextLabel",row)
+    nL.Position=UDim2.new(0,10,0,4); nL.Size=UDim2.new(0.60,-10,0,16)
+    nL.BackgroundTransparency=1; nL.Text=label; nL.TextColor3=col
+    nL.TextSize=11; nL.Font=Enum.Font.GothamBold
+    nL.TextXAlignment=Enum.TextXAlignment.Left
+    nL.TextScaled=false; nL.RichText=true; nL.TextStrokeTransparency=1
 
-    -- Wert-Anzeige (z.B. "1200 / 3500")
-    local valLbl = Instance.new("TextLabel", row)
-    valLbl.Position     = UDim2.new(0.62, 0, 0, 4)
-    valLbl.Size         = UDim2.new(0.37, -6, 0, 16)
-    valLbl.BackgroundTransparency = 1
-    valLbl.Text         = "0 / –"
-    valLbl.TextColor3   = D.TextHi
-    valLbl.TextSize     = 11
-    valLbl.Font         = Enum.Font.GothamBold
-    valLbl.TextXAlignment = Enum.TextXAlignment.Right
-    valLbl.TextScaled   = false
-    valLbl.RichText     = true
-    valLbl.TextStrokeTransparency = 1
+    local vL = Instance.new("TextLabel",row)
+    vL.Position=UDim2.new(0.60,0,0,4); vL.Size=UDim2.new(0.39,-6,0,16)
+    vL.BackgroundTransparency=1; vL.Text="0 / –"; vL.TextColor3=D.TextHi
+    vL.TextSize=11; vL.Font=Enum.Font.GothamBold
+    vL.TextXAlignment=Enum.TextXAlignment.Right
+    vL.TextScaled=false; vL.RichText=true; vL.TextStrokeTransparency=1
 
-    -- Balken-Hintergrund
-    local barBg = Instance.new("Frame", row)
-    barBg.Position      = UDim2.new(0, 10, 0, 28)
-    barBg.Size          = UDim2.new(1, -16, 0, 10)
-    barBg.BackgroundColor3 = Color3.fromRGB(18, 14, 30)
-    barBg.BorderSizePixel  = 0
-    Corner(barBg, 5)
+    local bg = Instance.new("Frame",row)
+    bg.Position=UDim2.new(0,10,0,28); bg.Size=UDim2.new(1,-16,0,10)
+    bg.BackgroundColor3=Color3.fromRGB(16,12,28); bg.BorderSizePixel=0; Corner(bg,5)
 
-    -- Balken-Füllung
-    local barFill = Instance.new("Frame", barBg)
-    barFill.Size        = UDim2.new(0, 0, 1, 0)
-    barFill.BackgroundColor3 = col
-    barFill.BorderSizePixel  = 0
-    Corner(barFill, 5)
-
-    -- Gradient auf Füllung
-    local grad = Instance.new("UIGradient", barFill)
-    grad.Color = ColorSequence.new({
+    local fill = Instance.new("Frame",bg)
+    fill.Size=UDim2.new(0,0,1,0); fill.BackgroundColor3=col; fill.BorderSizePixel=0; Corner(fill,5)
+    local g = Instance.new("UIGradient",fill)
+    g.Color = ColorSequence.new({
         ColorSequenceKeypoint.new(0, col),
         ColorSequenceKeypoint.new(1, Color3.new(
-            math.min(1, col.R + 0.25),
-            math.min(1, col.G + 0.25),
-            math.min(1, col.B + 0.25)
+            math.min(1, col.R + 0.22),
+            math.min(1, col.G + 0.22),
+            math.min(1, col.B + 0.22)
         )),
     })
 
-    return valLbl, barFill
+    return vL, fill
 end
 
--- ================================================================
---  UI AUFBAU  (via task.defer sicherstellen, dass Parent bereit)
--- ================================================================
 task.defer(function()
-    -- SummonPage nochmals prüfen (nach defer könnte es weg sein)
     local Page = _G.HazeShared and _G.HazeShared.SummonPage
     if not Page or not Page.Parent then
-        warn("[Summon] SummonPage nicht mehr gültig nach task.defer")
-        return
+        warn("[Summon] SummonPage ungültig nach task.defer"); return
     end
 
-    -- Pity-UI-Referenzen (key → { valLbl, barFill, max })
-    local pityRefs = {}
+    -- Lade-Label für Haupt-UI (wird nach Init ersetzt)
+    local loadLbl = Instance.new("TextLabel", Page)
+    loadLbl.Name = "SummonLoadLbl"
+    loadLbl.Size = UDim2.new(1,0,0,20)
+    loadLbl.BackgroundTransparency = 1
+    loadLbl.Text = "⏳  Summon-Modul initialisiert..."
+    loadLbl.TextColor3 = D.Yellow; loadLbl.TextSize = 10
+    loadLbl.Font = Enum.Font.GothamMedium
+    loadLbl.TextXAlignment = Enum.TextXAlignment.Left
+    loadLbl.TextScaled = false; loadLbl.RichText = true; loadLbl.TextStrokeTransparency = 1
+    _G._SummonWaitLbl = loadLbl
 
-    -- ────────────────────────────────────────────────────────
-    --  SEKTION A: BANNER-AUSWAHL
-    -- ────────────────────────────────────────────────────────
-    local banCard = Card(Page)
-    Pad(banCard, 10, 12, 10, 12); VList(banCard, 8)
+    -- ── A. BANNER-AUSWAHL ─────────────────────────────────────
+    local banCard = Card(Page); Pad(banCard,10,12,10,12); VList(banCard,8)
     SecLbl(banCard, "🎴  BANNER")
 
-    local activeLbl = MkLbl(banCard, "Aktiv:  STANDARD", 11, D.Purple, true)
-    activeLbl.Size = UDim2.new(1, 0, 0, 18)
+    local actLbl = MkLbl(banCard,"Aktiv:  STANDARD",11,D.Purple,true)
+    actLbl.Size = UDim2.new(1,0,0,18)
 
-    local banBtnRow = Instance.new("Frame", banCard)
-    banBtnRow.Size = UDim2.new(1, 0, 0, 34)
-    banBtnRow.BackgroundTransparency = 1
-    HList(banBtnRow, 5)
-
-    local banBtns = {}
+    local banRow = Instance.new("Frame",banCard)
+    banRow.Size=UDim2.new(1,0,0,34); banRow.BackgroundTransparency=1; HList(banRow,5)
 
     local function RefreshBannerUI()
-        for i, btn in ipairs(banBtns) do
-            if i == selectedBanner then
-                btn.BackgroundColor3    = D.Purple
-                btn.BackgroundTransparency = 0.1
-                btn.TextColor3          = D.TextHi
-                Stroke(btn, D.Purple, 2, 0)
+        for i,btn in ipairs(banBtns) do
+            if i == selBanner then
+                btn.BackgroundColor3=D.Purple; btn.BackgroundTransparency=0.10
+                btn.TextColor3=D.TextHi; Stroke(btn,D.Purple,2,0)
             else
-                btn.BackgroundColor3    = D.CardHover
-                btn.BackgroundTransparency = D.GlassPane
-                btn.TextColor3          = D.TextMid
-                Stroke(btn, D.Border, 1, 0.4)
+                btn.BackgroundColor3=D.CardHover; btn.BackgroundTransparency=D.GlassPane
+                btn.TextColor3=D.TextMid; Stroke(btn,D.Border,1,0.4)
             end
         end
-        activeLbl.Text = "Aktiv:  " .. BANNERS[selectedBanner].display
+        actLbl.Text = "Aktiv:  " .. BANNERS[selBanner].display
     end
 
     for i, ban in ipairs(BANNERS) do
-        local btn = Instance.new("TextButton", banBtnRow)
-        btn.Size    = UDim2.new(0.32, -3, 0, 34)
-        btn.BackgroundColor3    = D.CardHover
-        btn.BackgroundTransparency = D.GlassPane
-        btn.Text    = ban.display
-        btn.TextColor3 = D.TextMid
-        btn.TextSize   = 10
-        btn.Font       = Enum.Font.GothamBold
-        btn.AutoButtonColor  = false
-        btn.BorderSizePixel  = 0
-        btn.TextWrapped      = true
-        btn.TextScaled       = false
-        btn.RichText         = true
-        btn.TextStrokeTransparency = 1
-        Corner(btn, 8)
-        Stroke(btn, D.Border, 1, 0.4)
-
-        local capturedIdx = i
-        btn.MouseButton1Click:Connect(function()
-            selectedBanner = capturedIdx
-            RefreshBannerUI()
-        end)
-        btn.MouseEnter:Connect(function()
-            if selectedBanner ~= capturedIdx then
-                Tw(btn, { BackgroundColor3 = D.TabActive, BackgroundTransparency = 0.08 })
-            end
-        end)
-        btn.MouseLeave:Connect(function()
-            if selectedBanner ~= capturedIdx then
-                Tw(btn, { BackgroundColor3 = D.CardHover, BackgroundTransparency = D.GlassPane })
-            end
-        end)
-
-        banBtns[i] = btn
+        local btn = Instance.new("TextButton",banRow)
+        btn.Size=UDim2.new(0.32,-3,0,34)
+        btn.BackgroundColor3=D.CardHover; btn.BackgroundTransparency=D.GlassPane
+        btn.Text=ban.display; btn.TextColor3=D.TextMid
+        btn.TextSize=10; btn.Font=Enum.Font.GothamBold
+        btn.AutoButtonColor=false; btn.BorderSizePixel=0
+        btn.TextWrapped=true; btn.TextScaled=false
+        btn.RichText=true; btn.TextStrokeTransparency=1
+        Corner(btn,8); Stroke(btn,D.Border,1,0.4)
+        local idx=i
+        btn.MouseButton1Click:Connect(function() selBanner=idx; RefreshBannerUI() end)
+        btn.MouseEnter:Connect(function() if selBanner~=idx then Tw(btn,{BackgroundTransparency=0.08}) end end)
+        btn.MouseLeave:Connect(function() if selBanner~=idx then Tw(btn,{BackgroundTransparency=D.GlassPane}) end end)
+        banBtns[i]=btn
     end
     RefreshBannerUI()
 
-    -- ────────────────────────────────────────────────────────
-    --  SEKTION B: PITY TRACKER
-    -- ────────────────────────────────────────────────────────
-    local pityCard = Card(Page)
-    Pad(pityCard, 10, 12, 10, 12); VList(pityCard, 8)
-    SecLbl(pityCard, "📊  PITY TRACKER")
+    -- ── B. PITY TRACKER ───────────────────────────────────────
+    local pityCard = Card(Page); Pad(pityCard,10,12,10,12); VList(pityCard,8)
+    SecLbl(pityCard,"📊  PITY TRACKER")
 
-    -- SOL-Pity-Balken (3 Stück)
-    local solFrame = Instance.new("Frame", pityCard)
-    solFrame.Size = UDim2.new(1, 0, 0, 0)
-    solFrame.AutomaticSize = Enum.AutomaticSize.Y
-    solFrame.BackgroundTransparency = 1
-    VList(solFrame, 5)
-
-    for idx, pp in ipairs(SOL_PITY) do
-        local vLbl, bFill = BuildProgressRow(solFrame, "☀️  " .. pp.label, pp.col, idx)
-        pityRefs[pp.key] = { lbl = vLbl, fill = bFill, max = pp.max }
+    -- SOL (3 Balken)
+    local solFrame = Instance.new("Frame",pityCard)
+    solFrame.Size=UDim2.new(1,0,0,0); solFrame.AutomaticSize=Enum.AutomaticSize.Y
+    solFrame.BackgroundTransparency=1; VList(solFrame,5)
+    for idx,pp in ipairs(SOL_PITY) do
+        local vL,fill = BuildProgressRow(solFrame,"☀️  "..pp.label, pp.col, idx)
+        pityRefs[pp.key] = { lbl=vL, fill=fill, max=pp.max }
     end
 
-    -- Standard/Rate-Up gemeinsamer Balken
-    local stdFrame = Instance.new("Frame", pityCard)
-    stdFrame.Size = UDim2.new(1, 0, 0, 0)
-    stdFrame.AutomaticSize = Enum.AutomaticSize.Y
-    stdFrame.BackgroundTransparency = 1
-    VList(stdFrame, 5)
-
+    -- Standard/Rate-Up (1 Balken)
+    local stdFrame = Instance.new("Frame",pityCard)
+    stdFrame.Size=UDim2.new(1,0,0,0); stdFrame.AutomaticSize=Enum.AutomaticSize.Y
+    stdFrame.BackgroundTransparency=1; VList(stdFrame,5)
     do
-        local vLbl, bFill = BuildProgressRow(stdFrame, "🎴  " .. STD_PITY.label, STD_PITY.col, 10)
-        pityRefs["Pity"] = { lbl = vLbl, fill = bFill, max = STD_PITY.max }
+        local vL,fill = BuildProgressRow(stdFrame,"🎴  "..STD_PITY.label, STD_PITY.col, 10)
+        pityRefs["Pity"] = { lbl=vL, fill=fill, max=STD_PITY.max }
     end
 
-    -- Pity-Werte laden und UI updaten
     local function RefreshPity()
-        -- SOL-Pities
-        for _, pp in ipairs(SOL_PITY) do
-            local ref = pityRefs[pp.key]
-            if not ref then continue end
+        for _,pp in ipairs(SOL_PITY) do
+            local ref=pityRefs[pp.key]; if not ref then continue end
             pcall(function()
-                local val = ReadBannerPity(pp.key)
-                local pct = math.max(0, math.min(1, val / math.max(1, ref.max)))
-                ref.lbl.Text = tostring(val) .. " / " .. tostring(ref.max)
-                Tw(ref.fill, { Size = UDim2.new(pct, 0, 1, 0) }, TM)
+                local val=ReadPity(pp.key)
+                local pct=math.max(0,math.min(1,val/math.max(1,ref.max)))
+                ref.lbl.Text = tostring(val).." / "..tostring(ref.max)
+                Tw(ref.fill,{Size=UDim2.new(pct,0,1,0)},TM)
             end)
         end
-        -- Standard/Rate-Up
         pcall(function()
-            local ref = pityRefs["Pity"]
-            if not ref then return end
-            local val = ReadBannerPity("Pity")
-            local pct = math.max(0, math.min(1, val / math.max(1, ref.max)))
-            ref.lbl.Text = tostring(val) .. " / " .. tostring(ref.max)
-            Tw(ref.fill, { Size = UDim2.new(pct, 0, 1, 0) }, TM)
+            local ref=pityRefs["Pity"]; if not ref then return end
+            local val=ReadPity("Pity")
+            local pct=math.max(0,math.min(1,val/math.max(1,ref.max)))
+            ref.lbl.Text = tostring(val).." / "..tostring(ref.max)
+            Tw(ref.fill,{Size=UDim2.new(pct,0,1,0)},TM)
         end)
     end
 
-    NeonBtn(pityCard, "🔄  Pity aktualisieren", D.CyanDim, 28)
+    NeonBtn(pityCard,"🔄  Pity aktualisieren",D.CyanDim,28)
         .MouseButton1Click:Connect(function()
             task.spawn(function() pcall(RefreshPity) end)
         end)
 
-    -- ────────────────────────────────────────────────────────
-    --  SEKTION C: AUTO-SELL CHECKBOXEN
-    -- ────────────────────────────────────────────────────────
-    local sellCard = Card(Page)
-    Pad(sellCard, 10, 12, 10, 12); VList(sellCard, 8)
-    SecLbl(sellCard, "🗑️  AUTO-SELL NACH SUMMON")
+    -- ── C. AUTO-SELL ──────────────────────────────────────────
+    local sellCard = Card(Page); Pad(sellCard,10,12,10,12); VList(sellCard,8)
+    SecLbl(sellCard,"🗑️  AUTO-SELL NACH SUMMON")
 
-    -- 2×2 Grid
-    local sellGrid = Instance.new("Frame", sellCard)
-    sellGrid.Size = UDim2.new(1, 0, 0, 0)
-    sellGrid.AutomaticSize = Enum.AutomaticSize.Y
-    sellGrid.BackgroundTransparency = 1
-    local grid = Instance.new("UIGridLayout", sellGrid)
-    grid.CellSize       = UDim2.new(0.5, -4, 0, 34)
-    grid.CellPadding    = UDim2.new(0, 4, 0, 4)
-    grid.FillDirection  = Enum.FillDirection.Horizontal
-    grid.SortOrder      = Enum.SortOrder.LayoutOrder
+    local sellGrid = Instance.new("Frame",sellCard)
+    sellGrid.Size=UDim2.new(1,0,0,0); sellGrid.AutomaticSize=Enum.AutomaticSize.Y
+    sellGrid.BackgroundTransparency=1
+    local sg=Instance.new("UIGridLayout",sellGrid)
+    sg.CellSize=UDim2.new(0.5,-4,0,34); sg.CellPadding=UDim2.new(0,4,0,4)
+    sg.FillDirection=Enum.FillDirection.Horizontal; sg.SortOrder=Enum.SortOrder.LayoutOrder
 
-    local sellBtnRefs = {}  -- rar → { frame, btn }
-
-    for lo, rar in ipairs(RARITIES) do
-        local col = RAR_COL[rar] or D.TextMid
-
-        local frame = Instance.new("Frame", sellGrid)
-        frame.Size = UDim2.new(0.5, -4, 0, 34)
-        frame.BackgroundColor3 = D.CardHover
-        frame.BackgroundTransparency = D.GlassPane
-        frame.BorderSizePixel = 0
-        frame.LayoutOrder = lo
-        Corner(frame, 8)
-        Stroke(frame, col, 1, 0.5)
-
-        local btn = Instance.new("TextButton", frame)
-        btn.Size = UDim2.new(1, 0, 1, 0)
-        btn.BackgroundTransparency = 1
-        btn.Text = "⬜  " .. rar
-        btn.TextColor3 = col
-        btn.TextSize   = 11
-        btn.Font       = Enum.Font.GothamBold
-        btn.AutoButtonColor  = false
-        btn.BorderSizePixel  = 0
-        btn.TextXAlignment   = Enum.TextXAlignment.Center
-        btn.TextScaled  = false
-        btn.RichText    = true
-        btn.TextStrokeTransparency = 1
-
-        sellBtnRefs[rar] = { frame = frame, btn = btn, col = col }
-
-        local capRar = rar
+    for lo,rar in ipairs(RARITIES) do
+        local col = RAR_COL[rar]
+        local fr = Instance.new("Frame",sellGrid)
+        fr.Size=UDim2.new(0.5,-4,0,34); fr.LayoutOrder=lo
+        fr.BackgroundColor3=D.CardHover; fr.BackgroundTransparency=D.GlassPane
+        fr.BorderSizePixel=0; Corner(fr,8); Stroke(fr,col,1,0.5)
+        local btn = Instance.new("TextButton",fr)
+        btn.Size=UDim2.new(1,0,1,0); btn.BackgroundTransparency=1
+        btn.Text="⬜  "..rar; btn.TextColor3=col; btn.TextSize=11
+        btn.Font=Enum.Font.GothamBold; btn.AutoButtonColor=false; btn.BorderSizePixel=0
+        btn.TextXAlignment=Enum.TextXAlignment.Center
+        btn.TextScaled=false; btn.RichText=true; btn.TextStrokeTransparency=1
+        sellRefs[rar]={frame=fr,btn=btn,col=col}
+        local cr=rar
         btn.MouseButton1Click:Connect(function()
-            -- Zustand togglen
-            autoSellActive[capRar] = not autoSellActive[capRar]
-            local state = autoSellActive[capRar]
-
-            -- Remote feuern
-            FireAutoSellRemote(capRar, state)
-
-            -- UI aktualisieren
-            local ref = sellBtnRefs[capRar]
+            autoSell[cr]=not autoSell[cr]
+            local state=autoSell[cr]
+            -- Remote-Aufruf: Setting_Event:FireServer("Sell Auto <rar>", bool)
+            local rem=GetSettingsRemote()
+            if rem then
+                pcall(function() rem:FireServer("Sell Auto "..cr, state) end)
+            end
+            -- UI-Update
+            local e=sellRefs[cr]
             if state then
-                ref.btn.Text  = "✅  " .. capRar
-                ref.btn.TextColor3 = D.TextHi
-                ref.frame.BackgroundColor3 = Color3.fromRGB(
-                    math.clamp(math.floor(ref.col.R * 255 * 0.30), 0, 255),
-                    math.clamp(math.floor(ref.col.G * 255 * 0.30), 0, 255),
-                    math.clamp(math.floor(ref.col.B * 255 * 0.30), 0, 255)
-                )
-                ref.frame.BackgroundTransparency = 0.05
-                Stroke(ref.frame, ref.col, 2, 0)
+                e.btn.Text="✅  "..cr; e.btn.TextColor3=D.TextHi
+                e.frame.BackgroundColor3=Color3.fromRGB(
+                    math.clamp(math.floor(e.col.R*255*0.28),0,255),
+                    math.clamp(math.floor(e.col.G*255*0.28),0,255),
+                    math.clamp(math.floor(e.col.B*255*0.28),0,255))
+                e.frame.BackgroundTransparency=0.05; Stroke(e.frame,e.col,2,0)
             else
-                ref.btn.Text  = "⬜  " .. capRar
-                ref.btn.TextColor3 = ref.col
-                ref.frame.BackgroundColor3 = D.CardHover
-                ref.frame.BackgroundTransparency = D.GlassPane
-                Stroke(ref.frame, ref.col, 1, 0.5)
+                e.btn.Text="⬜  "..cr; e.btn.TextColor3=e.col
+                e.frame.BackgroundColor3=D.CardHover; e.frame.BackgroundTransparency=D.GlassPane
+                Stroke(e.frame,e.col,1,0.5)
             end
         end)
     end
 
-    -- ────────────────────────────────────────────────────────
-    --  SEKTION D: SUMMON AUSFÜHREN  (1x / 10x / 50x)
-    -- ────────────────────────────────────────────────────────
-    local sumCard = Card(Page)
-    Pad(sumCard, 10, 12, 10, 12); VList(sumCard, 8)
-    SecLbl(sumCard, "✨  SUMMON")
+    -- ── D. SUMMON AUSFÜHREN ───────────────────────────────────
+    local sumCard = Card(Page); Pad(sumCard,10,12,10,12); VList(sumCard,8)
+    SecLbl(sumCard,"✨  SUMMON AUSFÜHREN")
 
-    -- Status-Anzeige
-    local sumStatusLbl = MkLbl(sumCard, "Bereit.", 11, D.TextMid)
-    sumStatusLbl.Size = UDim2.new(1, 0, 0, 18)
-
-    -- Aktiver Banner / Menge Info
-    local sumInfoLbl = MkLbl(sumCard, "Banner: STANDARD  •  Menge: 10x", 10, D.TextLow)
-    sumInfoLbl.Size = UDim2.new(1, 0, 0, 16)
+    sumStatusLbl = MkLbl(sumCard,"Bereit.",11,D.TextMid); sumStatusLbl.Size=UDim2.new(1,0,0,18)
+    sumInfoLbl   = MkLbl(sumCard,"Banner: STANDARD  •  Menge: 10x",10,D.TextLow); sumInfoLbl.Size=UDim2.new(1,0,0,16)
 
     local function UpdateSumInfo()
-        sumInfoLbl.Text = string.format(
-            "Banner: %s  •  Menge: %s",
-            BANNERS[selectedBanner].display,
-            selectedAmount
-        )
+        if sumInfoLbl then
+            sumInfoLbl.Text = "Banner: "..BANNERS[selBanner].display.."  •  Menge: "..selAmount
+        end
+    end
+    -- Banner-Änderung aktualisiert auch SumInfo
+    for i,btn in ipairs(banBtns) do
+        btn.MouseButton1Click:Connect(function() UpdateSumInfo() end)
     end
 
-    -- ── BYPASS: Schließt den "Click anywhere"-Screen ──────────
+    -- Bypass: Findet und schließt "Click anywhere"-Screens
     local function BypassClickScreen()
         task.spawn(function()
-            -- Mehrere Versuche über 6 Sekunden (Screen erscheint mit Verzögerung)
-            for attempt = 1, 20 do
+            for attempt=1,20 do
                 task.wait(0.3)
-                local closed = false
-
+                local closed=false
                 pcall(function()
-                    local pg = LP:FindFirstChildOfClass("PlayerGui")
+                    local pg=LP:FindFirstChildOfClass("PlayerGui")
                     if not pg then return end
-
-                    for _, desc in ipairs(pg:GetDescendants()) do
-                        if not desc or not desc.Parent then continue end
-
-                        local cls  = desc.ClassName
-                        local name = desc.Name:lower()
-
-                        -- Suche nach TextButton/ImageButton mit "click"-Schlüsselwörtern
-                        if (cls == "TextButton" or cls == "ImageButton") then
-                            if name:find("click") or name:find("anywhere")
-                            or name:find("continue") or name:find("tap") then
-                                -- Direktes Deaktivieren des Parent-Screens
+                    for _,d in ipairs(pg:GetDescendants()) do
+                        if not d or not d.Parent then continue end
+                        local cls=d.ClassName; local n=d.Name:lower()
+                        if (cls=="TextButton" or cls=="ImageButton") then
+                            if n:find("click") or n:find("anywhere") or n:find("continue") or n:find("tap") then
                                 pcall(function()
-                                    local p = desc.Parent
-                                    if p and (p:IsA("Frame") or p:IsA("ScreenGui")) then
-                                        p.Visible = false
-                                    end
-                                    desc.Visible = false
+                                    local p=d.Parent
+                                    if p and (p:IsA("Frame") or p:IsA("ScreenGui")) then p.Visible=false end
+                                    d.Visible=false
                                 end)
-                                closed = true
+                                closed=true
                             end
                         end
-
-                        -- Frame-basierter Ergebnis-Screen
-                        if cls == "Frame" and desc.Visible then
-                            if name:find("result") or name:find("gacha")
-                            or name:find("pull") or name:find("reward") then
-                                -- VirtualInputManager-Click in der Mitte
+                        if cls=="Frame" and d.Visible then
+                            if n:find("result") or n:find("gacha") or n:find("pull") then
                                 pcall(function()
-                                    local abs = desc.AbsolutePosition
-                                    local sz  = desc.AbsoluteSize
-                                    local cx  = math.floor(abs.X + sz.X * 0.5)
-                                    local cy  = math.floor(abs.Y + sz.Y * 0.5)
-                                    game:GetService("VirtualInputManager")
-                                        :SendMouseButtonEvent(cx, cy, 0, true,  game, 0)
+                                    local abs=d.AbsolutePosition; local sz=d.AbsoluteSize
+                                    local cx=math.floor(abs.X+sz.X*0.5); local cy=math.floor(abs.Y+sz.Y*0.5)
+                                    game:GetService("VirtualInputManager"):SendMouseButtonEvent(cx,cy,0,true,game,0)
                                     task.wait(0.05)
-                                    game:GetService("VirtualInputManager")
-                                        :SendMouseButtonEvent(cx, cy, 0, false, game, 0)
+                                    game:GetService("VirtualInputManager"):SendMouseButtonEvent(cx,cy,0,false,game,0)
                                 end)
-                                closed = true
+                                closed=true
                             end
                         end
                     end
                 end)
-
-                if closed then
-                    print("[Summon] Bypass: Click-Screen geschlossen (Versuch " .. attempt .. ")")
-                    return
-                end
+                if closed then break end
             end
         end)
     end
 
-    -- ── Summon-Kern-Funktion ───────────────────────────────────
+    -- Gacha-Funktion
     local function DoSummon(amount)
-        if summonBusy then
-            sumStatusLbl.Text      = "⏳  Warte auf vorherigen Summon..."
-            sumStatusLbl.TextColor3 = D.Yellow
+        if sumBusy then
+            if sumStatusLbl then sumStatusLbl.Text="⏳  Warte..."; sumStatusLbl.TextColor3=D.Yellow end
             return
         end
-        summonBusy = true
-
-        local ban    = BANNERS[selectedBanner]
-        local asSells = BuildAutoSellTable()
-
-        sumStatusLbl.Text      = string.format("⏳  Summone %s auf %s ...", amount, ban.display)
-        sumStatusLbl.TextColor3 = D.Yellow
-
+        sumBusy=true
+        local ban=BANNERS[selBanner]
+        if sumStatusLbl then
+            sumStatusLbl.Text=string.format("⏳  %s auf %s...",amount,ban.display)
+            sumStatusLbl.TextColor3=D.Yellow
+        end
         task.spawn(function()
-            -- Remote: UnitsGacha:FireServer(Menge, BannerName, AutoSellTable)
-            local ok, err = pcall(function()
-                RS:WaitForChild("Remote",   3)
-                  :WaitForChild("Server",   3)
-                  :WaitForChild("Gambling", 3)
-                  :WaitForChild("UnitsGacha", 3)
-                  :FireServer(amount, ban.remote, asSells)
-            end)
+            -- AutoSell-Table aufbauen
+            local asSells={}
+            for _,r in ipairs(RARITIES) do if autoSell[r] then asSells[r]=true end end
 
-            if ok then
-                sumStatusLbl.Text      = string.format("✅  %s auf %s!", amount, ban.display)
-                sumStatusLbl.TextColor3 = D.GreenBright
-                -- Pity nach kurzer Verzögerung aktualisieren
-                task.delay(1.5, function() pcall(RefreshPity) end)
+            -- Remote: UnitsGacha:FireServer(Menge, BannerName, {ActiveAutoSells})
+            local rem=GetGachaRemote()
+            local ok,err
+            if rem then
+                ok,err=pcall(function() rem:FireServer(amount, ban.remote, asSells) end)
             else
-                local errShort = tostring(err):sub(1, 80)
-                sumStatusLbl.Text      = "❌  " .. errShort
-                sumStatusLbl.TextColor3 = D.Red
-                warn("[Summon] UnitsGacha Fehler: " .. tostring(err))
+                ok=false; err="UnitsGacha Remote nicht gefunden"
             end
 
-            -- Bypass starten
-            BypassClickScreen()
+            if ok then
+                if sumStatusLbl then
+                    sumStatusLbl.Text=string.format("✅  %s auf %s!",amount,ban.display)
+                    sumStatusLbl.TextColor3=D.GreenBright
+                end
+                task.delay(2, function() pcall(RefreshPity) end)
+            else
+                if sumStatusLbl then
+                    sumStatusLbl.Text="❌  "..tostring(err):sub(1,60)
+                    sumStatusLbl.TextColor3=D.Red
+                end
+                warn("[Summon] UnitsGacha Fehler: "..tostring(err))
+            end
 
-            -- Debounce nach 2.5s freigeben
+            BypassClickScreen()
             task.wait(2.5)
-            summonBusy = false
-            sumStatusLbl.Text      = "Bereit."
-            sumStatusLbl.TextColor3 = D.TextMid
+            sumBusy=false
+            if sumStatusLbl then sumStatusLbl.Text="Bereit."; sumStatusLbl.TextColor3=D.TextMid end
         end)
     end
 
-    -- ── Mengen-Auswahl-Buttons ─────────────────────────────────
-    SecLbl(sumCard, "MENGE")
-    local amtRow = Instance.new("Frame", sumCard)
-    amtRow.Size = UDim2.new(1, 0, 0, 32)
-    amtRow.BackgroundTransparency = 1
-    HList(amtRow, 6)
+    -- Mengen-Auswahl
+    SecLbl(sumCard,"MENGE")
+    local amtRow = Instance.new("Frame",sumCard)
+    amtRow.Size=UDim2.new(1,0,0,32); amtRow.BackgroundTransparency=1; HList(amtRow,6)
 
-    local amtBtns = {}
-    local AMT_COLS = { ["1x"] = D.CyanDim, ["10x"] = D.Purple, ["50x"] = D.Gold }
-
+    local AMT_COLS={["1x"]=D.CyanDim,["10x"]=D.Purple,["50x"]=D.Gold}
     local function RefreshAmtUI()
-        for amtStr, btn in pairs(amtBtns) do
-            local col = AMT_COLS[amtStr] or D.Accent
-            if amtStr == selectedAmount then
-                btn.BackgroundColor3    = col
-                btn.BackgroundTransparency = 0.15
-                btn.TextColor3          = D.TextHi
-                Stroke(btn, col, 2, 0)
+        for a,btn in pairs(amtBtns) do
+            local col=AMT_COLS[a] or D.Accent
+            if a==selAmount then
+                btn.BackgroundColor3=col; btn.BackgroundTransparency=0.15
+                btn.TextColor3=D.TextHi; Stroke(btn,col,2,0)
             else
-                btn.BackgroundColor3    = D.CardHover
-                btn.BackgroundTransparency = D.GlassPane
-                btn.TextColor3          = col
-                Stroke(btn, col, 1, 0.45)
+                btn.BackgroundColor3=D.CardHover; btn.BackgroundTransparency=D.GlassPane
+                btn.TextColor3=col; Stroke(btn,col,1,0.45)
             end
         end
     end
 
-    for _, amt in ipairs(AMOUNTS) do
-        local col = AMT_COLS[amt] or D.Accent
-        local btn = Instance.new("TextButton", amtRow)
-        btn.Size   = UDim2.new(0.32, -3, 0, 32)
-        btn.BackgroundColor3    = D.CardHover
-        btn.BackgroundTransparency = D.GlassPane
-        btn.Text   = amt
-        btn.TextColor3 = col
-        btn.TextSize   = 13
-        btn.Font       = Enum.Font.GothamBold
-        btn.AutoButtonColor  = false
-        btn.BorderSizePixel  = 0
-        btn.TextScaled  = false
-        btn.RichText    = true
-        btn.TextStrokeTransparency = 1
-        Corner(btn, 8)
-        Stroke(btn, col, 1, 0.45)
-
-        local capAmt = amt
-        btn.MouseButton1Click:Connect(function()
-            selectedAmount = capAmt
-            RefreshAmtUI()
-            UpdateSumInfo()
-        end)
-        btn.MouseEnter:Connect(function()
-            if selectedAmount ~= capAmt then
-                Tw(btn, { BackgroundTransparency = 0.08 })
-            end
-        end)
-        btn.MouseLeave:Connect(function()
-            if selectedAmount ~= capAmt then
-                Tw(btn, { BackgroundTransparency = D.GlassPane })
-            end
-        end)
-
-        amtBtns[amt] = btn
+    for _,amt in ipairs(AMOUNTS) do
+        local col=AMT_COLS[amt] or D.Accent
+        local btn=Instance.new("TextButton",amtRow)
+        btn.Size=UDim2.new(0.32,-3,0,32)
+        btn.BackgroundColor3=D.CardHover; btn.BackgroundTransparency=D.GlassPane
+        btn.Text=amt; btn.TextColor3=col; btn.TextSize=13; btn.Font=Enum.Font.GothamBold
+        btn.AutoButtonColor=false; btn.BorderSizePixel=0
+        btn.TextScaled=false; btn.RichText=true; btn.TextStrokeTransparency=1
+        Corner(btn,8); Stroke(btn,col,1,0.45)
+        local ca=amt
+        btn.MouseButton1Click:Connect(function() selAmount=ca; RefreshAmtUI(); UpdateSumInfo() end)
+        btn.MouseEnter:Connect(function() if selAmount~=ca then Tw(btn,{BackgroundTransparency=0.08}) end end)
+        btn.MouseLeave:Connect(function() if selAmount~=ca then Tw(btn,{BackgroundTransparency=D.GlassPane}) end end)
+        amtBtns[amt]=btn
     end
     RefreshAmtUI()
 
-    -- ── Summon-Button ──────────────────────────────────────────
-    local sumBtn = NeonBtn(sumCard, "✨  SUMMON", D.Purple, 38)
-    sumBtn.MouseButton1Click:Connect(function()
-        DoSummon(selectedAmount)
-    end)
+    -- Summon-Button
+    local sumBtn = NeonBtn(sumCard,"✨  SUMMON",D.Purple,38)
+    sumBtn.MouseButton1Click:Connect(function() DoSummon(selAmount) end)
 
-    -- ────────────────────────────────────────────────────────
-    --  SEKTION E: AUTO-SUMMON LOOP
-    -- ────────────────────────────────────────────────────────
-    local autoCard = Card(Page)
-    Pad(autoCard, 10, 12, 10, 12); VList(autoCard, 8)
-    SecLbl(autoCard, "🔁  AUTO-SUMMON  (Loop)")
+    -- ── E. AUTO-SUMMON ────────────────────────────────────────
+    local autoCard = Card(Page); Pad(autoCard,10,12,10,12); VList(autoCard,8)
+    SecLbl(autoCard,"🔁  AUTO-SUMMON")
 
     -- Pause-Eingabe
-    local pauseRow = Instance.new("Frame", autoCard)
-    pauseRow.Size = UDim2.new(1, 0, 0, 30)
-    pauseRow.BackgroundTransparency = 1
-    HList(pauseRow, 6)
-
-    local pauseLbl = MkLbl(pauseRow, "Pause zwischen Summons (s):", 10, D.TextLow)
-    pauseLbl.Size = UDim2.new(0.7, 0, 1, 0)
-
-    local pauseOuter, pauseBox = MkInput(pauseRow, "3", 30)
-    pauseOuter.Size = UDim2.new(0.29, 0, 0, 30)
-    pauseBox.Text   = "3"
-    pauseBox:GetPropertyChangedSignal("Text"):Connect(function()
-        autoSummonDelay = math.max(1, math.floor(tonumber(pauseBox.Text) or 3))
+    local delRow = Instance.new("Frame",autoCard)
+    delRow.Size=UDim2.new(1,0,0,30); delRow.BackgroundTransparency=1; HList(delRow,6)
+    MkLbl(delRow,"Pause (s):",10,D.TextLow).Size=UDim2.new(0.55,0,1,0)
+    local delOut,delBox = MkInput(delRow,"3",30)
+    delOut.Size=UDim2.new(0.44,0,0,30); delBox.Text="3"
+    delBox:GetPropertyChangedSignal("Text"):Connect(function()
+        autoDelay=math.max(1,math.floor(tonumber(delBox.Text) or 3))
     end)
 
     -- Status-Zeile
-    local autoTopRow = Instance.new("Frame", autoCard)
-    autoTopRow.Size = UDim2.new(1, 0, 0, 22)
-    autoTopRow.BackgroundTransparency = 1
-    HList(autoTopRow, 8)
+    local aTopRow = Instance.new("Frame",autoCard)
+    aTopRow.Size=UDim2.new(1,0,0,22); aTopRow.BackgroundTransparency=1; HList(aTopRow,8)
+    autoDot = Instance.new("Frame",aTopRow)
+    autoDot.Size=UDim2.new(0,10,0,10); autoDot.BackgroundColor3=D.TextLow; autoDot.BorderSizePixel=0; Corner(autoDot,99)
+    autoStatusLbl = Instance.new("TextLabel",aTopRow)
+    autoStatusLbl.Size=UDim2.new(1,-18,1,0); autoStatusLbl.BackgroundTransparency=1
+    autoStatusLbl.Text="Auto-Summon  —  Inaktiv"; autoStatusLbl.TextColor3=D.TextLow
+    autoStatusLbl.TextSize=12; autoStatusLbl.Font=Enum.Font.GothamBold
+    autoStatusLbl.TextXAlignment=Enum.TextXAlignment.Left
+    autoStatusLbl.TextScaled=false; autoStatusLbl.RichText=true; autoStatusLbl.TextStrokeTransparency=1
 
-    local autoDot = Instance.new("Frame", autoTopRow)
-    autoDot.Size   = UDim2.new(0, 10, 0, 10)
-    autoDot.BackgroundColor3 = D.TextLow
-    autoDot.BorderSizePixel  = 0
-    Corner(autoDot, 99)
-
-    local autoStatusLbl = Instance.new("TextLabel", autoTopRow)
-    autoStatusLbl.Size = UDim2.new(1, -18, 1, 0)
-    autoStatusLbl.BackgroundTransparency = 1
-    autoStatusLbl.Text      = "Auto-Summon  —  Inaktiv"
-    autoStatusLbl.TextColor3 = D.TextLow
-    autoStatusLbl.TextSize   = 12
-    autoStatusLbl.Font       = Enum.Font.GothamBold
-    autoStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
-    autoStatusLbl.TextScaled = false
-    autoStatusLbl.RichText   = true
-    autoStatusLbl.TextStrokeTransparency = 1
-
-    -- Toggle-Button
-    local autoToggle = NeonBtn(autoCard, "▶  Auto-Summon AN", D.Purple, 34)
-
-    local function UpdateAutoUI()
-        if autoSummonOn then
-            autoDot.BackgroundColor3  = D.Green
-            autoStatusLbl.Text        = "Auto-Summon  —  Aktiv"
-            autoStatusLbl.TextColor3  = D.Green
-            autoToggle.Text           = "⏹  Auto-Summon AUS"
-            autoToggle.TextColor3     = D.Red
-            Stroke(autoToggle, D.Red, 1, 0.35)
+    autoToggleBtn = NeonBtn(autoCard,"▶  Auto-Summon AN",D.Purple,34)
+    autoToggleBtn.MouseButton1Click:Connect(function()
+        autoOn=not autoOn
+        if autoOn then
+            autoDot.BackgroundColor3=D.Green; autoStatusLbl.Text="Auto-Summon  —  Aktiv"; autoStatusLbl.TextColor3=D.Green
+            autoToggleBtn.Text="⏹  Auto-Summon AUS"; autoToggleBtn.TextColor3=D.Red; Stroke(autoToggleBtn,D.Red,1,0.35)
         else
-            autoDot.BackgroundColor3  = D.TextLow
-            autoStatusLbl.Text        = "Auto-Summon  —  Inaktiv"
-            autoStatusLbl.TextColor3  = D.TextLow
-            autoToggle.Text           = "▶  Auto-Summon AN"
-            autoToggle.TextColor3     = D.Purple
-            Stroke(autoToggle, D.Purple, 1, 0.35)
+            autoDot.BackgroundColor3=D.TextLow; autoStatusLbl.Text="Auto-Summon  —  Inaktiv"; autoStatusLbl.TextColor3=D.TextLow
+            autoToggleBtn.Text="▶  Auto-Summon AN"; autoToggleBtn.TextColor3=D.Purple; Stroke(autoToggleBtn,D.Purple,1,0.35)
         end
+    end)
+
+    -- Dot-Puls
+    task.spawn(function()
+        while Page and Page.Parent do
+            if autoOn then Tw(autoDot,{BackgroundTransparency=0.65},TM); task.wait(0.9); Tw(autoDot,{BackgroundTransparency=0},TM); task.wait(0.9)
+            else task.wait(0.5) end
+        end
+    end)
+    -- Auto-Summon Loop
+    task.spawn(function()
+        while Page and Page.Parent do
+            if autoOn and not sumBusy then DoSummon(selAmount); task.wait(math.max(1,autoDelay))
+            else task.wait(0.5) end
+        end
+    end)
+
+    -- ── F. INIT-ABSCHLUSS ─────────────────────────────────────
+    -- Lade-Label entfernen, Pity starten, Status-Update
+    loadLbl.Text = "✅  Summon v"..VERSION.." bereit"
+    loadLbl.TextColor3 = D.GreenBright
+
+    UpdateSumInfo()
+    task.spawn(function()
+        task.wait(2)
+        pcall(RefreshPity)
+        while Page and Page.Parent do task.wait(10); pcall(RefreshPity) end
+    end)
+
+    -- ModulStatus im Header auf "Bereit" setzen
+    if type(_G.HazeShared.SetSummonLoaded) == "function" then
+        pcall(_G.HazeShared.SetSummonLoaded, VERSION)
     end
 
-    autoToggle.MouseButton1Click:Connect(function()
-        autoSummonOn = not autoSummonOn
-        UpdateAutoUI()
-    end)
+    -- In globale Summon-Tabelle schreiben
+    if _G.HazeHUB and _G.HazeHUB.Modules then
+        _G.HazeHUB.Modules["Summon"] = {
+            Version = VERSION,
+            RefreshPity = RefreshPity,
+        }
+    end
 
-    -- Dot-Puls-Animation
-    task.spawn(function()
-        while Page and Page.Parent do
-            if autoSummonOn then
-                Tw(autoDot, { BackgroundTransparency = 0.65 }, TM)
-                task.wait(0.9)
-                Tw(autoDot, { BackgroundTransparency = 0 }, TM)
-                task.wait(0.9)
-            else
-                task.wait(0.5)
-            end
-        end
-    end)
-
-    -- Auto-Summon Haupt-Loop
-    task.spawn(function()
-        while Page and Page.Parent do
-            if autoSummonOn and not summonBusy then
-                DoSummon(selectedAmount)
-                task.wait(math.max(1, autoSummonDelay))
-            else
-                task.wait(0.5)
-            end
-        end
-    end)
-
-    -- ────────────────────────────────────────────────────────
-    --  INIT: Pity beim Start laden + alle 10s refreshen
-    -- ────────────────────────────────────────────────────────
-    task.spawn(function()
-        task.wait(2)        -- Warte bis RS vollständig initialisiert
-        pcall(RefreshPity)
-        while Page and Page.Parent do
-            task.wait(10)
-            pcall(RefreshPity)
-        end
-    end)
-
-    -- Initiale Info-Labels
-    UpdateSumInfo()
-
-    print(string.format("[Summon] v3.0.0 geladen – Spieler: %s", LP.Name))
+    print("[Summon] v"..VERSION.." UI bereit | "..LP.Name)
 end) -- end task.defer
+
+-- ════════════════════════════════════════════════════════════
+--  10. Return Table  (MUSS vorhanden sein – verhindert nil-call)
+-- ════════════════════════════════════════════════════════════
+local ModuleTable = {
+    Version = VERSION,
+
+    -- Init wird von LoadModule aufgerufen (falls Return-Tabelle)
+    Init = function()
+        print("[Summon] Init() aufgerufen – v" .. VERSION)
+    end,
+
+    -- Aktualisiert alle Pity-Balken von außen
+    Refresh = function()
+        for _,pp in ipairs(SOL_PITY) do
+            local ref=pityRefs[pp.key]; if not ref then continue end
+            pcall(function()
+                local val=ReadPity(pp.key)
+                local pct=math.max(0,math.min(1,val/math.max(1,ref.max)))
+                ref.lbl.Text=tostring(val).." / "..tostring(ref.max)
+                if _G.HazeShared and _G.HazeShared.Tw then
+                    _G.HazeShared.Tw(ref.fill,{Size=UDim2.new(pct,0,1,0)})
+                end
+            end)
+        end
+        pcall(function()
+            local ref=pityRefs["Pity"]; if not ref then return end
+            local val=ReadPity("Pity")
+            local pct=math.max(0,math.min(1,val/math.max(1,ref.max)))
+            ref.lbl.Text=tostring(val).." / "..tostring(ref.max)
+            if _G.HazeShared and _G.HazeShared.Tw then
+                _G.HazeShared.Tw(ref.fill,{Size=UDim2.new(pct,0,1,0)})
+            end
+        end)
+    end,
+}
+
+-- Guard setzen damit Doppel-Load die gleiche Tabelle zurückgibt
+_G._SummonModuleLoaded = ModuleTable
+
+-- In HazeHUB.Modules eintragen (synchron, noch vor Init-Aufruf)
+if _G.HazeHUB then
+    if not _G.HazeHUB.Modules then _G.HazeHUB.Modules = {} end
+    _G.HazeHUB.Modules["Summon"] = ModuleTable
+end
+
+return ModuleTable
