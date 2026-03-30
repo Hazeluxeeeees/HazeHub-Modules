@@ -113,7 +113,6 @@ local Haze = {
         CRAFT_URL     = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/craft",
         TRAIT_URL     = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/trait",
         TEAMS_URL     = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/teams",
-        SUMMON_URL    = "https://raw.githubusercontent.com/Hazeluxeeeees/HazeHub-Modules/refs/heads/main/summon",
     },
 }
 
@@ -158,7 +157,6 @@ _G.GlobalSession = GlobalSession
 
 -- === GLOBALE HAZEHUB TABELLE (SYNCHRONISATION) ===
 _G.HazeHUB = {}
-_G.HazeHUB.Modules = {}   -- Modul-Ergebnis-Tabellen landen hier
 _G.HazeHUB_Loaded = false
 _G.HazeHUB_Ready = false
 
@@ -1429,6 +1427,33 @@ local function SaveConfig()
     for _,g in ipairs(S.Goals) do table.insert(H.Config.SavedGoals,{item=g.item,amount=g.amount}) end
     if writefile then pcall(function() writefile(GetAutoSaveFilePath(), Svc.Http:JSONEncode(H.Config)) end) end
 end
+-- ── AutoBuy Persistenz (pro UserId) ──────────────────────────
+local _autoBuyFile = K.FOLDER .. "/" .. tostring(LP.UserId) .. "_autobuy.json"
+_G._AutoBuyList = _G._AutoBuyList or {}
+
+local function SaveAutoBuy()
+    if not writefile then return end
+    local list = {}
+    for name,_ in pairs(_G._AutoBuyList) do table.insert(list, name) end
+    pcall(function() writefile(_autoBuyFile, Svc.Http:JSONEncode({ items = list, ts = os.time() })) end)
+end
+local function LoadAutoBuy()
+    if not (isfile and isfile(_autoBuyFile)) then return end
+    local ok, data = pcall(function() return Svc.Http:JSONDecode(readfile(_autoBuyFile)) end)
+    if not ok or not data or not data.items then return end
+    for _, name in ipairs(data.items) do
+        if type(name) == "string" and name ~= "" then
+            _G._AutoBuyList[name] = true
+        end
+    end
+    print(string.format("[HazeHUB] AutoBuy geladen: %d Items (UserId: %d)", #data.items, LP.UserId))
+end
+-- Beim Start laden
+pcall(LoadAutoBuy)
+-- Für Shop-Modul zugänglich machen
+_G.HazeShared = _G.HazeShared or {}
+_G.HazeShared.SaveAutoBuy = SaveAutoBuy
+_G.HazeShared.LoadAutoBuy = LoadAutoBuy
 local function LoadConfig()
     local savePath = GetAutoSaveFilePath()
     if not (isfile and isfile(savePath)) then return end
@@ -1975,6 +2000,173 @@ ScreenGui.AncestryChanged:Connect(function()
     if not ScreenGui.Parent and HazeHubBlur and HazeHubBlur.Parent then pcall(function() HazeHubBlur:Destroy() end) end
 end)
 
+-- ╔══════════════════════════════════════════════════════════╗
+--  SPLASH / LOADING SCREEN  (10s Pflicht-Delay)
+-- ╚══════════════════════════════════════════════════════════╝
+local SPLASH_DURATION = 10   -- Sekunden
+
+local SplashGui = Instance.new("ScreenGui")
+SplashGui.Name            = "HazHub_Splash"
+SplashGui.ResetOnSpawn    = false
+SplashGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
+SplashGui.DisplayOrder    = 1001  -- über allem
+SplashGui.IgnoreGuiInset  = true
+SplashGui.Parent          = guiParent
+
+-- Hintergrund (voll-opaque Schwarz)
+local splashBg = Instance.new("Frame", SplashGui)
+splashBg.Size                   = UDim2.new(1,0,1,0)
+splashBg.BackgroundColor3       = Color3.fromRGB(8,8,10)
+splashBg.BackgroundTransparency = 0
+splashBg.BorderSizePixel        = 0
+
+-- Zentrierung
+local splashCenter = Instance.new("Frame", splashBg)
+splashCenter.AnchorPoint        = Vector2.new(0.5,0.5)
+splashCenter.Position           = UDim2.new(0.5,0,0.5,0)
+splashCenter.Size               = UDim2.new(0,320,0,220)
+splashCenter.BackgroundColor3   = Color3.fromRGB(15,15,18)
+splashCenter.BackgroundTransparency = 0.1
+splashCenter.BorderSizePixel    = 0
+Corner(splashCenter, 14)
+Stroke(splashCenter, D.Border, 1.5, 0.35)
+
+local splashList = Instance.new("UIListLayout", splashCenter)
+splashList.FillDirection        = Enum.FillDirection.Vertical
+splashList.HorizontalAlignment  = Enum.HorizontalAlignment.Center
+splashList.VerticalAlignment    = Enum.VerticalAlignment.Center
+splashList.Padding              = UDim.new(0,10)
+
+-- Logo-Bereich
+local splashLogoFrame = Instance.new("Frame", splashCenter)
+splashLogoFrame.Size            = UDim2.new(1,0,0,72)
+splashLogoFrame.BackgroundTransparency = 1
+splashLogoFrame.LayoutOrder     = 1
+local splashLogoImg = Instance.new("ImageLabel", splashLogoFrame)
+splashLogoImg.AnchorPoint       = Vector2.new(0.5,0.5)
+splashLogoImg.Position          = UDim2.new(0.5,0,0.5,0)
+splashLogoImg.Size              = UDim2.new(0,56,0,56)
+splashLogoImg.BackgroundTransparency = 1
+splashLogoImg.Image             = HAZE_ASSETS.LogoRbx
+splashLogoImg.ScaleType         = Enum.ScaleType.Fit
+
+-- Titel
+local splashTitle = Instance.new("TextLabel", splashCenter)
+splashTitle.Size                = UDim2.new(1,0,0,28)
+splashTitle.BackgroundTransparency = 1
+splashTitle.Text                = "HazeHUB"
+splashTitle.TextColor3          = D.TextHi
+splashTitle.TextSize            = 22
+splashTitle.Font                = Enum.Font.GothamBold
+splashTitle.TextXAlignment      = Enum.TextXAlignment.Center
+splashTitle.TextScaled          = false
+splashTitle.RichText            = true
+splashTitle.TextStrokeTransparency = 1
+splashTitle.LayoutOrder         = 2
+
+-- Status-Label
+local splashStatus = Instance.new("TextLabel", splashCenter)
+splashStatus.Size               = UDim2.new(1,0,0,18)
+splashStatus.BackgroundTransparency = 1
+splashStatus.Text               = "Initialisiere..."
+splashStatus.TextColor3         = D.TextLow
+splashStatus.TextSize           = 11
+splashStatus.Font               = Enum.Font.GothamMedium
+splashStatus.TextXAlignment     = Enum.TextXAlignment.Center
+splashStatus.TextScaled         = false
+splashStatus.RichText           = true
+splashStatus.TextStrokeTransparency = 1
+splashStatus.LayoutOrder        = 3
+
+-- Progress-Bar Hintergrund
+local splashBarOuter = Instance.new("Frame", splashCenter)
+splashBarOuter.Size             = UDim2.new(0.82,0,0,10)
+splashBarOuter.BackgroundColor3 = Color3.fromRGB(22,22,26)
+splashBarOuter.BackgroundTransparency = 0
+splashBarOuter.BorderSizePixel  = 0
+splashBarOuter.LayoutOrder      = 4
+Corner(splashBarOuter, 5)
+Stroke(splashBarOuter, D.Border, 1, 0.45)
+
+-- Progress-Bar Füllung
+local splashBarFill = Instance.new("Frame", splashBarOuter)
+splashBarFill.Size              = UDim2.new(0,0,1,0)
+splashBarFill.BackgroundColor3  = D.GreenBright
+splashBarFill.BackgroundTransparency = 0
+splashBarFill.BorderSizePixel   = 0
+Corner(splashBarFill, 5)
+local splashGrad = Instance.new("UIGradient", splashBarFill)
+splashGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, D.Green),
+    ColorSequenceKeypoint.new(1, D.GreenBright),
+})
+
+-- Versions-Label
+local splashVer = Instance.new("TextLabel", splashCenter)
+splashVer.Size                  = UDim2.new(1,0,0,14)
+splashVer.BackgroundTransparency = 1
+splashVer.Text                  = "v22.0  •  " .. LP.Name
+splashVer.TextColor3            = D.TextLow
+splashVer.TextSize              = 9
+splashVer.Font                  = Enum.Font.GothamMedium
+splashVer.TextXAlignment        = Enum.TextXAlignment.Center
+splashVer.TextScaled            = false
+splashVer.RichText              = true
+splashVer.TextStrokeTransparency = 1
+splashVer.LayoutOrder           = 5
+
+-- Splash-Phasen
+local SPLASH_STEPS = {
+    { pct=0.08,  label="Initialisiere HazeHUB..."      },
+    { pct=0.20,  label="Prüfe PlaceID..."               },
+    { pct=0.35,  label="Lade Spielerdaten..."           },
+    { pct=0.50,  label="Verbinde Remotes..."            },
+    { pct=0.65,  label="Lade Module..."                 },
+    { pct=0.78,  label="Baue UI..."                     },
+    { pct=0.90,  label="Starte AutoBuy & Session..."    },
+    { pct=1.00,  label="Fertig  ✓"                      },
+}
+
+-- MainFrame zunächst unsichtbar (Splash übernimmt Kontrolle)
+-- (MainFrame wird erst nach Splash sichtbar geschaltet)
+local _splashDone = false
+local function RunSplash(onComplete)
+    task.spawn(function()
+        local stepCount = #SPLASH_STEPS
+        local timePerStep = SPLASH_DURATION / stepCount
+
+        for _, step in ipairs(SPLASH_STEPS) do
+            splashStatus.Text = step.label
+            -- Balken animieren
+            Tw(splashBarFill, { Size = UDim2.new(step.pct, 0, 1, 0) }, TweenInfo.new(timePerStep * 0.85, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+            task.wait(timePerStep)
+        end
+
+        -- 100% Pause
+        task.wait(0.3)
+
+        -- Fade-Out des Splash via TweenService
+        local fadeTI = TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        Svc.Tween:Create(splashBg, fadeTI, { BackgroundTransparency = 1 }):Play()
+        Svc.Tween:Create(splashCenter, fadeTI, { BackgroundTransparency = 1 }):Play()
+        -- Alle Kinder im Center ausblenden
+        for _, child in ipairs(splashCenter:GetDescendants()) do
+            if child:IsA("TextLabel") or child:IsA("TextButton") or child:IsA("ImageLabel") then
+                pcall(function() Svc.Tween:Create(child, fadeTI, { TextTransparency = 1, ImageTransparency = 1 }):Play() end)
+            elseif child:IsA("Frame") then
+                pcall(function() Svc.Tween:Create(child, fadeTI, { BackgroundTransparency = 1 }):Play() end)
+            end
+        end
+        task.wait(0.65)
+
+        -- Splash entfernen
+        pcall(function() SplashGui:Destroy() end)
+        _splashDone = true
+
+        if onComplete then pcall(onComplete) end
+    end)
+end
+
 H.UI.Fr.Main=Instance.new("Frame",ScreenGui)
 H.UI.Fr.Main.Name="MainFrame"
 local MainFrame=H.UI.Fr.Main
@@ -1991,6 +2183,8 @@ MainFrame.BackgroundTransparency=0.18
 MainFrame.BorderSizePixel=0
 Corner(MainFrame,12)
 Stroke(MainFrame,D.Border,1.5,0.45)
+-- ★ Splash: MainFrame zunächst unsichtbar; Splash schaltet es frei
+MainFrame.Visible = false
 
 local MainUIScale = Instance.new("UIScale", MainFrame)
 MainUIScale.Name = "MainUIScale"
@@ -2236,7 +2430,6 @@ local CraftPage = MakeTab("Crafting","⚒")
 local TraitRoot, TraitSticky, TraitPage = MakeTraitsTab("Traits", "✦")
 local TeamsPage = MakeTab("Teams","⚔")
 local InvPage   = MakeTab("Inventory","▣")
-local SummonPage = MakeTab("Summon","🎲")
 local MiscPage  = MakeTab("Misc","◇")
 local SettPage  = MakeTab("Settings","⛭")
 
@@ -2247,7 +2440,6 @@ _G.HazeShared.TraitPage     = TraitPage
 _G.HazeShared.TraitSticky   = TraitSticky
 _G.HazeShared.TraitPageRoot = TraitRoot
 _G.HazeShared.TeamsPage     = TeamsPage
-_G.HazeShared.SummonPage    = SummonPage  -- ← für summon.lua
 
 -- ── Touch / Mobile Layout Sync (Tabs + Trait-Modul) ───────────
 local function UpdateLayoutForMobile()
@@ -3332,8 +3524,6 @@ _G.HazeShared.StopFarm=nil; _G.HazeShared.StartFarmFromMain=nil; _G.HazeShared.T
 _G.HazeShared.ShopContainer = ShopPage
 _G.HazeShared.CraftPage     = CraftPage
 _G.HazeShared.TraitPage     = TraitPage
-_G.HazeShared.TeamsPage     = TeamsPage
-_G.HazeShared.SummonPage    = SummonPage  -- ← final assignment (nach vollst. HazeShared-Init)
 
 _G.HazeShared.OnDBReady=function(chapCount,msg)
     pcall(function() S.DBReady=true end) -- Database confirmation removed - status now in header end)
@@ -3351,16 +3541,6 @@ _G.HazeShared.SetModuleLoaded=function(version)
         end
     end)
 end
--- Wird vom Summon-Modul aufgerufen wenn es erfolgreich geladen hat
-_G.HazeShared.SetSummonLoaded = function(version)
-    pcall(function()
-        if H.UI.Lbl.ModulStatus then
-            H.UI.Lbl.ModulStatus.Text = string.format("🟢  HazeHUB bereit  [Summon v%s]", tostring(version or "?"))
-            H.UI.Lbl.ModulStatus.TextColor3 = D.GreenBright
-        end
-        print("[HazeHUB] Summon-Modul bereit – v" .. tostring(version or "?"))
-    end)
-end
 
 -- ── Startup ───────────────────────────────────────────────────
 LoadConfig(); LoadSettings()
@@ -3370,20 +3550,72 @@ if not H.Config.WebhookURL  then H.Config.WebhookURL = ""     end
 if not H.Config.UISize      then H.Config.UISize     = "PC"   end
 if H.Config.AutoFarm==nil   then H.Config.AutoFarm   = false  end
 if H.Config.GuiVisible==nil then H.Config.GuiVisible = true   end
-S.GuiVisible=H.Config.GuiVisible==true
-MainFrame.Visible=S.GuiVisible
-pcall(function() if HazeHubBlur and HazeHubBlur.Parent then HazeHubBlur.Enabled=S.GuiVisible end end)
-if _earlyAutoFarm then H.Config.AutoFarm=true end
-if _G._SetKeyDisplay        then _G._SetKeyDisplay(H.Config.ToggleKey) end
-if _G and _G._UpdateAutoRetryUI    then _G._UpdateAutoRetryUI() end
--- Auto-Mobile-Detection: TouchEnabled uebersteigt gespeicherte UISize-Einstellung
+S.GuiVisible = H.Config.GuiVisible == true
+-- ★ MainFrame wird ERST nach Splash sichtbar (daher kein direktes Setzen hier)
+pcall(function() if HazeHubBlur and HazeHubBlur.Parent then HazeHubBlur.Enabled = true end end)
+if _earlyAutoFarm then H.Config.AutoFarm = true end
+if _G._SetKeyDisplay then _G._SetKeyDisplay(H.Config.ToggleKey) end
+if _G and _G._UpdateAutoRetryUI then _G._UpdateAutoRetryUI() end
 local _startupMode = H.Config.UISize
 if Svc.Input.TouchEnabled then _startupMode = "Mobile" end
 SetGUISize(_startupMode)
-if H.UI.Inp.Webhook then H.UI.Inp.Webhook.Text=H.Config.WebhookURL end
+if H.UI.Inp.Webhook then H.UI.Inp.Webhook.Text = H.Config.WebhookURL end
 SelectTab("Game")
 if UpdateSessionUI then pcall(UpdateSessionUI) end
 if UpdateGoalsUI   then pcall(UpdateGoalsUI)   end
+
+-- ══ SPLASH STARTEN (Main-GUI wird im Callback sichtbar) ══════
+RunSplash(function()
+    -- Nach Splash: MainFrame sichtbar schalten (nach config-GuiVisible)
+    MainFrame.Visible = S.GuiVisible
+    pcall(function() if HazeHubBlur then HazeHubBlur.Enabled = S.GuiVisible end end)
+    print("[HazeHUB] Splash abgeschlossen – Main-GUI aktiv")
+end)
+
+-- ══ PlaceID / Game-State Logik (15-Min Auto-Restart) ═════════
+-- Im Hintergrund laufen lassen, blockiert nichts
+task.spawn(function()
+    -- Warte bis Splash durch und HazeHUB_Ready
+    repeat task.wait(0.5) until _G.HazeHUB_Ready == true
+
+    local function IsInGame()
+        -- In Runde = PlaceId ≠ Lobby-ID
+        return game.PlaceId ~= K.LOBBY_ID
+    end
+
+    -- Nur starten wenn tatsächlich in einer Runde
+    repeat task.wait(2) until IsInGame()
+
+    local RESTART_INTERVAL = 15 * 60   -- 15 Minuten
+    local restartAt = os.time() + RESTART_INTERVAL
+
+    print("[HazeHUB] In Runde erkannt (PlaceId: " .. tostring(game.PlaceId) .. ") – 15-Min Restart aktiv")
+
+    -- Live-Countdown aktualisieren (falls UI-Label vorhanden)
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            if not IsInGame() then break end
+            local remain = math.max(0, restartAt - os.time())
+            local m, s   = math.floor(remain / 60), remain % 60
+            local txt     = string.format("Nächster Restart in: %02d:%02d", m, s)
+            -- In Session-Tab anzeigen falls Label existiert
+            pcall(function()
+                if H.UI.Lbl.ARCountdown then
+                    H.UI.Lbl.ARCountdown.Text = txt
+                end
+            end)
+            if remain == 0 then
+                -- Restart: Teleport auf dieselbe PlaceId
+                print("[HazeHUB] 15-Min Restart: Teleportiere...")
+                pcall(function()
+                    game:GetService("ReplicatedStorage").Remote.Server.OnGame.RestartMatch:FireServer()
+                end)
+                restartAt = os.time() + RESTART_INTERVAL
+            end
+        end
+    end)
+end)
 
 -- ★ Startup: nur Cache laden, KEIN auto-rescan
 task.spawn(function()
@@ -3442,116 +3674,123 @@ end)
 local function LoadModule(url,name,delay,onErr)
     task.spawn(function()
         task.wait(delay or 1)
+        
+        -- Warte bis das Hauptskript vollständig geladen ist
         repeat task.wait(0.5) until _G.HazeHUB_Ready == true
-
-        if not _G.HazeHubFunctions then _G.HazeHubFunctions = {} end
-
-        local fallbackFunctions = {
-            ToggleAntiAFK = _G.HazeHUB.ToggleAntiAFK or function() end,
-            StartRaid = _G.HazeHUB.StartRaid or function() end,
-            StopRaid = _G.HazeHUB.StopRaid or function() end,
-            SetGoalFromInventory = _G.HazeHUB.SetGoalFromInventory or function() end,
-            SetKeyDisplay = _G.HazeHUB.SetKeyDisplay or function() end,
-            UpdateAutoRetryUI = _G.HazeHUB.UpdateAutoRetryUI or function() end,
-            UpdateGoalsUI = _G.HazeHUB.UpdateGoalsUI or function() end,
-            UpdateSessionUI = _G.HazeHUB.UpdateSessionUI or function() end,
-            RebuildWorldList = _G.HazeHUB.RebuildWorldList or function() end,
-            LoadWorldCache = _G.HazeHUB.LoadWorldCache or function() end,
-            SaveWorldData = _G.HazeHUB.SaveWorldData or function() end,
-            SendWebhook = _G.HazeHUB.SendWebhook or function() end,
-            AccumulateRewards = _G.HazeHUB.AccumulateRewards or function() end,
-            RefreshPlayerStats = _G.HazeHUB.RefreshPlayerStats or function() end,
-            SelectTab = _G.HazeHUB.SelectTab or function() end,
-            OnMiniBtnClick = _G.HazeHUB.OnMiniBtnClick or function() end,
-            ToggleHubGui = _G.HazeHUB.ToggleHubGui or function() end,
-            BuildItemPreview = _G.HazeHUB.BuildItemPreview or function() end,
-            LoadItemViewport = _G.HazeHUB.LoadItemViewport or function() end,
-            GetItemTextureId = _G.HazeHUB.GetItemTextureId or function() end,
-            ApplySharpTypography = _G.HazeHUB.ApplySharpTypography or function() end,
-            FireCreateAndStart = _G.HazeHUB.FireCreateAndStart or function() end,
-            FireVoteRetry = _G.HazeHUB.FireVoteRetry or function() end,
-            TeleportToLobby = _G.HazeHUB.TeleportToLobby or function() end,
-            IsInLobby = _G.HazeHUB.IsInLobby or function() end,
-            SaveConfig = _G.HazeHUB.SaveConfig or function() end,
-            LoadConfig = _G.HazeHUB.LoadConfig or function() end,
-            SaveSettings = _G.HazeHUB.SaveSettings or function() end,
-            LoadSettings = _G.HazeHUB.LoadSettings or function() end,
-            GetSettingsFilePath = _G.HazeHUB.GetSettingsFilePath or function() end,
-            GetAutoSaveFilePath = _G.HazeHUB.GetAutoSaveFilePath or function() end,
-            GetInvAmt = _G.HazeHUB.GetInvAmt or function() end,
-            FmtDur = _G.HazeHUB.FmtDur or function() end,
-            FmtNum = _G.HazeHUB.FmtNum or function() end,
-            formatTime = _G.HazeHUB.formatTime or function() end,
-            Tw = _G.HazeHUB.Tw or function() end,
-            Corner = _G.HazeHUB.Corner or function() end,
-            Stroke = _G.HazeHUB.Stroke or function() end,
-            Pad = _G.HazeHUB.Pad or function() end,
-            VList = _G.HazeHUB.VList or function() end,
-            HList = _G.HazeHUB.HList or function() end,
-            MkLbl = _G.HazeHUB.MkLbl or function() end,
-            SecLbl = _G.HazeHUB.SecLbl or function() end,
-            MkInput = _G.HazeHUB.MkInput or function() end,
-            Card = _G.HazeHUB.Card or function() end,
-            NeonBtn = _G.HazeHUB.NeonBtn or function() end,
-            StartAutofarm = _G.HazeHUB.StartAutofarm or function() end,
-            StopAutofarm = _G.HazeHUB.StopAutofarm or function() end,
-            UpdateStatus = _G.HazeHUB.UpdateStatus or function() end,
-        }
-        for fn, fi in pairs(fallbackFunctions) do
-            if not _G.HazeHubFunctions[fn] then _G.HazeHubFunctions[fn] = fi end
+        
+        -- Stelle sicher, dass alle globalen Funktionen und Variablen verfügbar sind
+        if not _G.HazeHubFunctions then
+            _G.HazeHubFunctions = {}
         end
-
-        if not _G.HazeShared then _G.HazeShared = {} end
-        if not _G.HazeShared.SetModuleLoaded then _G.HazeShared.SetModuleLoaded = function() end end
-        if not _G.HazeShared.OnDBReady then _G.HazeShared.OnDBReady = function() end end
+        
+        -- Fülle ALLE möglichen Funktionen mit _G.HazeHUB Referenzen auf
+        local fallbackFunctions = {
+            ToggleAntiAFK = _G.HazeHUB.ToggleAntiAFK or function() warn("[HazeHUB] ToggleAntiAFK nicht implementiert") end,
+            StartRaid = _G.HazeHUB.StartRaid or function() warn("[HazeHUB] StartRaid nicht implementiert") end,
+            StopRaid = _G.HazeHUB.StopRaid or function() warn("[HazeHUB] StopRaid nicht implementiert") end,
+            SetGoalFromInventory = _G.HazeHUB.SetGoalFromInventory or function() warn("[HazeHUB] SetGoalFromInventory nicht implementiert") end,
+            SetKeyDisplay = _G.HazeHUB.SetKeyDisplay or function() warn("[HazeHUB] SetKeyDisplay nicht implementiert") end,
+            UpdateAutoRetryUI = _G.HazeHUB.UpdateAutoRetryUI or function() warn("[HazeHUB] UpdateAutoRetryUI nicht implementiert") end,
+            UpdateGoalsUI = _G.HazeHUB.UpdateGoalsUI or function() warn("[HazeHUB] UpdateGoalsUI nicht implementiert") end,
+            UpdateSessionUI = _G.HazeHUB.UpdateSessionUI or function() warn("[HazeHUB] UpdateSessionUI nicht implementiert") end,
+            RebuildWorldList = _G.HazeHUB.RebuildWorldList or function() warn("[HazeHUB] RebuildWorldList nicht implementiert") end,
+            LoadWorldCache = _G.HazeHUB.LoadWorldCache or function() warn("[HazeHUB] LoadWorldCache nicht implementiert") end,
+            SaveWorldData = _G.HazeHUB.SaveWorldData or function() warn("[HazeHUB] SaveWorldData nicht implementiert") end,
+            SendWebhook = _G.HazeHUB.SendWebhook or function() warn("[HazeHUB] SendWebhook nicht implementiert") end,
+            AccumulateRewards = _G.HazeHUB.AccumulateRewards or function() warn("[HazeHUB] AccumulateRewards nicht implementiert") end,
+            RefreshPlayerStats = _G.HazeHUB.RefreshPlayerStats or function() warn("[HazeHUB] RefreshPlayerStats nicht implementiert") end,
+            SelectTab = _G.HazeHUB.SelectTab or function() warn("[HazeHUB] SelectTab nicht implementiert") end,
+            OnMiniBtnClick = _G.HazeHUB.OnMiniBtnClick or function() warn("[HazeHUB] OnMiniBtnClick nicht implementiert") end,
+            ToggleHubGui = _G.HazeHUB.ToggleHubGui or function() warn("[HazeHUB] ToggleHubGui nicht implementiert") end,
+            BuildItemPreview = _G.HazeHUB.BuildItemPreview or function() warn("[HazeHUB] BuildItemPreview nicht implementiert") end,
+            LoadItemViewport = _G.HazeHUB.LoadItemViewport or function() warn("[HazeHUB] LoadItemViewport nicht implementiert") end,
+            GetItemTextureId = _G.HazeHUB.GetItemTextureId or function() warn("[HazeHUB] GetItemTextureId nicht implementiert") end,
+            ApplySharpTypography = _G.HazeHUB.ApplySharpTypography or function() warn("[HazeHUB] ApplySharpTypography nicht implementiert") end,
+            FireCreateAndStart = _G.HazeHUB.FireCreateAndStart or function() warn("[HazeHUB] FireCreateAndStart nicht implementiert") end,
+            FireVoteRetry = _G.HazeHUB.FireVoteRetry or function() warn("[HazeHUB] FireVoteRetry nicht implementiert") end,
+            TeleportToLobby = _G.HazeHUB.TeleportToLobby or function() warn("[HazeHUB] TeleportToLobby nicht implementiert") end,
+            IsInLobby = _G.HazeHUB.IsInLobby or function() warn("[HazeHUB] IsInLobby nicht implementiert") end,
+            SaveConfig = _G.HazeHUB.SaveConfig or function() warn("[HazeHUB] SaveConfig nicht implementiert") end,
+            LoadConfig = _G.HazeHUB.LoadConfig or function() warn("[HazeHUB] LoadConfig nicht implementiert") end,
+            SaveSettings = _G.HazeHUB.SaveSettings or function() warn("[HazeHUB] SaveSettings nicht implementiert") end,
+            LoadSettings = _G.HazeHUB.LoadSettings or function() warn("[HazeHUB] LoadSettings nicht implementiert") end,
+            GetSettingsFilePath = _G.HazeHUB.GetSettingsFilePath or function() warn("[HazeHUB] GetSettingsFilePath nicht implementiert") end,
+            GetAutoSaveFilePath = _G.HazeHUB.GetAutoSaveFilePath or function() warn("[HazeHUB] GetAutoSaveFilePath nicht implementiert") end,
+            GetInvAmt = _G.HazeHUB.GetInvAmt or function() warn("[HazeHUB] GetInvAmt nicht implementiert") end,
+            FmtDur = _G.HazeHUB.FmtDur or function() warn("[HazeHUB] FmtDur nicht implementiert") end,
+            FmtNum = _G.HazeHUB.FmtNum or function() warn("[HazeHUB] FmtNum nicht implementiert") end,
+            formatTime = _G.HazeHUB.formatTime or function() warn("[HazeHUB] formatTime nicht implementiert") end,
+            Tw = _G.HazeHUB.Tw or function() warn("[HazeHUB] Tw nicht implementiert") end,
+            Corner = _G.HazeHUB.Corner or function() warn("[HazeHUB] Corner nicht implementiert") end,
+            Stroke = _G.HazeHUB.Stroke or function() warn("[HazeHUB] Stroke nicht implementiert") end,
+            Pad = _G.HazeHUB.Pad or function() warn("[HazeHUB] Pad nicht implementiert") end,
+            VList = _G.HazeHUB.VList or function() warn("[HazeHUB] VList nicht implementiert") end,
+            HList = _G.HazeHUB.HList or function() warn("[HazeHUB] HList nicht implementiert") end,
+            MkLbl = _G.HazeHUB.MkLbl or function() warn("[HazeHUB] MkLbl nicht implementiert") end,
+            SecLbl = _G.HazeHUB.SecLbl or function() warn("[HazeHUB] SecLbl nicht implementiert") end,
+            MkInput = _G.HazeHUB.MkInput or function() warn("[HazeHUB] MkInput nicht implementiert") end,
+            Card = _G.HazeHUB.Card or function() warn("[HazeHUB] Card nicht implementiert") end,
+            NeonBtn = _G.HazeHUB.NeonBtn or function() warn("[HazeHUB] NeonBtn nicht implementiert") end,
+            StartAutofarm = _G.HazeHUB.StartAutofarm or function() warn("[HazeHUB] StartAutofarm nicht implementiert") end,
+            StopAutofarm = _G.HazeHUB.StopAutofarm or function() warn("[HazeHUB] StopAutofarm nicht implementiert") end,
+            UpdateStatus = _G.HazeHUB.UpdateStatus or function() warn("[HazeHUB] UpdateStatus nicht implementiert") end
+        }
+        
+        -- Registriere alle Fallback-Funktionen
+        for funcName, funcImpl in pairs(fallbackFunctions) do
+            if not _G.HazeHubFunctions[funcName] then
+                _G.HazeHubFunctions[funcName] = funcImpl
+            end
+        end
+        
+        -- Stelle sicher, dass _G.HazeShared auch verfügbar ist
+        if not _G.HazeShared then
+            _G.HazeShared = {}
+        end
+        
+        -- Fülle kritische _G.HazeShared Funktionen
+        if not _G.HazeShared.SetModuleLoaded then
+            _G.HazeShared.SetModuleLoaded = function(version) 
+                warn("[HazeHUB] SetModuleLoaded nicht implementiert") 
+            end
+        end
+        
+        if not _G.HazeShared.OnDBReady then
+            _G.HazeShared.OnDBReady = function() 
+                warn("[HazeHUB] OnDBReady nicht implementiert") 
+            end
+        end
+        
+        -- Stelle sicher, dass globale UI-Referenzen existieren
         if not H then H = {} end
         if not H.UI then H.UI = {} end
         if not H.Config then H.Config = {} end
         if not S then S = {} end
-        if not _G.HazeHUB.Modules then _G.HazeHUB.Modules = {} end
-
-        -- ── HTTP laden ──────────────────────────────────────────
-        local httpOk, raw = pcall(function() return game:HttpGet(url) end)
-        if not httpOk or not raw or #raw < 20 then
-            warn("[HazeHUB] " .. name .. ": HttpGet fehlgeschlagen – " .. tostring(raw))
-            if onErr then pcall(onErr, "HttpGet fehlgeschlagen") end
-            return
+        
+        local httpOk,raw=pcall(function() return game:HttpGet(url) end)
+        if not httpOk or not raw or #raw<20 then
+            warn("[HazeHUB] "..name..": HttpGet fehlgeschlagen")
+            if onErr then pcall(onErr,"HttpGet fehlgeschlagen") end; return
         end
-
-        -- ── Kompilieren (loadstring) ─────────────────────────────
-        -- WICHTIG: loadstring gibt (nil, errMsg) zurück bei Syntaxfehlern.
-        -- Den nil-Check VOR dem Aufruf machen, sonst: "attempt to call a nil value".
-        local compiledFn, compileErr = loadstring(raw)
-        if not compiledFn then
-            local msg = "Kompilierungsfehler: " .. tostring(compileErr)
-            warn("[HazeHUB] " .. name .. " – " .. msg)
-            if onErr then pcall(onErr, msg:sub(1,80)) end
-            return
-        end
-
-        -- ── Ausführen ────────────────────────────────────────────
-        local runOk, runResult = pcall(compiledFn)
-        if not runOk then
-            local msg = "Ausführungsfehler: " .. tostring(runResult)
-            warn("[HazeHUB] " .. name .. " – " .. msg)
-            if onErr then pcall(onErr, msg:sub(1,80)) end
-            return
-        end
-
-        -- ── Ergebnis in Modules-Tabelle speichern ───────────────
-        -- Module die eine Return-Tabelle liefern → _G.HazeHUB.Modules[name]
-        if type(runResult) == "table" then
-            _G.HazeHUB.Modules[name] = runResult
-            -- Init-Funktion aufrufen wenn vorhanden
-            if type(runResult.Init) == "function" then
-                local initOk, initErr = pcall(runResult.Init)
-                if not initOk then
-                    warn("[HazeHUB] " .. name .. ".Init() Fehler: " .. tostring(initErr):sub(1,80))
-                end
+        
+        -- Fange loadstring Fehler ab und gib detaillierte Informationen
+        local execOk,execErr=pcall(function() 
+            -- Erstelle eine sichere Umgebung für das Modul
+            local success, modResult = pcall(function() 
+                return loadstring(raw)() 
+            end)
+            if not success then
+                error("Modul-Ausführungsfehler: " .. tostring(modResult))
             end
+            return modResult
+        end)
+        
+        if not execOk then
+            warn("[HazeHUB] "..name.." Fehler: "..tostring(execErr):sub(1,120))
+            if onErr then pcall(onErr,tostring(execErr):sub(1,60)) end
+        else 
+            print("[HazeHUB] Modul '"..name.."' geladen.") 
         end
-
-        print("[HazeHUB] Modul '" .. name .. "' erfolgreich geladen.")
     end)
 end
 
@@ -3578,77 +3817,6 @@ LoadModule(K.TEAMS_URL, "Teams", 5, function(err)
             _G._TeamsWaitLbl.TextColor3 = D.Red
         end
     end)
-end)
-
--- Summon-Modul mit Retry-Mechanismus (bis zu 3 Versuche)
-task.spawn(function()
-    local maxTries = 3
-    for attempt = 1, maxTries do
-        task.wait(6 + (attempt - 1) * 5)  -- 6s, 11s, 16s
-        repeat task.wait(0.5) until _G.HazeHUB_Ready == true
-
-        -- Prüfe ob Modul bereits erfolgreich geladen wurde
-        if _G.HazeHUB.Modules and _G.HazeHUB.Modules["Summon"] then break end
-
-        print(string.format("[HazeHUB] Summon-Modul Ladeversuch %d/%d...", attempt, maxTries))
-
-        local httpOk, raw = pcall(function() return game:HttpGet(K.SUMMON_URL) end)
-        if not httpOk or not raw or #raw < 20 then
-            warn("[HazeHUB] Summon HttpGet Versuch " .. attempt .. " fehlgeschlagen")
-            if attempt == maxTries then
-                pcall(function()
-                    if _G._SummonWaitLbl then
-                        _G._SummonWaitLbl.Text = "❌ Summon: Netzwerk-Fehler nach " .. maxTries .. " Versuchen"
-                        _G._SummonWaitLbl.TextColor3 = D.Red
-                    end
-                end)
-            end
-            continue
-        end
-
-        -- loadstring nil-Check (Kern-Fix für "attempt to call a nil value")
-        local compiledFn, compileErr = loadstring(raw)
-        if not compiledFn then
-            warn("[HazeHUB] Summon Kompilierungsfehler: " .. tostring(compileErr))
-            pcall(function()
-                if _G._SummonWaitLbl then
-                    _G._SummonWaitLbl.Text = "❌ Syntax-Fehler im Summon-Modul"
-                    _G._SummonWaitLbl.TextColor3 = D.Red
-                end
-            end)
-            break  -- Syntaxfehler: Retry bringt nichts
-        end
-
-        -- Ausführen
-        local runOk, runResult = pcall(compiledFn)
-        if not runOk then
-            warn("[HazeHUB] Summon Ausführungsfehler: " .. tostring(runResult):sub(1,120))
-            if attempt < maxTries then
-                pcall(function()
-                    if _G._SummonWaitLbl then
-                        _G._SummonWaitLbl.Text = string.format("⏳ Summon: Versuch %d fehlgeschlagen, retry...", attempt)
-                        _G._SummonWaitLbl.TextColor3 = D.Yellow
-                    end
-                end)
-                continue
-            end
-            pcall(function()
-                if _G._SummonWaitLbl then
-                    _G._SummonWaitLbl.Text = "❌ Summon konnte nicht geladen werden"
-                    _G._SummonWaitLbl.TextColor3 = D.Red
-                end
-            end)
-        else
-            -- Erfolg
-            if type(runResult) == "table" then
-                if not _G.HazeHUB.Modules then _G.HazeHUB.Modules = {} end
-                _G.HazeHUB.Modules["Summon"] = runResult
-                if type(runResult.Init) == "function" then pcall(runResult.Init) end
-            end
-            print("[HazeHUB] Summon-Modul erfolgreich geladen (Versuch " .. attempt .. ")")
-            break
-        end
-    end
 end)
 
 -- === WORLDCACHE BEIM START LADEN ===
