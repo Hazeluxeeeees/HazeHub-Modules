@@ -176,12 +176,15 @@ local RemoteCache = {}
 --   Remote.Server.Gameplay.Merchant / Calamity_Shop / JJK_RaidShop
 --   Diese Funktion bypasst den Remote-Cache für maximale Zuverlässigkeit.
 local function FireDirect(remoteName, ...)
+    -- ★ Varargs müssen VOR dem anonymen pcall-Closure in eine Tabelle gepackt werden,
+    --   da Lua '...' nicht aus dem äußeren Scope in eine innere function() überträgt.
+    local args = { ... }
     local ok, err = pcall(function()
         RS:WaitForChild("Remote",5)
           :WaitForChild("Server",5)
           :WaitForChild("Gameplay",5)
           :WaitForChild(remoteName,5)
-          :FireServer(...)
+          :FireServer(table.unpack(args))
     end)
     if ok then
         print(string.format("[HazeHub-Shops] ✅ Gameplay.%s:FireServer()", remoteName))
@@ -216,12 +219,15 @@ local function GetRemote(name)
 end
 
 local function FireRemote(remoteName, ...)
+    local args = {...}
     local r = GetRemote(remoteName)
     if r then
-        local args = {...}
         pcall(function() r:FireServer(table.unpack(args)) end)
+        -- args bereits gepackt → table.concat direkt nutzbar
+        local argStrs = {}
+        for _, v in ipairs(args) do table.insert(argStrs, tostring(v)) end
         print(string.format("[HazeHub-Shops] %s:FireServer(%s)",
-            remoteName, table.concat(table.pack(...),", ")))
+            remoteName, table.concat(argStrs, ", ")))
     else
         warn("[HazeHub-Shops] Remote nicht gefunden: " .. tostring(remoteName))
     end
