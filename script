@@ -62,7 +62,7 @@ local _earlyAutoFarm = false
 if _G.HazHubLoaded then return end
 _G.HazHubLoaded = true
 
--- ★ Initialer Stabilitäts-Wait (5s für langsame Executoren / Race-Conditions)
+-- ★ Initialer Stabilitäts-Wait (10s für langsame Executoren / Race-Conditions)
 task.wait(10)
 
 -- ★ Account-spezifische Dynamik (für Multi-Account korrekt)
