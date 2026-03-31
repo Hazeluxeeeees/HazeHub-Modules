@@ -1,23 +1,23 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – trait.lua  v2.8.0
+--  HazeHUB – trait.lua  v2.9.0
 --
---  v2.8.0 (Fixes & Verbesserungen gegenüber v2.7.0):
---    ✓ FIX #1 – StatValues Priority Table: C-=1 … O+=17
---      (ersetzt STAT_RANK_VALUE, einheitlicher Name)
---    ✓ FIX #2 – Stop-Bedingung: StatValues[current] >= StatValues[target]
---      → S+ stoppt auch wenn Ziel S war (>= statt ==)
---      → Multi-Stat: ALLE aktiven Stats müssen >= Ziel sein (AND)
---      → Mindest-Ziel: niedrigstes aktives Ziel ist die Stop-Basis
---    ✓ FIX #3 – Anti-Skip: task.wait(0.15) + Double-Check VOR
---      UND NACH Remote-Call; GUI-Text wird re-validiert
---    ✓ FIX #4 – UI-Cleanup: Trait-Name ist der Button (kein Doppel-Text),
---      Stat-Anzeige kompakter (alle 5 Stats ohne Scrollen sichtbar)
---    ✓ FIX #5 – Stat-Anzeige als Erkennungsquelle: ReadStatFromLabel()
---      liest den aktuellen Stat-Wert aus dem GUI-Label (double-check),
---      damit der Loop den neu gerollten Wert sicher sieht
+--  v2.9.0 Fixes & Verbesserungen:
+--    ✓ FIX #1 – GRADE_LIST als geordnete Array-Tabelle
+--      GradeIndex(grade) → Index 1–17, sicherer als Map-Lookup
+--      RankAtLeast: GradeIndex(current) >= GradeIndex(target)
+--    ✓ FIX #2 – GetPotentialObject: robustere Pfad-Suche
+--      (Direct → Stats → Potentials → Data → Deep)
+--    ✓ FIX #3 – Loop-Timing: min 0.35s post-roll Wait
+--      statt 0.15s; verhindert False-Negative durch Latenz
+--    ✓ FIX #4 – Dual-Layout Reroll-Center:
+--      LINKS  = Trait-Ziel-Auswahl (kompakt, scrollbar)
+--      RECHTS = Stat-Ziel-Grades + Info-Bar
+--      Info-Bar: Stats Key / Perfect Stats Key + Live Stats
+--    ✓ FIX #5 – Stat-Anzeige direkt im Reroll-Center
+--      (kein separates Scrollen nötig)
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "2.8.0"
+local VERSION = "2.9.0"
 
 -- ── Warten bis HazeShared bereit ──────────────────────────────
 local _w = 0
@@ -68,98 +68,89 @@ if DivineTraitData then for k, v in pairs(DivineTraitData) do AllTraits[k] = v e
 -- ── Remotes ───────────────────────────────────────────────────
 local RerollRemote, TraitAckRemote = nil, nil
 pcall(function()
-    RerollRemote = RS:WaitForChild("Remote", 10)
-                     :WaitForChild("Server", 10)
-                     :WaitForChild("Gambling", 10)
-                     :WaitForChild("RerollTrait", 10)
+    RerollRemote = RS:WaitForChild("Remote",10):WaitForChild("Server",10)
+                     :WaitForChild("Gambling",10):WaitForChild("RerollTrait",10)
 end)
 pcall(function()
-    TraitAckRemote = RS:WaitForChild("Remote", 10)
-                       :WaitForChild("Client", 10)
-                       :WaitForChild("TraitAck", 10)
+    TraitAckRemote = RS:WaitForChild("Remote",10):WaitForChild("Client",10)
+                       :WaitForChild("TraitAck",10)
 end)
 
 -- ── Rarity-Farben ─────────────────────────────────────────────
 local RARITY_COLORS = {
-    Common    = Color3.fromRGB(180, 180, 180),
-    Uncommon  = Color3.fromRGB(50,  200,  80),
-    Rare      = Color3.fromRGB(50,  120, 255),
-    Epic      = Color3.fromRGB(160,  60, 240),
-    Legendary = Color3.fromRGB(255, 180,   0),
-    Mythic    = Color3.fromRGB(255,  50,  50),
-    Divine    = Color3.fromRGB(0,   220, 255),
+    Common    = Color3.fromRGB(180,180,180), Uncommon  = Color3.fromRGB(50,200,80),
+    Rare      = Color3.fromRGB(50,120,255),  Epic      = Color3.fromRGB(160,60,240),
+    Legendary = Color3.fromRGB(255,180,0),   Mythic    = Color3.fromRGB(255,50,50),
+    Divine    = Color3.fromRGB(0,220,255),
 }
-
-local RARITY_ORDER = {
-    Divine = 0, Mythic = 1, Legendary = 2, Epic = 3, Rare = 4, Uncommon = 5, Common = 6
-}
-
+local RARITY_ORDER = { Divine=0, Mythic=1, Legendary=2, Epic=3, Rare=4, Uncommon=5, Common=6 }
 local function GetRarityColor(rarity)
     return RARITY_COLORS[rarity] or D.TextMid
 end
 
 -- ╔══════════════════════════════════════════════════════════╗
---  FIX #1 – StatValues Priority Table
---  Einzige Wahrheitsquelle für Stat-Vergleiche im gesamten Modul.
---  Ersetzte das alte STAT_RANK_VALUE vollständig.
+--  FIX #1 – GRADE_LIST: geordnete Array-Tabelle
+--  GradeIndex(grade) liefert den Index (1–17).
+--  RankAtLeast nutzt Index-Vergleich: robuster als Map-Lookup.
 -- ╚══════════════════════════════════════════════════════════╝
-local StatValues = {
-    ["C-"]  = 1,  ["C"]   = 2,  ["C+"]  = 3,
-    ["B-"]  = 4,  ["B"]   = 5,  ["B+"]  = 6,
-    ["A-"]  = 7,  ["A"]   = 8,  ["A+"]  = 9,
-    ["S-"]  = 10, ["S"]   = 11, ["S+"]  = 12,
-    ["SS"]  = 13, ["SSS"] = 14,
-    ["O-"]  = 15, ["O"]   = 16, ["O+"]  = 17,
+local GRADE_LIST = {
+    "C-","C","C+",
+    "B-","B","B+",
+    "A-","A","A+",
+    "S-","S","S+",
+    "SS","SSS",
+    "O-","O","O+",
 }
+-- Schnelle Umkehrtabelle für O(1)-Lookup
+local GRADE_INDEX = {}
+for i, g in ipairs(GRADE_LIST) do GRADE_INDEX[g] = i end
 
--- Alias für Rückwärtskompatibilität (falls irgendwo intern referenziert)
-local STAT_RANK_VALUE = StatValues
+-- Einheitliche StatValues-Tabelle (Alias für Rückwärtskompatibilität)
+local StatValues = GRADE_INDEX
+local STAT_RANK_VALUE = GRADE_INDEX
 
-local ALL_RATINGS = {
-    "C-", "C", "C+",
-    "B-", "B", "B+",
-    "A-", "A", "A+",
-    "S-", "S", "S+",
-    "SS", "SSS",
-    "O-", "O", "O+",
-}
+local ALL_RATINGS = GRADE_LIST
 
--- ── Normalisierung eines Roh-Werts zu einem Ratings-String ────
+-- GradeIndex: gibt numerischen Index zurück (0 wenn unbekannt)
+local function GradeIndex(grade)
+    return GRADE_INDEX[grade] or 0
+end
+
+-- ToRankString: wandelt rohen Wert in Grade-String
 local function ToRankString(v)
-    local s = tostring(v or ""):upper():gsub("%s+", ""):gsub("PLUS", "+")
-    if StatValues[s] then return s end
+    local s = tostring(v or ""):upper():gsub("%s+",""):gsub("PLUS","+")
+    if GRADE_INDEX[s] then return s end
     local n = tonumber(v)
     if n then
-        if n >= 17 then return "O+"  end
-        if n >= 16 then return "O"   end
-        if n >= 15 then return "O-"  end
-        if n >= 14 then return "SSS" end
-        if n >= 13 then return "SS"  end
-        if n >= 12 then return "S+"  end
-        if n >= 11 then return "S"   end
-        if n >= 10 then return "S-"  end
-        if n >= 9  then return "A+"  end
-        if n >= 8  then return "A"   end
-        if n >= 7  then return "A-"  end
-        if n >= 6  then return "B+"  end
-        if n >= 5  then return "B"   end
-        if n >= 4  then return "B-"  end
-        if n >= 3  then return "C+"  end
-        if n >= 2  then return "C"   end
-        return "C-"
+        if     n >= 17 then return "O+"
+        elseif n >= 16 then return "O"
+        elseif n >= 15 then return "O-"
+        elseif n >= 14 then return "SSS"
+        elseif n >= 13 then return "SS"
+        elseif n >= 12 then return "S+"
+        elseif n >= 11 then return "S"
+        elseif n >= 10 then return "S-"
+        elseif n >= 9  then return "A+"
+        elseif n >= 8  then return "A"
+        elseif n >= 7  then return "A-"
+        elseif n >= 6  then return "B+"
+        elseif n >= 5  then return "B"
+        elseif n >= 4  then return "B-"
+        elseif n >= 3  then return "C+"
+        elseif n >= 2  then return "C"
+        else                return "C-"
+        end
     end
     return "C-"
 end
 
--- ╔══════════════════════════════════════════════════════════╗
---  FIX #2 – Stop-Bedingung: >= (größer oder gleich)
---  RankAtLeast(rank, target) → true wenn rank >= target
---  Verwendet StatValues für einen sicheren numerischen Vergleich.
--- ╚══════════════════════════════════════════════════════════╝
+-- FIX #1: RankAtLeast nutzt GradeIndex (Index-Vergleich, nicht Map)
+-- Stoppt wenn current >= target (z. B. S+ stoppt bei Ziel S)
 local function RankAtLeast(rank, target)
-    local rv = StatValues[ToRankString(rank)]   or 1
-    local tv = StatValues[ToRankString(target)] or 1
-    return rv >= tv  -- >= statt ==: S+ stoppt auch wenn Ziel S war
+    local ri = GradeIndex(ToRankString(rank))
+    local ti = GradeIndex(ToRankString(target))
+    -- Beide müssen gültige Grades sein (Index > 0)
+    return ri > 0 and ti > 0 and ri >= ti
 end
 
 -- ── Stat-Namen ────────────────────────────────────────────────
@@ -185,7 +176,7 @@ local STAT_DISPLAY_NAMES = {
     SpeedPotential          = "Speed",
 }
 
--- ── Placeholder-Labels aufräumen ──────────────────────────────
+-- Placeholder-Labels entfernen
 pcall(function()
     for _, v in pairs(TraitPage:GetChildren()) do
         if v:IsA("TextLabel") and (v.Text:find("geladen") or v.Text:find("Trait%-Modul wird")) then
@@ -195,132 +186,95 @@ pcall(function()
 end)
 
 -- ── Header ────────────────────────────────────────────────────
-MkLbl(TraitPage, "✨  Traits", 18, D.Cyan, true)
-MkLbl(TraitPage, "Trait-Modul v" .. VERSION .. " | " .. LP.Name, 14, D.TextLow).Size = UDim2.new(1, 0, 0, 18)
+MkLbl(TraitPage,"✨  Traits",18,D.Cyan,true)
+MkLbl(TraitPage,"Trait-Modul v"..VERSION.." | "..LP.Name,14,D.TextLow).Size=UDim2.new(1,0,0,18)
 
--- Status-Card
-local statusCard = Card(TraitPage, 28); Pad(statusCard, 4, 10, 4, 10)
+local statusCard = Card(TraitPage,28); Pad(statusCard,4,10,4,10)
 local TR = {
-    SelectedUnit         = nil,
-    SelectedUnitName     = nil,
-    SelectedUnitTagValue = nil,
-    Units                = {},
-    Rolling              = false,
-    RollCount            = 0,
-    TargetTraits         = {},
-    StatRolling          = false,
-    StatRollCount        = 0,
-    SelectedStatMode     = "All",
-    StatTargetRatings    = {},
-    UI = { Lbl = {}, Fr = {}, Btn = {}, Inp = {} },
+    SelectedUnit=nil, SelectedUnitName=nil, SelectedUnitTagValue=nil,
+    Units={}, Rolling=false, RollCount=0, TargetTraits={},
+    StatRolling=false, StatRollCount=0, SelectedStatMode="All", StatTargetRatings={},
+    UI={Lbl={},Fr={},Btn={},Inp={}},
 }
-
 if not _G.HazeHUB then _G.HazeHUB = {} end
 _G.HazeHUB.StatLoopActive = false
 
-TR.UI.Lbl.Status = Instance.new("TextLabel", statusCard)
-TR.UI.Lbl.Status.Size                  = UDim2.new(1, 0, 1, 0)
-TR.UI.Lbl.Status.BackgroundTransparency = 1
-TR.UI.Lbl.Status.Text                  = "⏳ Lade Einheiten..."
-TR.UI.Lbl.Status.TextColor3            = D.Yellow
-TR.UI.Lbl.Status.TextSize              = 14
-TR.UI.Lbl.Status.Font                  = Enum.Font.GothamMedium
-TR.UI.Lbl.Status.TextScaled            = false
-TR.UI.Lbl.Status.RichText              = true
-TR.UI.Lbl.Status.TextStrokeTransparency = 1
-TR.UI.Lbl.Status.TextXAlignment        = Enum.TextXAlignment.Left
+TR.UI.Lbl.Status = Instance.new("TextLabel",statusCard)
+TR.UI.Lbl.Status.Size=UDim2.new(1,0,1,0); TR.UI.Lbl.Status.BackgroundTransparency=1
+TR.UI.Lbl.Status.Text="⏳ Lade Einheiten..."; TR.UI.Lbl.Status.TextColor3=D.Yellow
+TR.UI.Lbl.Status.TextSize=14; TR.UI.Lbl.Status.Font=Enum.Font.GothamMedium
+TR.UI.Lbl.Status.TextScaled=false; TR.UI.Lbl.Status.RichText=true
+TR.UI.Lbl.Status.TextStrokeTransparency=1; TR.UI.Lbl.Status.TextXAlignment=Enum.TextXAlignment.Left
 
-local function SetStatus(txt, col)
-    pcall(function() TR.UI.Lbl.Status.Text = txt; TR.UI.Lbl.Status.TextColor3 = col or D.TextMid end)
+local function SetStatus(txt,col)
+    pcall(function() TR.UI.Lbl.Status.Text=txt; TR.UI.Lbl.Status.TextColor3=col or D.TextMid end)
 end
 
 -- ── Sticky-Leiste ─────────────────────────────────────────────
 local stickyParent = TraitSticky or TraitPage
-if not TraitSticky then
-    warn("[HazeHub-Trait] TraitSticky fehlt – Reroll-Leiste im Scrollbereich.")
-end
+local stickyCard = Card(stickyParent,26); Pad(stickyCard,4,10,4,10)
+local rollRow = Instance.new("Frame",stickyCard)
+rollRow.Size=UDim2.new(1,0,0,26); rollRow.BackgroundTransparency=1
 
-local stickyCard = Card(stickyParent, 26); Pad(stickyCard, 4, 10, 4, 10)
-local rollRow = Instance.new("Frame", stickyCard)
-rollRow.Size                  = UDim2.new(1, 0, 0, 26)
-rollRow.BackgroundTransparency = 1
+TR.UI.Lbl.RollCount = Instance.new("TextLabel",rollRow)
+TR.UI.Lbl.RollCount.Size=UDim2.new(0.55,0,1,0); TR.UI.Lbl.RollCount.BackgroundTransparency=1
+TR.UI.Lbl.RollCount.Text="Trait Reroll: –"; TR.UI.Lbl.RollCount.TextColor3=D.Gold
+TR.UI.Lbl.RollCount.TextSize=14; TR.UI.Lbl.RollCount.Font=Enum.Font.GothamBold
+TR.UI.Lbl.RollCount.TextScaled=false; TR.UI.Lbl.RollCount.RichText=true
+TR.UI.Lbl.RollCount.TextStrokeTransparency=1; TR.UI.Lbl.RollCount.TextXAlignment=Enum.TextXAlignment.Left
 
-TR.UI.Lbl.RollCount = Instance.new("TextLabel", rollRow)
-TR.UI.Lbl.RollCount.Size                  = UDim2.new(0.55, 0, 1, 0)
-TR.UI.Lbl.RollCount.BackgroundTransparency = 1
-TR.UI.Lbl.RollCount.Text                  = "Trait Reroll: –"
-TR.UI.Lbl.RollCount.TextColor3            = D.Gold
-TR.UI.Lbl.RollCount.TextSize              = 14
-TR.UI.Lbl.RollCount.Font                  = Enum.Font.GothamBold
-TR.UI.Lbl.RollCount.TextScaled            = false
-TR.UI.Lbl.RollCount.RichText              = true
-TR.UI.Lbl.RollCount.TextStrokeTransparency = 1
-TR.UI.Lbl.RollCount.TextXAlignment        = Enum.TextXAlignment.Left
-
-TR.UI.Lbl.RollRate = Instance.new("TextLabel", rollRow)
-TR.UI.Lbl.RollRate.Position               = UDim2.new(0.55, 0, 0, 0)
-TR.UI.Lbl.RollRate.Size                   = UDim2.new(0.45, 0, 1, 0)
-TR.UI.Lbl.RollRate.BackgroundTransparency = 1
-TR.UI.Lbl.RollRate.Text                   = ""
-TR.UI.Lbl.RollRate.TextColor3             = D.TextLow
-TR.UI.Lbl.RollRate.TextSize               = 14
-TR.UI.Lbl.RollRate.Font                   = Enum.Font.GothamMedium
-TR.UI.Lbl.RollRate.TextScaled             = false
-TR.UI.Lbl.RollRate.RichText               = true
-TR.UI.Lbl.RollRate.TextStrokeTransparency = 1
-TR.UI.Lbl.RollRate.TextXAlignment         = Enum.TextXAlignment.Right
+TR.UI.Lbl.RollRate = Instance.new("TextLabel",rollRow)
+TR.UI.Lbl.RollRate.Position=UDim2.new(0.55,0,0,0); TR.UI.Lbl.RollRate.Size=UDim2.new(0.45,0,1,0)
+TR.UI.Lbl.RollRate.BackgroundTransparency=1; TR.UI.Lbl.RollRate.Text=""
+TR.UI.Lbl.RollRate.TextColor3=D.TextLow; TR.UI.Lbl.RollRate.TextSize=14
+TR.UI.Lbl.RollRate.Font=Enum.Font.GothamMedium; TR.UI.Lbl.RollRate.TextScaled=false
+TR.UI.Lbl.RollRate.RichText=true; TR.UI.Lbl.RollRate.TextStrokeTransparency=1
+TR.UI.Lbl.RollRate.TextXAlignment=Enum.TextXAlignment.Right
 
 local startRerollBtn, stopRerollBtn
 
 -- ╔══════════════════════════════════════════════════════════╗
 --  EINHEITEN-LISTE
 -- ╚══════════════════════════════════════════════════════════╝
-local unitCard = Card(TraitPage); Pad(unitCard, 10, 12, 10, 12); VList(unitCard, 7)
-SecLbl(unitCard, "👤 EINHEIT AUSWÄHLEN")
-local unitSearchOuter, unitSearchBox = MkInput(unitCard, "Einheit suchen...", 28)
-unitSearchOuter.Size = UDim2.new(1, 0, 0, 28)
+local unitCard = Card(TraitPage); Pad(unitCard,10,12,10,12); VList(unitCard,7)
+SecLbl(unitCard,"👤 EINHEIT AUSWÄHLEN")
+local unitSearchOuter, unitSearchBox = MkInput(unitCard,"Einheit suchen...",28)
+unitSearchOuter.Size = UDim2.new(1,0,0,28)
 
-local unitScroll = Instance.new("ScrollingFrame", unitCard)
-unitScroll.Name                 = "UnitGridScroll"
-unitScroll.Size                 = UDim2.new(1, 0, 0, 240)
-unitScroll.BackgroundTransparency = 1
-unitScroll.BorderSizePixel      = 0
-unitScroll.ScrollBarThickness   = 0
-unitScroll.ScrollBarImageColor3 = D.CyanDim
-unitScroll.ScrollingEnabled     = true
-unitScroll.ScrollingDirection   = Enum.ScrollingDirection.Y
-unitScroll.ElasticBehavior      = Enum.ElasticBehavior.Never
-unitScroll.CanvasSize           = UDim2.new(0, 0, 0, 0)
-unitScroll.AutomaticCanvasSize  = Enum.AutomaticSize.None
-unitScroll.ClipsDescendants     = true
+local unitScroll = Instance.new("ScrollingFrame",unitCard)
+unitScroll.Name="UnitGridScroll"; unitScroll.Size=UDim2.new(1,0,0,240)
+unitScroll.BackgroundTransparency=1; unitScroll.BorderSizePixel=0
+unitScroll.ScrollBarThickness=0; unitScroll.ScrollBarImageColor3=D.CyanDim
+unitScroll.ScrollingEnabled=true; unitScroll.ScrollingDirection=Enum.ScrollingDirection.Y
+unitScroll.ElasticBehavior=Enum.ElasticBehavior.Never
+unitScroll.CanvasSize=UDim2.new(0,0,0,0); unitScroll.AutomaticCanvasSize=Enum.AutomaticSize.None
+unitScroll.ClipsDescendants=true
 
-local unitListFrame = Instance.new("Frame", unitScroll)
-unitListFrame.Size                  = UDim2.new(1, 0, 0, 0)
-unitListFrame.BackgroundTransparency = 1
-unitListFrame.AutomaticSize         = Enum.AutomaticSize.Y
+local unitListFrame = Instance.new("Frame",unitScroll)
+unitListFrame.Size=UDim2.new(1,0,0,0); unitListFrame.BackgroundTransparency=1
+unitListFrame.AutomaticSize=Enum.AutomaticSize.Y
 
-local unitGrid = Instance.new("UIGridLayout", unitListFrame)
-unitGrid.CellSize              = UDim2.new(0, 150, 0, 180)
-unitGrid.CellPadding           = UDim2.new(0, 6, 0, 8)
-unitGrid.FillDirection         = Enum.FillDirection.Horizontal
-unitGrid.HorizontalAlignment   = Enum.HorizontalAlignment.Left
-unitGrid.VerticalAlignment     = Enum.VerticalAlignment.Top
-unitGrid.SortOrder             = Enum.SortOrder.LayoutOrder
+local unitGrid = Instance.new("UIGridLayout",unitListFrame)
+unitGrid.CellSize=UDim2.new(0,150,0,180); unitGrid.CellPadding=UDim2.new(0,6,0,8)
+unitGrid.FillDirection=Enum.FillDirection.Horizontal
+unitGrid.HorizontalAlignment=Enum.HorizontalAlignment.Left
+unitGrid.VerticalAlignment=Enum.VerticalAlignment.Top
+unitGrid.SortOrder=Enum.SortOrder.LayoutOrder
 
 local function refreshUnitScrollCanvas()
     local y = unitGrid.AbsoluteContentSize.Y
-    unitListFrame.Size = UDim2.new(1, 0, 0, y)
-    pcall(function() unitScroll.CanvasSize = UDim2.new(0, 0, 0, y + 6) end)
+    unitListFrame.Size=UDim2.new(1,0,0,y)
+    pcall(function() unitScroll.CanvasSize=UDim2.new(0,0,0,y+6) end)
 end
 unitGrid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(refreshUnitScrollCanvas)
 
 local function syncMobileUnitTileCell()
-    local touch = (HS._isTouchClient == true) or UserInputService.TouchEnabled
+    local touch=(HS._isTouchClient==true) or UserInputService.TouchEnabled
     if not touch then return end
-    local w = unitListFrame.AbsoluteSize.X
-    if w <= 0 then return end
-    local inset = 12
-    unitGrid.CellSize = UDim2.new(1, -inset, 0, math.max(96, math.floor(w - inset)))
+    local w=unitListFrame.AbsoluteSize.X
+    if w<=0 then return end
+    local inset=12
+    unitGrid.CellSize=UDim2.new(1,-inset,0,math.max(96,math.floor(w-inset)))
     refreshUnitScrollCanvas()
 end
 unitListFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
@@ -328,204 +282,142 @@ unitListFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
 end)
 
 TR.UI.Fr.UnitList = unitListFrame
+local unitEmptyLbl = MkLbl(unitListFrame,"Keine Einheiten gefunden.",11,D.TextLow)
+unitEmptyLbl.Size=UDim2.new(1,0,0,26); TR.UI.Lbl.UnitEmpty=unitEmptyLbl
 
-local unitEmptyLbl = MkLbl(unitListFrame, "Keine Einheiten gefunden.", 11, D.TextLow)
-unitEmptyLbl.Size = UDim2.new(1, 0, 0, 26)
-TR.UI.Lbl.UnitEmpty = unitEmptyLbl
+-- ── 2-spaltige Zeile: Aktueller Trait + Ziel ──────────────────
+local traitsRow = Instance.new("Frame",TraitPage)
+traitsRow.Size=UDim2.new(1,0,0,0); traitsRow.AutomaticSize=Enum.AutomaticSize.Y
+traitsRow.BackgroundTransparency=1; HList(traitsRow,8)
 
--- ── 2-spaltige Zeile: Aktueller Trait + Ziel-Traits ──────────
-local traitsRow = Instance.new("Frame", TraitPage)
-traitsRow.Size = UDim2.new(1, 0, 0, 0)
-traitsRow.AutomaticSize = Enum.AutomaticSize.Y
-traitsRow.BackgroundTransparency = 1
-HList(traitsRow, 8)
-
--- ── Linke Spalte: Aktueller Trait ─────────────────────────────
+-- Linke Spalte: Aktueller Trait (Live)
 local currentTraitCard = Card(traitsRow)
-currentTraitCard.Size = UDim2.new(0.5, -4, 0, 0)
-currentTraitCard.AutomaticSize = Enum.AutomaticSize.Y
-Pad(currentTraitCard, 10, 12, 10, 12)
-VList(currentTraitCard, 8)
-SecLbl(currentTraitCard, "🔍 AKTUELLER TRAIT (Live)")
+currentTraitCard.Size=UDim2.new(0.5,-4,0,0); currentTraitCard.AutomaticSize=Enum.AutomaticSize.Y
+Pad(currentTraitCard,10,12,10,12); VList(currentTraitCard,8)
+SecLbl(currentTraitCard,"🔍 AKTUELLER TRAIT (Live)")
 
-TR.UI.Lbl.UnitName = MkLbl(currentTraitCard, "Keine Einheit gewählt", 16, D.TextHi, true)
-TR.UI.Lbl.UnitName.Size = UDim2.new(1, 0, 0, 22)
+TR.UI.Lbl.UnitName=MkLbl(currentTraitCard,"Keine Einheit gewählt",16,D.TextHi,true)
+TR.UI.Lbl.UnitName.Size=UDim2.new(1,0,0,22)
 
-local mainRow = Instance.new("Frame", currentTraitCard)
-mainRow.Size                  = UDim2.new(1, 0, 0, 48)
-mainRow.BackgroundColor3      = D.Input
-mainRow.BackgroundTransparency = D.GlassPane or 0.18
-mainRow.BorderSizePixel       = 0
-Corner(mainRow, 8); Stroke(mainRow, D.Gold, 1, 0.4)
+local mainRow=Instance.new("Frame",currentTraitCard)
+mainRow.Size=UDim2.new(1,0,0,48); mainRow.BackgroundColor3=D.Input
+mainRow.BackgroundTransparency=D.GlassPane or 0.18; mainRow.BorderSizePixel=0
+Corner(mainRow,8); Stroke(mainRow,D.Gold,1,0.4)
+Instance.new("Frame",mainRow).Size=UDim2.new(0,3,1,0); mainRow:FindFirstChildOfClass("Frame").BackgroundColor3=D.Gold; mainRow:FindFirstChildOfClass("Frame").BorderSizePixel=0; Corner(mainRow:FindFirstChildOfClass("Frame"),2)
+local mMainLabel=Instance.new("TextLabel",mainRow); mMainLabel.Position=UDim2.new(0,10,0,3); mMainLabel.Size=UDim2.new(0.35,0,0,16); mMainLabel.BackgroundTransparency=1; mMainLabel.Text="MAIN TRAIT"; mMainLabel.TextColor3=D.Gold; mMainLabel.TextSize=12; mMainLabel.Font=Enum.Font.GothamBold; mMainLabel.TextXAlignment=Enum.TextXAlignment.Left
+TR.UI.Lbl.MainTrait=Instance.new("TextLabel",mainRow); TR.UI.Lbl.MainTrait.Position=UDim2.new(0,10,0,20); TR.UI.Lbl.MainTrait.Size=UDim2.new(1,-14,0,22); TR.UI.Lbl.MainTrait.BackgroundTransparency=1; TR.UI.Lbl.MainTrait.Text="–"; TR.UI.Lbl.MainTrait.TextColor3=D.TextHi; TR.UI.Lbl.MainTrait.TextSize=16; TR.UI.Lbl.MainTrait.Font=Enum.Font.GothamBold; TR.UI.Lbl.MainTrait.TextXAlignment=Enum.TextXAlignment.Left
+TR.UI.Lbl.MainRarity=Instance.new("TextLabel",mainRow); TR.UI.Lbl.MainRarity.Position=UDim2.new(0.6,0,0,3); TR.UI.Lbl.MainRarity.Size=UDim2.new(0.39,-4,0,16); TR.UI.Lbl.MainRarity.BackgroundTransparency=1; TR.UI.Lbl.MainRarity.Text=""; TR.UI.Lbl.MainRarity.TextColor3=D.Gold; TR.UI.Lbl.MainRarity.TextSize=12; TR.UI.Lbl.MainRarity.Font=Enum.Font.GothamMedium; TR.UI.Lbl.MainRarity.TextXAlignment=Enum.TextXAlignment.Right
 
-local mainBarLine = Instance.new("Frame", mainRow)
-mainBarLine.Size             = UDim2.new(0, 3, 1, 0)
-mainBarLine.BackgroundColor3 = D.Gold
-mainBarLine.BorderSizePixel  = 0
-Corner(mainBarLine, 2)
+local subRow=Instance.new("Frame",currentTraitCard)
+subRow.Size=UDim2.new(1,0,0,48); subRow.BackgroundColor3=D.Input
+subRow.BackgroundTransparency=(D.GlassPane or 0.18)+0.04; subRow.BorderSizePixel=0
+Corner(subRow,8); Stroke(subRow,D.Purple,1,0.4)
+Instance.new("Frame",subRow).Size=UDim2.new(0,3,1,0); subRow:FindFirstChildOfClass("Frame").BackgroundColor3=D.Purple; subRow:FindFirstChildOfClass("Frame").BorderSizePixel=0; Corner(subRow:FindFirstChildOfClass("Frame"),2)
+local mSubLabel=Instance.new("TextLabel",subRow); mSubLabel.Position=UDim2.new(0,10,0,3); mSubLabel.Size=UDim2.new(0.35,0,0,16); mSubLabel.BackgroundTransparency=1; mSubLabel.Text="SUB TRAIT"; mSubLabel.TextColor3=D.Purple; mSubLabel.TextSize=12; mSubLabel.Font=Enum.Font.GothamBold; mSubLabel.TextXAlignment=Enum.TextXAlignment.Left
+TR.UI.Lbl.SubTrait=Instance.new("TextLabel",subRow); TR.UI.Lbl.SubTrait.Position=UDim2.new(0,10,0,20); TR.UI.Lbl.SubTrait.Size=UDim2.new(1,-14,0,22); TR.UI.Lbl.SubTrait.BackgroundTransparency=1; TR.UI.Lbl.SubTrait.Text="–"; TR.UI.Lbl.SubTrait.TextColor3=D.TextHi; TR.UI.Lbl.SubTrait.TextSize=16; TR.UI.Lbl.SubTrait.Font=Enum.Font.GothamBold; TR.UI.Lbl.SubTrait.TextXAlignment=Enum.TextXAlignment.Left
+TR.UI.Lbl.SubRarity=Instance.new("TextLabel",subRow); TR.UI.Lbl.SubRarity.Position=UDim2.new(0.6,0,0,3); TR.UI.Lbl.SubRarity.Size=UDim2.new(0.39,-4,0,16); TR.UI.Lbl.SubRarity.BackgroundTransparency=1; TR.UI.Lbl.SubRarity.Text=""; TR.UI.Lbl.SubRarity.TextColor3=D.Purple; TR.UI.Lbl.SubRarity.TextSize=12; TR.UI.Lbl.SubRarity.Font=Enum.Font.GothamMedium; TR.UI.Lbl.SubRarity.TextXAlignment=Enum.TextXAlignment.Right
+TR.UI.Lbl.TraitInfo=MkLbl(currentTraitCard,"",14,D.TextLow); TR.UI.Lbl.TraitInfo.Size=UDim2.new(1,0,0,40)
 
-local mainLabelL = Instance.new("TextLabel", mainRow)
-mainLabelL.Position               = UDim2.new(0, 10, 0, 3)
-mainLabelL.Size                   = UDim2.new(0.35, 0, 0, 16)
-mainLabelL.BackgroundTransparency = 1
-mainLabelL.Text                   = "MAIN TRAIT"
-mainLabelL.TextColor3             = D.Gold
-mainLabelL.TextSize               = 12
-mainLabelL.Font                   = Enum.Font.GothamBold
-mainLabelL.TextXAlignment         = Enum.TextXAlignment.Left
-
-TR.UI.Lbl.MainTrait = Instance.new("TextLabel", mainRow)
-TR.UI.Lbl.MainTrait.Position               = UDim2.new(0, 10, 0, 20)
-TR.UI.Lbl.MainTrait.Size                   = UDim2.new(1, -14, 0, 22)
-TR.UI.Lbl.MainTrait.BackgroundTransparency = 1
-TR.UI.Lbl.MainTrait.Text                   = "–"
-TR.UI.Lbl.MainTrait.TextColor3             = D.TextHi
-TR.UI.Lbl.MainTrait.TextSize               = 16
-TR.UI.Lbl.MainTrait.Font                   = Enum.Font.GothamBold
-TR.UI.Lbl.MainTrait.TextXAlignment         = Enum.TextXAlignment.Left
-
-TR.UI.Lbl.MainRarity = Instance.new("TextLabel", mainRow)
-TR.UI.Lbl.MainRarity.Position               = UDim2.new(0.6, 0, 0, 3)
-TR.UI.Lbl.MainRarity.Size                   = UDim2.new(0.39, -4, 0, 16)
-TR.UI.Lbl.MainRarity.BackgroundTransparency = 1
-TR.UI.Lbl.MainRarity.Text                   = ""
-TR.UI.Lbl.MainRarity.TextColor3             = D.Gold
-TR.UI.Lbl.MainRarity.TextSize               = 12
-TR.UI.Lbl.MainRarity.Font                   = Enum.Font.GothamMedium
-TR.UI.Lbl.MainRarity.TextXAlignment         = Enum.TextXAlignment.Right
-
-local subRow = Instance.new("Frame", currentTraitCard)
-subRow.Size                  = UDim2.new(1, 0, 0, 48)
-subRow.BackgroundColor3      = D.Input
-subRow.BackgroundTransparency = (D.GlassPane or 0.18) + 0.04
-subRow.BorderSizePixel       = 0
-Corner(subRow, 8); Stroke(subRow, D.Purple, 1, 0.4)
-
-local subBarLine = Instance.new("Frame", subRow)
-subBarLine.Size             = UDim2.new(0, 3, 1, 0)
-subBarLine.BackgroundColor3 = D.Purple
-subBarLine.BorderSizePixel  = 0
-Corner(subBarLine, 2)
-
-local subLabelL = Instance.new("TextLabel", subRow)
-subLabelL.Position               = UDim2.new(0, 10, 0, 3)
-subLabelL.Size                   = UDim2.new(0.35, 0, 0, 16)
-subLabelL.BackgroundTransparency = 1
-subLabelL.Text                   = "SUB TRAIT"
-subLabelL.TextColor3             = D.Purple
-subLabelL.TextSize               = 12
-subLabelL.Font                   = Enum.Font.GothamBold
-subLabelL.TextXAlignment         = Enum.TextXAlignment.Left
-
-TR.UI.Lbl.SubTrait = Instance.new("TextLabel", subRow)
-TR.UI.Lbl.SubTrait.Position               = UDim2.new(0, 10, 0, 20)
-TR.UI.Lbl.SubTrait.Size                   = UDim2.new(1, -14, 0, 22)
-TR.UI.Lbl.SubTrait.BackgroundTransparency = 1
-TR.UI.Lbl.SubTrait.Text                   = "–"
-TR.UI.Lbl.SubTrait.TextColor3             = D.TextHi
-TR.UI.Lbl.SubTrait.TextSize               = 16
-TR.UI.Lbl.SubTrait.Font                   = Enum.Font.GothamBold
-TR.UI.Lbl.SubTrait.TextXAlignment         = Enum.TextXAlignment.Left
-
-TR.UI.Lbl.SubRarity = Instance.new("TextLabel", subRow)
-TR.UI.Lbl.SubRarity.Position               = UDim2.new(0.6, 0, 0, 3)
-TR.UI.Lbl.SubRarity.Size                   = UDim2.new(0.39, -4, 0, 16)
-TR.UI.Lbl.SubRarity.BackgroundTransparency = 1
-TR.UI.Lbl.SubRarity.Text                   = ""
-TR.UI.Lbl.SubRarity.TextColor3             = D.Purple
-TR.UI.Lbl.SubRarity.TextSize               = 12
-TR.UI.Lbl.SubRarity.Font                   = Enum.Font.GothamMedium
-TR.UI.Lbl.SubRarity.TextXAlignment         = Enum.TextXAlignment.Right
-
-TR.UI.Lbl.TraitInfo = MkLbl(currentTraitCard, "", 14, D.TextLow)
-TR.UI.Lbl.TraitInfo.Size = UDim2.new(1, 0, 0, 40)
-
--- ╔══════════════════════════════════════════════════════════╗
---  HILFSFUNKTIONEN
--- ╚══════════════════════════════════════════════════════════╝
+-- ── Hilfsfunktionen ───────────────────────────────────────────
 local function GetUnitTraits(unitInstance)
-    local main, sub = nil, nil
+    local main,sub=nil,nil
     pcall(function()
-        local tf = unitInstance:FindFirstChild("Traits") or unitInstance:FindFirstChild("Trait")
+        local tf=unitInstance:FindFirstChild("Traits") or unitInstance:FindFirstChild("Trait")
         if tf then
-            local pm = tf:FindFirstChild("PrimaryTrait")   or tf:FindFirstChild("Primary")
-            local ps = tf:FindFirstChild("SecondaryTrait") or tf:FindFirstChild("Secondary") or tf:FindFirstChild("SubTrait")
-            if pm then main = tostring(pm.Value) end
-            if ps then sub  = tostring(ps.Value) end
+            local pm=tf:FindFirstChild("PrimaryTrait") or tf:FindFirstChild("Primary")
+            local ps=tf:FindFirstChild("SecondaryTrait") or tf:FindFirstChild("Secondary") or tf:FindFirstChild("SubTrait")
+            if pm then main=tostring(pm.Value) end
+            if ps then sub=tostring(ps.Value) end
         else
-            local pm = unitInstance:FindFirstChild("PrimaryTrait")   or unitInstance:FindFirstChild("Primary")
-            local ps = unitInstance:FindFirstChild("SecondaryTrait") or unitInstance:FindFirstChild("Secondary")
-            if pm then main = tostring(pm.Value) end
-            if ps then sub  = tostring(ps.Value) end
+            local pm=unitInstance:FindFirstChild("PrimaryTrait") or unitInstance:FindFirstChild("Primary")
+            local ps=unitInstance:FindFirstChild("SecondaryTrait") or unitInstance:FindFirstChild("Secondary")
+            if pm then main=tostring(pm.Value) end
+            if ps then sub=tostring(ps.Value) end
         end
     end)
-    return main, sub
+    return main,sub
 end
 
+-- ╔══════════════════════════════════════════════════════════╗
+--  FIX #2 – GetPotentialObject: robustere Pfad-Suche
+--  Sucht in: Direct → Stats → Potentials → Data → Deep
+-- ╚══════════════════════════════════════════════════════════╝
 local function GetPotentialObject(unitInstance, statName)
     if not unitInstance then return nil end
+    -- 1. Direkt am Unit
     local direct = unitInstance:FindFirstChild(statName)
     if direct then return direct end
+    -- 2. Stats-Ordner
     local stats = unitInstance:FindFirstChild("Stats")
-    if stats and stats:FindFirstChild(statName) then return stats:FindFirstChild(statName) end
+    if stats then
+        local s = stats:FindFirstChild(statName)
+        if s then return s end
+    end
+    -- 3. Potentials-Ordner
     local pot = unitInstance:FindFirstChild("Potentials")
-    if pot and pot:FindFirstChild(statName) then return pot:FindFirstChild(statName) end
+    if pot then
+        local p = pot:FindFirstChild(statName)
+        if p then return p end
+    end
+    -- 4. Data-Ordner
+    local data = unitInstance:FindFirstChild("Data")
+    if data then
+        local d = data:FindFirstChild(statName)
+        if d then return d end
+    end
+    -- 5. Alle bekannten Containerordner iterieren
+    for _, containerName in ipairs({"Attributes","Properties","Values","Config"}) do
+        local container = unitInstance:FindFirstChild(containerName)
+        if container then
+            local c = container:FindFirstChild(statName)
+            if c then return c end
+        end
+    end
+    -- 6. Tiefen-Suche als letztes Mittel
     return unitInstance:FindFirstChild(statName, true)
 end
 
 local function GetStatRatings(unitInstance)
     local out = {}
     for _, statName in ipairs(STAT_POTENTIAL_NAMES) do
-        local obj    = GetPotentialObject(unitInstance, statName)
-        local raw    = obj and obj.Value or nil
-        out[statName] = { raw = raw, rating = ToRankString(raw), obj = obj }
+        local obj  = GetPotentialObject(unitInstance, statName)
+        local raw  = obj and obj.Value or nil
+        out[statName] = { raw=raw, rating=ToRankString(raw), obj=obj }
     end
     return out
 end
 
--- ╔══════════════════════════════════════════════════════════╗
---  FIX #5 – ReadStatFromLabel:
---  Liest den aktuell im GUI angezeigten Rating-String aus dem
---  valLbl des jeweiligen Stat-Rows. Format: "S+  (12)" → "S+"
---  Dies ist der Double-Check nach dem Roll: Wir vertrauen dem
---  GUI-Text als "was das Spiel zurückgeliefert hat".
--- ╚══════════════════════════════════════════════════════════╝
+-- FIX #5: ReadStatFromLabel liest aus valLbl (Format: "S+  (12)")
 local function ReadStatFromLabel(statName)
     local rowData = TR.UI.Fr.StatRows and TR.UI.Fr.StatRows[statName]
     if not rowData or not rowData.valLbl then return nil end
     local text = rowData.valLbl.Text or ""
-    -- Format ist "RATING  (raw)" → extrahiere Rating vor dem ersten Leerzeichen
     local rating = text:match("^([^%s]+)")
-    if rating and StatValues[rating] then
-        return rating
-    end
-    -- Fallback: versuche aus Raw-Wert in Klammern zu parsen
+    if rating and GRADE_INDEX[rating] then return rating end
     local rawStr = text:match("%((.-)%)")
     if rawStr then return ToRankString(rawStr) end
     return nil
 end
 
 local function GetUnitTagValue(unitName)
-    local uName = unitName and tostring(unitName) or nil
-    if not uName or uName == "" then return nil end
-    local ok, tagValue = pcall(function()
-        local playerData    = RS:WaitForChild("Player_Data", 10)
-        local accountFolder = playerData:WaitForChild(LP.Name, 10)
-        local collection    = accountFolder:WaitForChild("Collection", 5)
-        local unitFolder    = collection:FindFirstChild(uName)
+    local uName=unitName and tostring(unitName) or nil
+    if not uName or uName=="" then return nil end
+    local ok,tagValue=pcall(function()
+        local playerData=RS:WaitForChild("Player_Data",10)
+        local accountFolder=playerData:WaitForChild(LP.Name,10)
+        local collection=accountFolder:WaitForChild("Collection",5)
+        local unitFolder=collection:FindFirstChild(uName)
         if not unitFolder then
-            for _, ch in ipairs(collection:GetChildren()) do
-                if string.lower(ch.Name) == string.lower(uName) then
-                    unitFolder = ch; break
-                end
+            for _,ch in ipairs(collection:GetChildren()) do
+                if string.lower(ch.Name)==string.lower(uName) then unitFolder=ch; break end
             end
         end
         if not unitFolder then return nil end
-        local tagObj = unitFolder:FindFirstChild("Tag") or unitFolder:FindFirstChild("Tags")
+        local tagObj=unitFolder:FindFirstChild("Tag") or unitFolder:FindFirstChild("Tags")
         if not tagObj then return nil end
-        local vObj = tagObj:FindFirstChild("Value")
+        local vObj=tagObj:FindFirstChild("Value")
         if vObj then return vObj.Value end
-        if tagObj.Value ~= nil then return tagObj.Value end
+        if tagObj.Value~=nil then return tagObj.Value end
         return nil
     end)
     if not ok then return nil end
@@ -534,181 +426,130 @@ end
 
 local function UpdateLiveTraitDisplay()
     if not TR.SelectedUnit then
-        TR.UI.Lbl.UnitName.Text        = "Keine Einheit gewählt"
-        TR.UI.Lbl.UnitName.TextColor3  = D.TextLow
-        TR.UI.Lbl.MainTrait.Text       = "–"
-        TR.UI.Lbl.MainTrait.TextColor3 = D.TextLow
-        TR.UI.Lbl.SubTrait.Text        = "–"
-        TR.UI.Lbl.SubTrait.TextColor3  = D.TextLow
-        TR.UI.Lbl.MainRarity.Text      = ""
-        TR.UI.Lbl.SubRarity.Text       = ""
-        TR.UI.Lbl.TraitInfo.Text       = ""
-        return
+        TR.UI.Lbl.UnitName.Text="Keine Einheit gewählt"; TR.UI.Lbl.UnitName.TextColor3=D.TextLow
+        TR.UI.Lbl.MainTrait.Text="–"; TR.UI.Lbl.MainTrait.TextColor3=D.TextLow
+        TR.UI.Lbl.SubTrait.Text="–"; TR.UI.Lbl.SubTrait.TextColor3=D.TextLow
+        TR.UI.Lbl.MainRarity.Text=""; TR.UI.Lbl.SubRarity.Text=""; TR.UI.Lbl.TraitInfo.Text=""; return
     end
-    local main, sub = GetUnitTraits(TR.SelectedUnit)
-    main = main or "–"; sub = sub or "–"
-    TR.UI.Lbl.UnitName.Text       = "✔ " .. (TR.SelectedUnitName or TR.SelectedUnit.Name)
-    TR.UI.Lbl.UnitName.TextColor3 = D.Cyan
-    TR.UI.Lbl.MainTrait.Text      = main
-    TR.UI.Lbl.SubTrait.Text       = sub
-    local function ApplyRarity(lbl, rarLbl, traitName)
-        local td = AllTraits[traitName]
+    local main,sub=GetUnitTraits(TR.SelectedUnit)
+    main=main or "–"; sub=sub or "–"
+    TR.UI.Lbl.UnitName.Text="✔ "..(TR.SelectedUnitName or TR.SelectedUnit.Name)
+    TR.UI.Lbl.UnitName.TextColor3=D.Cyan
+    TR.UI.Lbl.MainTrait.Text=main; TR.UI.Lbl.SubTrait.Text=sub
+    local function ApplyRarity(lbl,rarLbl,traitName)
+        local td=AllTraits[traitName]
         if td and td.Rarity then
-            local col = GetRarityColor(td.Rarity)
-            lbl.TextColor3    = col
-            rarLbl.Text       = "[" .. td.Rarity .. "]"
-            rarLbl.TextColor3 = col
-        else
-            lbl.TextColor3 = D.TextHi
-            rarLbl.Text    = ""
-        end
+            local col=GetRarityColor(td.Rarity)
+            lbl.TextColor3=col; rarLbl.Text="["..td.Rarity.."]"; rarLbl.TextColor3=col
+        else lbl.TextColor3=D.TextHi; rarLbl.Text="" end
     end
-    ApplyRarity(TR.UI.Lbl.MainTrait, TR.UI.Lbl.MainRarity, main)
-    ApplyRarity(TR.UI.Lbl.SubTrait,  TR.UI.Lbl.SubRarity,  sub)
-    local infoLines = {}
-    for _, tn in ipairs({ main, sub }) do
-        local td = AllTraits[tn]
+    ApplyRarity(TR.UI.Lbl.MainTrait,TR.UI.Lbl.MainRarity,main)
+    ApplyRarity(TR.UI.Lbl.SubTrait,TR.UI.Lbl.SubRarity,sub)
+    local infoLines={}
+    for _,tn in ipairs({main,sub}) do
+        local td=AllTraits[tn]
         if td and td.Stats then
-            local statStrs = {}
-            for stat, val in pairs(td.Stats) do
-                local sign = val >= 0 and "+" or ""
-                table.insert(statStrs, sign .. val .. "% " .. stat)
+            local statStrs={}
+            for stat,val in pairs(td.Stats) do
+                local sign=val>=0 and "+" or ""
+                table.insert(statStrs,sign..val.."% "..stat)
             end
-            if #statStrs > 0 then
-                table.insert(infoLines, tn .. ": " .. table.concat(statStrs, ", "))
-            end
+            if #statStrs>0 then table.insert(infoLines,tn..": "..table.concat(statStrs,", ")) end
         end
     end
-    TR.UI.Lbl.TraitInfo.Text = #infoLines > 0 and table.concat(infoLines, "\n") or ""
+    TR.UI.Lbl.TraitInfo.Text=#infoLines>0 and table.concat(infoLines,"\n") or ""
 end
 
 local function LooksLikeUnitInstance(obj)
     if not obj then return false end
-    local tf = obj:FindFirstChild("Traits") or obj:FindFirstChild("Trait")
+    local tf=obj:FindFirstChild("Traits") or obj:FindFirstChild("Trait")
     if tf then
         if tf:FindFirstChild("PrimaryTrait") or tf:FindFirstChild("Primary") then return true end
         if tf:FindFirstChild("SecondaryTrait") or tf:FindFirstChild("Secondary") or tf:FindFirstChild("SubTrait") then return true end
     end
-    if obj:FindFirstChild("PrimaryTrait")   or obj:FindFirstChild("Primary")   then return true end
+    if obj:FindFirstChild("PrimaryTrait") or obj:FindFirstChild("Primary") then return true end
     if obj:FindFirstChild("SecondaryTrait") or obj:FindFirstChild("Secondary") or obj:FindFirstChild("SubTrait") then return true end
     return false
 end
 
 local function GetCollection()
-    local collection = nil
+    local collection=nil
     pcall(function()
-        collection = RS:WaitForChild("Player_Data", 10)
-                        :WaitForChild(LP.Name, 10)
-                        :WaitForChild("Collection", 5)
+        collection=RS:WaitForChild("Player_Data",10):WaitForChild(LP.Name,10):WaitForChild("Collection",5)
     end)
     return collection
 end
 
 local function ScanUnits()
-    TR.Units = {}
-    local collection = GetCollection()
-    if not collection then SetStatus("⚠ Collection nicht gefunden!", D.Orange); return false end
-    local sourceList = {}
-    for _, unit in pairs(collection:GetChildren()) do
+    TR.Units={}
+    local collection=GetCollection()
+    if not collection then SetStatus("⚠ Collection nicht gefunden!",D.Orange); return false end
+    local sourceList={}
+    for _,unit in pairs(collection:GetChildren()) do
         if (unit:IsA("Folder") or unit:IsA("Model") or unit:IsA("Configuration"))
             and (LooksLikeUnitInstance(unit) or unit:FindFirstChild("Tag")) then
-            table.insert(sourceList, { instance = unit, name = unit.Name })
+            table.insert(sourceList,{instance=unit,name=unit.Name})
         end
     end
-    SetStatus("✅ " .. #sourceList .. " Einheiten gefunden", D.Green)
-    local nameCount, nameSeen = {}, {}
-    for _, entry in ipairs(sourceList) do nameCount[entry.name] = (nameCount[entry.name] or 0) + 1 end
-    for _, entry in ipairs(sourceList) do
-        local n = entry.name
-        nameSeen[n] = (nameSeen[n] or 0) + 1
-        local displayName = n
-        if nameCount[n] > 1 then displayName = n .. " #" .. nameSeen[n] end
-        table.insert(TR.Units, { instance = entry.instance, name = n, index = nameSeen[n], displayName = displayName })
+    SetStatus("✅ "..#sourceList.." Einheiten gefunden",D.Green)
+    local nameCount,nameSeen={},{}
+    for _,entry in ipairs(sourceList) do nameCount[entry.name]=(nameCount[entry.name] or 0)+1 end
+    for _,entry in ipairs(sourceList) do
+        local n=entry.name; nameSeen[n]=(nameSeen[n] or 0)+1
+        local displayName=n
+        if nameCount[n]>1 then displayName=n.." #"..nameSeen[n] end
+        table.insert(TR.Units,{instance=entry.instance,name=n,index=nameSeen[n],displayName=displayName})
     end
-    table.sort(TR.Units, function(a, b) return a.displayName:lower() < b.displayName:lower() end)
-    return #TR.Units > 0
+    table.sort(TR.Units,function(a,b) return a.displayName:lower()<b.displayName:lower() end)
+    return #TR.Units>0
 end
 
 -- ── Unit-Model-Viewer ─────────────────────────────────────────
-local UnitModelsRoot = nil
-local BucketModelIndex = { Unit = {}, Shiny = {}, Evo = {} }
-
-local function NormalizeUnitKey(unitName)
-    local key = tostring(unitName or ""):lower()
-    return key:gsub(":shiny", ""):gsub(":evo", ""):gsub("%s+$", ""):gsub("^%s+", "")
-end
-local function ResolveTemplateBucket(unitName)
-    local n = tostring(unitName or ""):lower()
-    if n:find(":shiny", 1, true) then return "Shiny" end
-    if n:find(":evo",   1, true) then return "Evo"   end
-    return "Unit"
-end
+local UnitModelsRoot=nil; local BucketModelIndex={Unit={},Shiny={},Evo={}}
+local function NormalizeUnitKey(n) local key=tostring(n or ""):lower(); return key:gsub(":shiny",""):gsub(":evo",""):gsub("%s+$",""):gsub("^%s+","") end
+local function ResolveTemplateBucket(n) local s=tostring(n or ""):lower(); if s:find(":shiny",1,true) then return "Shiny" end; if s:find(":evo",1,true) then return "Evo" end; return "Unit" end
 local function BuildBucketModelIndex()
-    BucketModelIndex = { Unit = {}, Shiny = {}, Evo = {} }
-    UnitModelsRoot = nil
-    pcall(function() UnitModelsRoot = RS:WaitForChild("Assets", 8):WaitForChild("UnitModels", 8) end)
+    BucketModelIndex={Unit={},Shiny={},Evo={}}; UnitModelsRoot=nil
+    pcall(function() UnitModelsRoot=RS:WaitForChild("Assets",8):WaitForChild("UnitModels",8) end)
     if not UnitModelsRoot then return end
-    for _, bucket in ipairs({ "Unit", "Shiny", "Evo" }) do
-        local folder = UnitModelsRoot:FindFirstChild(bucket)
-        if folder then
-            for _, entry in ipairs(folder:GetDescendants()) do
-                if entry:IsA("Model") then BucketModelIndex[bucket][entry.Name:lower()] = entry end
-            end
-        end
+    for _,bucket in ipairs({"Unit","Shiny","Evo"}) do
+        local folder=UnitModelsRoot:FindFirstChild(bucket)
+        if folder then for _,entry in ipairs(folder:GetDescendants()) do if entry:IsA("Model") then BucketModelIndex[bucket][entry.Name:lower()]=entry end end end
     end
 end
 local function BucketSearchOrder(preferred)
-    if preferred == "Shiny" then return { "Shiny", "Unit" } end
-    if preferred == "Evo"   then return { "Evo",   "Unit" } end
-    return { "Unit", "Shiny", "Evo" }
+    if preferred=="Shiny" then return {"Shiny","Unit"} end
+    if preferred=="Evo"   then return {"Evo","Unit"}   end
+    return {"Unit","Shiny","Evo"}
 end
 local function FindUnitTemplate(unitName)
     if not UnitModelsRoot then BuildBucketModelIndex() end
-    local key = NormalizeUnitKey(unitName)
-    if key == "" then return nil end
-    for _, bucket in ipairs(BucketSearchOrder(ResolveTemplateBucket(unitName))) do
-        local idx = BucketModelIndex[bucket]
+    local key=NormalizeUnitKey(unitName); if key=="" then return nil end
+    for _,bucket in ipairs(BucketSearchOrder(ResolveTemplateBucket(unitName))) do
+        local idx=BucketModelIndex[bucket]
         if idx then
-            local exact = idx[key]
-            if exact then return exact end
-            for n, mdl in pairs(idx) do
-                if n:find(key, 1, true) or key:find(n, 1, true) then return mdl end
-            end
+            local exact=idx[key]; if exact then return exact end
+            for n,mdl in pairs(idx) do if n:find(key,1,true) or key:find(n,1,true) then return mdl end end
         end
     end
     return nil
 end
-
-local CAM_DIST = 5.5
-local function FillViewportWithUnit(vp, unitName)
-    local ok = false
+local CAM_DIST=5.5
+local function FillViewportWithUnit(vp,unitName)
+    local ok=false
     pcall(function()
-        for _, d in ipairs(vp:GetDescendants()) do
-            if d:IsA("WorldModel") or d:IsA("Camera") then d:Destroy() end
-        end
-        local source = FindUnitTemplate(unitName)
-        if not source then return end
-        local world = Instance.new("WorldModel"); world.Parent = vp
-        local clone = source:Clone(); clone.Parent = world
-        if not clone.PrimaryPart then
-            local pp0 = clone:FindFirstChildWhichIsA("BasePart", true)
-            if pp0 then clone.PrimaryPart = pp0 end
-        end
-        clone:PivotTo(CFrame.new(0, 0, 0))
-        local cam = Instance.new("Camera"); cam.Parent = vp; vp.CurrentCamera = cam
-        cam.FieldOfView = 60
-        local head       = clone:FindFirstChild("Head",       true)
-        local upperTorso = clone:FindFirstChild("UpperTorso", true) or clone:FindFirstChild("Torso", true)
-        local pp = clone.PrimaryPart
-        if not pp or not pp:IsA("BasePart") then pp = clone:FindFirstChildWhichIsA("BasePart", true) end
-        local aim = (head and head:IsA("BasePart") and head)
-                 or (upperTorso and upperTorso:IsA("BasePart") and upperTorso)
-                 or pp
+        for _,d in ipairs(vp:GetDescendants()) do if d:IsA("WorldModel") or d:IsA("Camera") then d:Destroy() end end
+        local source=FindUnitTemplate(unitName); if not source then return end
+        local world=Instance.new("WorldModel"); world.Parent=vp
+        local clone=source:Clone(); clone.Parent=world
+        if not clone.PrimaryPart then local pp0=clone:FindFirstChildWhichIsA("BasePart",true); if pp0 then clone.PrimaryPart=pp0 end end
+        clone:PivotTo(CFrame.new(0,0,0))
+        local cam=Instance.new("Camera"); cam.Parent=vp; vp.CurrentCamera=cam; cam.FieldOfView=60
+        local head=clone:FindFirstChild("Head",true); local upperTorso=clone:FindFirstChild("UpperTorso",true) or clone:FindFirstChild("Torso",true)
+        local pp=clone.PrimaryPart; if not pp or not pp:IsA("BasePart") then pp=clone:FindFirstChildWhichIsA("BasePart",true) end
+        local aim=(head and head:IsA("BasePart") and head) or (upperTorso and upperTorso:IsA("BasePart") and upperTorso) or pp
         if not aim then return end
-        local targetPos = aim.Position
-        local look      = aim.CFrame.LookVector
-        cam.CFrame = CFrame.new(targetPos + look * CAM_DIST + Vector3.new(0, 0.5, 0), targetPos)
-        ok = true
+        cam.CFrame=CFrame.new(aim.Position+aim.CFrame.LookVector*CAM_DIST+Vector3.new(0,0.5,0),aim.Position); ok=true
     end)
     return ok
 end
@@ -716,1326 +557,616 @@ end
 local RefreshStatPanel
 
 local function BuildUnitList(filter)
-    for _, v in pairs(TR.UI.Fr.UnitList:GetChildren()) do
-        if v:IsA("Frame") then v:Destroy() end
-    end
-    filter = (filter or ""):lower()
-    local shown = 0
-    for _, u in ipairs(TR.Units) do
-        if filter ~= "" and not u.displayName:lower():find(filter, 1, true) then continue end
-        shown = shown + 1
-        local isSelected = (TR.SelectedUnit == u.instance)
-        local row = Instance.new("Frame", TR.UI.Fr.UnitList)
-        row.Size          = UDim2.new(0, 150, 0, 180)
-        row.BorderSizePixel = 0
-        Corner(row, 8)
-        if (HS._isTouchClient == true) or UserInputService.TouchEnabled then
-            local ar = Instance.new("UIAspectRatioConstraint", row)
-            ar.Name = "UnitSquareAspect"
-            ar.AspectRatio = 1
-            ar.DominantAxis = Enum.DominantAxis.Width
+    for _,v in pairs(TR.UI.Fr.UnitList:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
+    filter=(filter or ""):lower(); local shown=0
+    for _,u in ipairs(TR.Units) do
+        if filter~="" and not u.displayName:lower():find(filter,1,true) then continue end
+        shown=shown+1; local isSelected=(TR.SelectedUnit==u.instance)
+        local row=Instance.new("Frame",TR.UI.Fr.UnitList)
+        row.Size=UDim2.new(0,150,0,180); row.BorderSizePixel=0; Corner(row,8)
+        if (HS._isTouchClient==true) or UserInputService.TouchEnabled then
+            local ar=Instance.new("UIAspectRatioConstraint",row); ar.AspectRatio=1; ar.DominantAxis=Enum.DominantAxis.Width
         end
-        if isSelected then
-            row.BackgroundColor3 = D.RowSelect or Color3.fromRGB(48, 50, 58)
-            Stroke(row, D.Accent or D.Cyan, 1.5, 0)
-        else
-            row.BackgroundColor3 = D.CardHover
-            Stroke(row, D.Border, 1, 0.4)
-        end
-        local bar = Instance.new("Frame", row)
-        bar.Size             = UDim2.new(0, 3, 0.92, 0)
-        bar.Position         = UDim2.new(0, 0, 0.04, 0)
-        bar.BackgroundColor3 = isSelected and D.Cyan or D.Border
-        bar.BorderSizePixel  = 0
-        Corner(bar, 2)
-
-        local vp = Instance.new("ViewportFrame", row)
-        vp.Size            = UDim2.new(1, -8, 0.7, 0)
-        vp.Position        = UDim2.new(0, 5, 0, 4)
-        vp.BackgroundColor3 = D.Input
-        vp.BorderSizePixel = 0
-        Corner(vp, 4)
-        vp.LightDirection  = Vector3.new(-1, -1, -1)
-        vp.Ambient         = Color3.fromRGB(200, 200, 210)
-        vp.LightColor      = Color3.fromRGB(255, 255, 255)
+        if isSelected then row.BackgroundColor3=D.RowSelect or Color3.fromRGB(48,50,58); Stroke(row,D.Accent or D.Cyan,1.5,0)
+        else row.BackgroundColor3=D.CardHover; Stroke(row,D.Border,1,0.4) end
+        local bar=Instance.new("Frame",row); bar.Size=UDim2.new(0,3,0.92,0); bar.Position=UDim2.new(0,0,0.04,0); bar.BackgroundColor3=isSelected and D.Cyan or D.Border; bar.BorderSizePixel=0; Corner(bar,2)
+        local vp=Instance.new("ViewportFrame",row); vp.Size=UDim2.new(1,-8,0.7,0); vp.Position=UDim2.new(0,5,0,4); vp.BackgroundColor3=D.Input; vp.BorderSizePixel=0; Corner(vp,4); vp.LightDirection=Vector3.new(-1,-1,-1); vp.Ambient=Color3.fromRGB(200,200,210); vp.LightColor=Color3.fromRGB(255,255,255)
         task.spawn(function()
-            local loaded = FillViewportWithUnit(vp, u.name)
-            if not loaded then
-                local fb = Instance.new("TextLabel", vp)
-                fb.Size                  = UDim2.new(1, 0, 1, 0)
-                fb.BackgroundTransparency = 1
-                fb.Text                  = u.name:sub(1, 1):upper()
-                fb.TextColor3            = D.TextLow
-                fb.TextSize              = 18
-                fb.Font                  = Enum.Font.GothamBold
-            end
+            local loaded=FillViewportWithUnit(vp,u.name)
+            if not loaded then local fb=Instance.new("TextLabel",vp); fb.Size=UDim2.new(1,0,1,0); fb.BackgroundTransparency=1; fb.Text=u.name:sub(1,1):upper(); fb.TextColor3=D.TextLow; fb.TextSize=18; fb.Font=Enum.Font.GothamBold end
         end)
-
-        local main, sub = GetUnitTraits(u.instance)
-        local mainColor  = main and AllTraits[main] and GetRarityColor(AllTraits[main].Rarity) or D.TextLow
-
-        local nL = Instance.new("TextLabel", row)
-        nL.Position        = UDim2.new(0, 4, 0.72, 0)
-        nL.Size            = UDim2.new(1, -8, 0, 16)
-        nL.BackgroundTransparency = 1
-        nL.Text            = u.displayName
-        nL.TextColor3      = isSelected and D.Cyan or D.TextHi
-        nL.TextSize        = 13
-        nL.Font            = Enum.Font.GothamBold
-        nL.TextXAlignment  = Enum.TextXAlignment.Left
-        nL.TextTruncate    = Enum.TextTruncate.AtEnd
-
-        local tL = Instance.new("TextLabel", row)
-        tL.Position        = UDim2.new(0, 4, 0.86, 0)
-        tL.Size            = UDim2.new(1, -8, 0, 13)
-        tL.BackgroundTransparency = 1
-        tL.Text            = (main or "?") .. " / " .. (sub or "?")
-        tL.TextColor3      = mainColor
-        tL.TextSize        = 12
-        tL.Font            = Enum.Font.GothamMedium
-        tL.TextXAlignment  = Enum.TextXAlignment.Left
-        tL.TextTruncate    = Enum.TextTruncate.AtEnd
-
-        local clickBtn = Instance.new("TextButton", row)
-        clickBtn.Size                  = UDim2.new(1, 0, 1, 0)
-        clickBtn.BackgroundTransparency = 1
-        clickBtn.Text                  = ""
-        clickBtn.BorderSizePixel       = 0
-        clickBtn.ZIndex                = 2
-        local capU = u
+        local main,sub=GetUnitTraits(u.instance)
+        local mainColor=main and AllTraits[main] and GetRarityColor(AllTraits[main].Rarity) or D.TextLow
+        local nL=Instance.new("TextLabel",row); nL.Position=UDim2.new(0,4,0.72,0); nL.Size=UDim2.new(1,-8,0,16); nL.BackgroundTransparency=1; nL.Text=u.displayName; nL.TextColor3=isSelected and D.Cyan or D.TextHi; nL.TextSize=13; nL.Font=Enum.Font.GothamBold; nL.TextXAlignment=Enum.TextXAlignment.Left; nL.TextTruncate=Enum.TextTruncate.AtEnd
+        local tL=Instance.new("TextLabel",row); tL.Position=UDim2.new(0,4,0.86,0); tL.Size=UDim2.new(1,-8,0,13); tL.BackgroundTransparency=1; tL.Text=(main or "?").." / "..(sub or "?"); tL.TextColor3=mainColor; tL.TextSize=12; tL.Font=Enum.Font.GothamMedium; tL.TextXAlignment=Enum.TextXAlignment.Left; tL.TextTruncate=Enum.TextTruncate.AtEnd
+        local clickBtn=Instance.new("TextButton",row); clickBtn.Size=UDim2.new(1,0,1,0); clickBtn.BackgroundTransparency=1; clickBtn.Text=""; clickBtn.BorderSizePixel=0; clickBtn.ZIndex=2
+        local capU=u
         clickBtn.MouseButton1Click:Connect(function()
-            TR.SelectedUnitName     = capU.instance.Name
-            TR.SelectedUnit         = capU.instance
-            TR.SelectedUnitTagValue = nil
-            BuildUnitList(filter)
-            UpdateLiveTraitDisplay()
+            TR.SelectedUnitName=capU.instance.Name; TR.SelectedUnit=capU.instance; TR.SelectedUnitTagValue=nil
+            BuildUnitList(filter); UpdateLiveTraitDisplay()
             pcall(function() if RefreshStatPanel then RefreshStatPanel() end end)
         end)
     end
-    TR.UI.Lbl.UnitEmpty.Visible = (shown == 0)
-    task.defer(refreshUnitScrollCanvas)
+    TR.UI.Lbl.UnitEmpty.Visible=(shown==0); task.defer(refreshUnitScrollCanvas)
 end
 
-local unitRefBtn = NeonBtn(unitCard, "🔄 Einheiten neu laden", D.CyanDim, 26)
+local unitRefBtn=NeonBtn(unitCard,"🔄 Einheiten neu laden",D.CyanDim,26)
 unitRefBtn.MouseButton1Click:Connect(function()
-    unitRefBtn.Text       = "⏳..."
-    unitRefBtn.TextColor3 = D.Yellow
+    unitRefBtn.Text="⏳..."; unitRefBtn.TextColor3=D.Yellow
     task.spawn(function()
-        ScanUnits()
-        BuildUnitList(unitSearchBox.Text)
-        pcall(function()
-            unitRefBtn.Text       = "🔄 Einheiten neu laden"
-            unitRefBtn.TextColor3 = D.CyanDim
-        end)
+        ScanUnits(); BuildUnitList(unitSearchBox.Text)
+        pcall(function() unitRefBtn.Text="🔄 Einheiten neu laden"; unitRefBtn.TextColor3=D.CyanDim end)
     end)
 end)
 unitSearchBox:GetPropertyChangedSignal("Text"):Connect(function() BuildUnitList(unitSearchBox.Text) end)
-NeonBtn(currentTraitCard, "🔄 Trait aktualisieren", D.CyanDim, 26).MouseButton1Click:Connect(function()
-    UpdateLiveTraitDisplay()
-end)
+NeonBtn(currentTraitCard,"🔄 Trait aktualisieren",D.CyanDim,26).MouseButton1Click:Connect(function() UpdateLiveTraitDisplay() end)
 task.spawn(function()
-    while true do
-        task.wait(2)
-        if HS.State and HS.State.ActiveTab == "Traits" then pcall(UpdateLiveTraitDisplay) end
+    while true do task.wait(2)
+        if HS.State and HS.State.ActiveTab=="Traits" then pcall(UpdateLiveTraitDisplay) end
     end
 end)
 
--- ╔══════════════════════════════════════════════════════════╗
---  FIX #4 – Ziel-Traits UI: Trait-Name = Button (kein Doppeltext)
---  Jede Rarity-Gruppe hat Header + kompakte 3-spaltige Button-Grid.
---  Der TextButton zeigt [✓] TraitName – kein separates Label darunter.
--- ╚══════════════════════════════════════════════════════════╝
-local targetCard = Card(traitsRow)
-targetCard.Size = UDim2.new(0.5, -4, 0, 0)
-targetCard.AutomaticSize = Enum.AutomaticSize.Y
-Pad(targetCard, 10, 12, 10, 12)
-VList(targetCard, 6)
-SecLbl(targetCard, "🎯 ZIEL-TRAITS (nach Rarity)")
-
-TR.UI.Lbl.SelectedTraitsInfo = MkLbl(targetCard, "Keine Ziel-Traits gewählt", 10, D.TextLow)
-TR.UI.Lbl.SelectedTraitsInfo.Size = UDim2.new(1, 0, 0, 14)
+-- ── Ziel-Traits (rechte Spalte von traitsRow) ─────────────────
+local targetCard=Card(traitsRow)
+targetCard.Size=UDim2.new(0.5,-4,0,0); targetCard.AutomaticSize=Enum.AutomaticSize.Y
+Pad(targetCard,10,12,10,12); VList(targetCard,6)
+SecLbl(targetCard,"🎯 ZIEL-TRAITS")
+TR.UI.Lbl.SelectedTraitsInfo=MkLbl(targetCard,"Keine Ziel-Traits gewählt",10,D.TextLow)
+TR.UI.Lbl.SelectedTraitsInfo.Size=UDim2.new(1,0,0,14)
 
 local function UpdateTargetTraitInfo()
-    local count = 0
-    local rarityCount = {}
+    local count=0; local rarityCount={}
     for traitName in pairs(TR.TargetTraits) do
-        count = count + 1
-        local td = AllTraits[traitName]
-        if td and td.Rarity then
-            rarityCount[td.Rarity] = (rarityCount[td.Rarity] or 0) + 1
-        end
+        count=count+1
+        local td=AllTraits[traitName]
+        if td and td.Rarity then rarityCount[td.Rarity]=(rarityCount[td.Rarity] or 0)+1 end
     end
-    if count == 0 then
-        TR.UI.Lbl.SelectedTraitsInfo.Text       = "Keine Ziel-Traits gewählt"
-        TR.UI.Lbl.SelectedTraitsInfo.TextColor3 = D.TextLow
+    if count==0 then TR.UI.Lbl.SelectedTraitsInfo.Text="Keine Ziel-Traits gewählt"; TR.UI.Lbl.SelectedTraitsInfo.TextColor3=D.TextLow
     else
-        local parts = {}
-        for _, rarity in ipairs({ "Divine", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common" }) do
-            if rarityCount[rarity] then
-                table.insert(parts, rarityCount[rarity] .. "×" .. rarity)
-            end
+        local parts={}
+        for _,rarity in ipairs({"Divine","Mythic","Legendary","Epic","Rare","Uncommon","Common"}) do
+            if rarityCount[rarity] then table.insert(parts,rarityCount[rarity].."×"..rarity) end
         end
-        TR.UI.Lbl.SelectedTraitsInfo.Text       = "✓ " .. count .. " Traits: " .. table.concat(parts, "  ")
-        TR.UI.Lbl.SelectedTraitsInfo.TextColor3 = D.Cyan
+        TR.UI.Lbl.SelectedTraitsInfo.Text="✓ "..count.." Traits: "..table.concat(parts,"  ")
+        TR.UI.Lbl.SelectedTraitsInfo.TextColor3=D.Cyan
     end
 end
 
-local rarFilterRow = Instance.new("Frame", targetCard)
-rarFilterRow.Size                  = UDim2.new(1, 0, 0, 0)
-rarFilterRow.AutomaticSize         = Enum.AutomaticSize.Y
-rarFilterRow.BackgroundTransparency = 1
-local rarFilterGrid = Instance.new("UIGridLayout", rarFilterRow)
-rarFilterGrid.CellSize    = UDim2.new(0.33, -3, 0, 20)
-rarFilterGrid.CellPadding = UDim2.new(0, 3, 0, 3)
-
-local ActiveRarityFilter = nil
-
-local traitSearchOuter, traitSearchBox = MkInput(targetCard, "Trait suchen...", 24)
-traitSearchOuter.Size = UDim2.new(1, 0, 0, 24)
-
-local traitListScroll = Instance.new("ScrollingFrame", targetCard)
-traitListScroll.Name                  = "TraitListScroll"
-traitListScroll.Size                  = UDim2.new(1, 0, 0, 220)
-traitListScroll.BackgroundTransparency = 1
-traitListScroll.BorderSizePixel       = 0
-traitListScroll.ScrollBarThickness    = 3
-traitListScroll.ScrollBarImageColor3  = D.CyanDim
-traitListScroll.ScrollingEnabled      = true
-traitListScroll.ScrollingDirection    = Enum.ScrollingDirection.Y
-traitListScroll.ElasticBehavior       = Enum.ElasticBehavior.Never
-traitListScroll.CanvasSize            = UDim2.new(0, 0, 0, 0)
-traitListScroll.AutomaticCanvasSize   = Enum.AutomaticSize.None
-
-local traitListFrame = Instance.new("Frame", traitListScroll)
-traitListFrame.Size                  = UDim2.new(1, 0, 0, 0)
-traitListFrame.BackgroundTransparency = 1
-traitListFrame.AutomaticSize         = Enum.AutomaticSize.Y
-VList(traitListFrame, 2)
+local rarFilterRow=Instance.new("Frame",targetCard); rarFilterRow.Size=UDim2.new(1,0,0,0); rarFilterRow.AutomaticSize=Enum.AutomaticSize.Y; rarFilterRow.BackgroundTransparency=1
+local rarFilterGrid=Instance.new("UIGridLayout",rarFilterRow); rarFilterGrid.CellSize=UDim2.new(0.33,-3,0,20); rarFilterGrid.CellPadding=UDim2.new(0,3,0,3)
+local ActiveRarityFilter=nil
+local traitSearchOuter,traitSearchBox=MkInput(targetCard,"Trait suchen...",24); traitSearchOuter.Size=UDim2.new(1,0,0,24)
+local traitListScroll=Instance.new("ScrollingFrame",targetCard); traitListScroll.Name="TraitListScroll"; traitListScroll.Size=UDim2.new(1,0,0,220); traitListScroll.BackgroundTransparency=1; traitListScroll.BorderSizePixel=0; traitListScroll.ScrollBarThickness=3; traitListScroll.ScrollBarImageColor3=D.CyanDim; traitListScroll.ScrollingEnabled=true; traitListScroll.ScrollingDirection=Enum.ScrollingDirection.Y; traitListScroll.ElasticBehavior=Enum.ElasticBehavior.Never; traitListScroll.CanvasSize=UDim2.new(0,0,0,0); traitListScroll.AutomaticCanvasSize=Enum.AutomaticSize.None
+local traitListFrame=Instance.new("Frame",traitListScroll); traitListFrame.Size=UDim2.new(1,0,0,0); traitListFrame.BackgroundTransparency=1; traitListFrame.AutomaticSize=Enum.AutomaticSize.Y; VList(traitListFrame,2)
 
 local function refreshTraitScrollCanvas()
-    local traitLayout = traitListFrame:FindFirstChildOfClass("UIListLayout")
-    local h = traitLayout and traitLayout.AbsoluteContentSize.Y or 0
-    traitListScroll.CanvasSize = UDim2.new(0, 0, 0, h + 6)
+    local traitLayout=traitListFrame:FindFirstChildOfClass("UIListLayout")
+    local h=traitLayout and traitLayout.AbsoluteContentSize.Y or 0
+    traitListScroll.CanvasSize=UDim2.new(0,0,0,h+6)
 end
-traitListFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-    task.defer(refreshTraitScrollCanvas)
-end)
+traitListFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() task.defer(refreshTraitScrollCanvas) end)
 
 local function RebuildTraitTargetList(searchFilter)
-    for _, v in pairs(traitListFrame:GetChildren()) do
-        if v:IsA("Frame") or v:IsA("TextLabel") then v:Destroy() end
+    for _,v in pairs(traitListFrame:GetChildren()) do if v:IsA("Frame") or v:IsA("TextLabel") then v:Destroy() end end
+    searchFilter=(searchFilter or ""):lower()
+    local grouped={}
+    for traitName,data in pairs(AllTraits) do
+        local rarity=(data and data.Rarity) or "Common"
+        if ActiveRarityFilter and rarity~=ActiveRarityFilter then continue end
+        if searchFilter~="" and not traitName:lower():find(searchFilter,1,true) then continue end
+        if not grouped[rarity] then grouped[rarity]={} end
+        table.insert(grouped[rarity],traitName)
     end
-    searchFilter = (searchFilter or ""):lower()
-
-    local grouped = {}
-    for traitName, data in pairs(AllTraits) do
-        local rarity = (data and data.Rarity) or "Common"
-        if ActiveRarityFilter and rarity ~= ActiveRarityFilter then continue end
-        if searchFilter ~= "" and not traitName:lower():find(searchFilter, 1, true) then continue end
-        if not grouped[rarity] then grouped[rarity] = {} end
-        table.insert(grouped[rarity], traitName)
-    end
-
-    local rarityOrder = { "Divine", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common" }
-    local totalShown = 0
-
-    for _, rarity in ipairs(rarityOrder) do
-        local traits = grouped[rarity]
-        if not traits or #traits == 0 then continue end
-        table.sort(traits)
-        totalShown = totalShown + #traits
-
-        local col = GetRarityColor(rarity)
-
-        -- Rarity-Header-Zeile
-        local headerRow = Instance.new("Frame", traitListFrame)
-        headerRow.Size                  = UDim2.new(1, 0, 0, 20)
-        headerRow.BackgroundColor3      = D.CardHover
-        headerRow.BackgroundTransparency = 0.4
-        headerRow.BorderSizePixel       = 0
-        Corner(headerRow, 4)
-        Stroke(headerRow, col, 1, 0.25)
-
-        local acLine = Instance.new("Frame", headerRow)
-        acLine.Size             = UDim2.new(0, 3, 1, 0)
-        acLine.BackgroundColor3 = col
-        acLine.BorderSizePixel  = 0
-        Corner(acLine, 2)
-
-        local selCount = 0
-        for _, tn in ipairs(traits) do if TR.TargetTraits[tn] then selCount = selCount + 1 end end
-
-        local headerLbl = Instance.new("TextLabel", headerRow)
-        headerLbl.Position               = UDim2.new(0, 8, 0, 0)
-        headerLbl.Size                   = UDim2.new(0.58, 0, 1, 0)
-        headerLbl.BackgroundTransparency = 1
-        headerLbl.Text                   = rarity .. " (" .. #traits .. ")"
-        headerLbl.TextColor3             = col
-        headerLbl.TextSize               = 10
-        headerLbl.Font                   = Enum.Font.GothamBold
-        headerLbl.TextXAlignment         = Enum.TextXAlignment.Left
-
-        local selectAllBtn = Instance.new("TextButton", headerRow)
-        selectAllBtn.Position               = UDim2.new(0.6, 0, 0.1, 0)
-        selectAllBtn.Size                   = UDim2.new(0.39, -4, 0.8, 0)
-        selectAllBtn.BackgroundColor3       = selCount == #traits and col or D.CardHover
-        selectAllBtn.BackgroundTransparency = selCount == #traits and 0.25 or 0.5
-        selectAllBtn.Text                   = selCount == #traits and "✕ alle" or "✓ alle"
-        selectAllBtn.TextColor3             = selCount == #traits and col or D.TextLow
-        selectAllBtn.TextSize               = 8
-        selectAllBtn.Font                   = Enum.Font.GothamBold
-        selectAllBtn.AutoButtonColor        = false
-        selectAllBtn.BorderSizePixel        = 0
-        Corner(selectAllBtn, 4)
-        if selCount == #traits then
-            Stroke(selectAllBtn, col, 1, 0.3)
-        end
-
-        local capRarity = rarity
-        local capTraits = traits
+    local rarityOrder={"Divine","Mythic","Legendary","Epic","Rare","Uncommon","Common"}; local totalShown=0
+    for _,rarity in ipairs(rarityOrder) do
+        local traits=grouped[rarity]; if not traits or #traits==0 then continue end
+        table.sort(traits); totalShown=totalShown+#traits; local col=GetRarityColor(rarity)
+        local headerRow=Instance.new("Frame",traitListFrame); headerRow.Size=UDim2.new(1,0,0,20); headerRow.BackgroundColor3=D.CardHover; headerRow.BackgroundTransparency=0.4; headerRow.BorderSizePixel=0; Corner(headerRow,4); Stroke(headerRow,col,1,0.25)
+        local acLine=Instance.new("Frame",headerRow); acLine.Size=UDim2.new(0,3,1,0); acLine.BackgroundColor3=col; acLine.BorderSizePixel=0; Corner(acLine,2)
+        local selCount=0; for _,tn in ipairs(traits) do if TR.TargetTraits[tn] then selCount=selCount+1 end end
+        local headerLbl=Instance.new("TextLabel",headerRow); headerLbl.Position=UDim2.new(0,8,0,0); headerLbl.Size=UDim2.new(0.58,0,1,0); headerLbl.BackgroundTransparency=1; headerLbl.Text=rarity.." ("..#traits..")"; headerLbl.TextColor3=col; headerLbl.TextSize=10; headerLbl.Font=Enum.Font.GothamBold; headerLbl.TextXAlignment=Enum.TextXAlignment.Left
+        local selectAllBtn=Instance.new("TextButton",headerRow); selectAllBtn.Position=UDim2.new(0.6,0,0.1,0); selectAllBtn.Size=UDim2.new(0.39,-4,0.8,0); selectAllBtn.BackgroundColor3=selCount==#traits and col or D.CardHover; selectAllBtn.BackgroundTransparency=selCount==#traits and 0.25 or 0.5; selectAllBtn.Text=selCount==#traits and "✕ alle" or "✓ alle"; selectAllBtn.TextColor3=selCount==#traits and col or D.TextLow; selectAllBtn.TextSize=8; selectAllBtn.Font=Enum.Font.GothamBold; selectAllBtn.AutoButtonColor=false; selectAllBtn.BorderSizePixel=0; Corner(selectAllBtn,4)
+        local capRarity=rarity; local capTraits=traits
         selectAllBtn.MouseButton1Click:Connect(function()
-            local allSelected = true
-            for _, tn in ipairs(capTraits) do
-                if not TR.TargetTraits[tn] then allSelected = false; break end
-            end
-            for _, tn in ipairs(capTraits) do
-                if allSelected then TR.TargetTraits[tn] = nil
-                else               TR.TargetTraits[tn] = true end
-            end
-            UpdateTargetTraitInfo()
-            RebuildTraitTargetList(traitSearchBox.Text)
+            local allSelected=true; for _,tn in ipairs(capTraits) do if not TR.TargetTraits[tn] then allSelected=false; break end end
+            for _,tn in ipairs(capTraits) do if allSelected then TR.TargetTraits[tn]=nil else TR.TargetTraits[tn]=true end end
+            UpdateTargetTraitInfo(); RebuildTraitTargetList(traitSearchBox.Text)
         end)
-
-        -- FIX #4: Kompaktes Button-Grid, EIN Button pro Trait (kein Doppeltext)
-        -- Der TextButton selbst zeigt [✓] TraitName in einer Zeile.
-        local gridFrame = Instance.new("Frame", traitListFrame)
-        gridFrame.Size                  = UDim2.new(1, 0, 0, 0)
-        gridFrame.AutomaticSize         = Enum.AutomaticSize.Y
-        gridFrame.BackgroundTransparency = 1
-
-        local grid = Instance.new("UIGridLayout", gridFrame)
-        grid.CellSize    = UDim2.new(0.333, -3, 0, 18)
-        grid.CellPadding = UDim2.new(0, 3, 0, 2)
-        grid.SortOrder   = Enum.SortOrder.LayoutOrder
-
-        for _, traitName in ipairs(traits) do
-            local isSelected = TR.TargetTraits[traitName] == true
-
-            -- FIX #4: Einziger TextButton, der den Trait-Namen DIREKT zeigt.
-            -- Kein separates TextLabel darunter. Kein unsichtbares Click-Overlay.
-            local btn = Instance.new("TextButton", gridFrame)
-            btn.BackgroundColor3      = isSelected and col or D.CardHover
-            btn.BackgroundTransparency = isSelected and 0.2 or 0.6
-            btn.BorderSizePixel       = 0
-            -- Trait-Name ist der Button-Text (mit Checkmark wenn aktiv)
-            btn.Text                  = (isSelected and "✓ " or "") .. traitName
-            btn.TextColor3            = isSelected and col or D.TextMid
-            btn.TextSize              = 9
-            btn.Font                  = Enum.Font.GothamBold
-            btn.AutoButtonColor       = false
-            btn.TextTruncate          = Enum.TextTruncate.AtEnd
-            btn.TextXAlignment        = Enum.TextXAlignment.Left
-            local btnPad = Instance.new("UIPadding", btn)
-            btnPad.PaddingLeft = UDim.new(0, 4)
-            Corner(btn, 4)
-            Stroke(btn, isSelected and col or D.Border, 1, isSelected and 0 or 0.6)
-
-            local capName = traitName
+        local gridFrame=Instance.new("Frame",traitListFrame); gridFrame.Size=UDim2.new(1,0,0,0); gridFrame.AutomaticSize=Enum.AutomaticSize.Y; gridFrame.BackgroundTransparency=1
+        local grid=Instance.new("UIGridLayout",gridFrame); grid.CellSize=UDim2.new(0.333,-3,0,18); grid.CellPadding=UDim2.new(0,3,0,2); grid.SortOrder=Enum.SortOrder.LayoutOrder
+        for _,traitName in ipairs(traits) do
+            local isSelected=TR.TargetTraits[traitName]==true
+            local btn=Instance.new("TextButton",gridFrame)
+            btn.BackgroundColor3=isSelected and col or D.CardHover; btn.BackgroundTransparency=isSelected and 0.2 or 0.6; btn.BorderSizePixel=0
+            btn.Text=(isSelected and "✓ " or "")..traitName; btn.TextColor3=isSelected and col or D.TextMid; btn.TextSize=9; btn.Font=Enum.Font.GothamBold; btn.AutoButtonColor=false; btn.TextTruncate=Enum.TextTruncate.AtEnd; btn.TextXAlignment=Enum.TextXAlignment.Left
+            local btnPad=Instance.new("UIPadding",btn); btnPad.PaddingLeft=UDim.new(0,4); Corner(btn,4); Stroke(btn,isSelected and col or D.Border,1,isSelected and 0 or 0.6)
+            local capName=traitName
             btn.MouseButton1Click:Connect(function()
-                if TR.TargetTraits[capName] then
-                    TR.TargetTraits[capName] = nil
-                else
-                    TR.TargetTraits[capName] = true
-                end
-                UpdateTargetTraitInfo()
-                RebuildTraitTargetList(traitSearchBox.Text)
+                if TR.TargetTraits[capName] then TR.TargetTraits[capName]=nil else TR.TargetTraits[capName]=true end
+                UpdateTargetTraitInfo(); RebuildTraitTargetList(traitSearchBox.Text)
             end)
         end
-
-        grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-            task.defer(refreshTraitScrollCanvas)
-        end)
+        grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() task.defer(refreshTraitScrollCanvas) end)
     end
-
-    if totalShown == 0 then
-        local emptyLbl = MkLbl(traitListFrame, "Keine Traits gefunden.", 10, D.TextLow)
-        emptyLbl.Size = UDim2.new(1, 0, 0, 24)
-    end
+    if totalShown==0 then local e=MkLbl(traitListFrame,"Keine Traits gefunden.",10,D.TextLow); e.Size=UDim2.new(1,0,0,24) end
     task.defer(refreshTraitScrollCanvas)
 end
 
-local RARITY_FILTER_LIST = { "Divine", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common" }
-TR.UI.Btn.RarityFilters = {}
-for _, rarity in ipairs(RARITY_FILTER_LIST) do
-    local col = GetRarityColor(rarity)
-    local btn = Instance.new("TextButton", rarFilterRow)
-    btn.BackgroundColor3      = D.CardHover
-    btn.BackgroundTransparency = 0.5
-    btn.BorderSizePixel       = 0
-    Corner(btn, 4)
-    Stroke(btn, col, 1, 0.5)
-    btn.Text         = rarity:sub(1, 3)
-    btn.TextColor3   = col
-    btn.TextSize     = 8
-    btn.Font         = Enum.Font.GothamBold
-    btn.AutoButtonColor = false
-
-    local capRarity = rarity
+local RARITY_FILTER_LIST={"Divine","Mythic","Legendary","Epic","Rare","Uncommon","Common"}
+TR.UI.Btn.RarityFilters={}
+for _,rarity in ipairs(RARITY_FILTER_LIST) do
+    local col=GetRarityColor(rarity)
+    local btn=Instance.new("TextButton",rarFilterRow)
+    btn.BackgroundColor3=D.CardHover; btn.BackgroundTransparency=0.5; btn.BorderSizePixel=0; Corner(btn,4); Stroke(btn,col,1,0.5); btn.Text=rarity:sub(1,3); btn.TextColor3=col; btn.TextSize=8; btn.Font=Enum.Font.GothamBold; btn.AutoButtonColor=false
+    local capRarity=rarity
     btn.MouseButton1Click:Connect(function()
-        if ActiveRarityFilter == capRarity then
-            ActiveRarityFilter = nil
-            Tw(btn, { BackgroundColor3 = D.CardHover, BackgroundTransparency = 0.5 })
-            local s = btn:FindFirstChildOfClass("UIStroke"); if s then s.Transparency = 0.5 end
+        if ActiveRarityFilter==capRarity then
+            ActiveRarityFilter=nil; Tw(btn,{BackgroundColor3=D.CardHover,BackgroundTransparency=0.5})
+            local s=btn:FindFirstChildOfClass("UIStroke"); if s then s.Transparency=0.5 end
         else
             if ActiveRarityFilter and TR.UI.Btn.RarityFilters[ActiveRarityFilter] then
-                local oldBtn = TR.UI.Btn.RarityFilters[ActiveRarityFilter]
-                Tw(oldBtn, { BackgroundColor3 = D.CardHover, BackgroundTransparency = 0.5 })
-                local os = oldBtn:FindFirstChildOfClass("UIStroke"); if os then os.Transparency = 0.5 end
+                local oldBtn=TR.UI.Btn.RarityFilters[ActiveRarityFilter]; Tw(oldBtn,{BackgroundColor3=D.CardHover,BackgroundTransparency=0.5})
+                local os=oldBtn:FindFirstChildOfClass("UIStroke"); if os then os.Transparency=0.5 end
             end
-            ActiveRarityFilter = capRarity
-            Tw(btn, { BackgroundColor3 = col, BackgroundTransparency = 0.25 })
-            local s = btn:FindFirstChildOfClass("UIStroke"); if s then s.Transparency = 0 end
+            ActiveRarityFilter=capRarity; Tw(btn,{BackgroundColor3=col,BackgroundTransparency=0.25})
+            local s=btn:FindFirstChildOfClass("UIStroke"); if s then s.Transparency=0 end
         end
         RebuildTraitTargetList(traitSearchBox.Text)
     end)
-    TR.UI.Btn.RarityFilters[rarity] = btn
+    TR.UI.Btn.RarityFilters[rarity]=btn
 end
-
-local traitQuickRow = Instance.new("Frame", targetCard)
-traitQuickRow.Size                  = UDim2.new(1, 0, 0, 22)
-traitQuickRow.BackgroundTransparency = 1
-HList(traitQuickRow, 5)
-
-local clearAllTraitsBtn = Instance.new("TextButton", traitQuickRow)
-clearAllTraitsBtn.Size               = UDim2.new(0.48, 0, 1, 0)
-clearAllTraitsBtn.BackgroundColor3   = D.CardHover; clearAllTraitsBtn.BackgroundTransparency = 0.35
-clearAllTraitsBtn.Text               = "✕ Alle abwählen"; clearAllTraitsBtn.TextColor3 = D.Red
-clearAllTraitsBtn.TextSize           = 9; clearAllTraitsBtn.Font = Enum.Font.GothamBold
-clearAllTraitsBtn.AutoButtonColor    = false; clearAllTraitsBtn.BorderSizePixel = 0
-Corner(clearAllTraitsBtn, 5); Stroke(clearAllTraitsBtn, D.Red, 1, 0.4)
-clearAllTraitsBtn.MouseButton1Click:Connect(function()
-    TR.TargetTraits = {}
-    UpdateTargetTraitInfo()
-    RebuildTraitTargetList(traitSearchBox.Text)
-end)
-
-local presetMythicBtn = Instance.new("TextButton", traitQuickRow)
-presetMythicBtn.Size               = UDim2.new(0.48, 0, 1, 0)
-presetMythicBtn.BackgroundColor3   = D.CardHover; presetMythicBtn.BackgroundTransparency = 0.35
-presetMythicBtn.Text               = "⭐ Mythic+"; presetMythicBtn.TextColor3 = D.Red
-presetMythicBtn.TextSize           = 9; presetMythicBtn.Font = Enum.Font.GothamBold
-presetMythicBtn.AutoButtonColor    = false; presetMythicBtn.BorderSizePixel = 0
-Corner(presetMythicBtn, 5); Stroke(presetMythicBtn, D.Red, 1, 0.4)
+local traitQuickRow=Instance.new("Frame",targetCard); traitQuickRow.Size=UDim2.new(1,0,0,22); traitQuickRow.BackgroundTransparency=1; HList(traitQuickRow,5)
+local clearAllTraitsBtn=Instance.new("TextButton",traitQuickRow); clearAllTraitsBtn.Size=UDim2.new(0.48,0,1,0); clearAllTraitsBtn.BackgroundColor3=D.CardHover; clearAllTraitsBtn.BackgroundTransparency=0.35; clearAllTraitsBtn.Text="✕ Alle abwählen"; clearAllTraitsBtn.TextColor3=D.Red; clearAllTraitsBtn.TextSize=9; clearAllTraitsBtn.Font=Enum.Font.GothamBold; clearAllTraitsBtn.AutoButtonColor=false; clearAllTraitsBtn.BorderSizePixel=0; Corner(clearAllTraitsBtn,5); Stroke(clearAllTraitsBtn,D.Red,1,0.4)
+clearAllTraitsBtn.MouseButton1Click:Connect(function() TR.TargetTraits={}; UpdateTargetTraitInfo(); RebuildTraitTargetList(traitSearchBox.Text) end)
+local presetMythicBtn=Instance.new("TextButton",traitQuickRow); presetMythicBtn.Size=UDim2.new(0.48,0,1,0); presetMythicBtn.BackgroundColor3=D.CardHover; presetMythicBtn.BackgroundTransparency=0.35; presetMythicBtn.Text="⭐ Mythic+"; presetMythicBtn.TextColor3=D.Red; presetMythicBtn.TextSize=9; presetMythicBtn.Font=Enum.Font.GothamBold; presetMythicBtn.AutoButtonColor=false; presetMythicBtn.BorderSizePixel=0; Corner(presetMythicBtn,5); Stroke(presetMythicBtn,D.Red,1,0.4)
 presetMythicBtn.MouseButton1Click:Connect(function()
-    TR.TargetTraits = {}
-    for traitName, data in pairs(AllTraits) do
-        if data and (data.Rarity == "Mythic" or data.Rarity == "Divine" or data.Rarity == "Legendary") then
-            TR.TargetTraits[traitName] = true
-        end
-    end
-    UpdateTargetTraitInfo()
-    RebuildTraitTargetList(traitSearchBox.Text)
+    TR.TargetTraits={}
+    for traitName,data in pairs(AllTraits) do if data and (data.Rarity=="Mythic" or data.Rarity=="Divine" or data.Rarity=="Legendary") then TR.TargetTraits[traitName]=true end end
+    UpdateTargetTraitInfo(); RebuildTraitTargetList(traitSearchBox.Text)
 end)
-
-traitSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-    pcall(function() RebuildTraitTargetList(traitSearchBox.Text) end)
-end)
+traitSearchBox:GetPropertyChangedSignal("Text"):Connect(function() pcall(function() RebuildTraitTargetList(traitSearchBox.Text) end) end)
 
 -- ╔══════════════════════════════════════════════════════════╗
---  REROLL & STATS EINSTELLUNGEN
+--  REROLL & STATS CENTER – KOMPAKTES DUAL-LAYOUT
+--
+--  Aufbau:
+--   ┌────────────────────────────────────────────────────────┐
+--   │  REROLL EINSTELLUNGEN    │  STAT-ZIELE + INFO-BAR      │
+--   │  [Währung/Delay/Modus]   │  Stats Key: X | Perfect: Y │
+--   │  [Start/Stop Trait]      │  Live: Cooldown S+ Dmg A   │
+--   │                          │  [Grade-Picker je Stat]    │
+--   │                          │  [Start/Stop Stat]         │
+--   └────────────────────────────────────────────────────────┘
 -- ╚══════════════════════════════════════════════════════════╝
-local settingsRow = Instance.new("Frame", TraitPage)
-settingsRow.Size = UDim2.new(1, 0, 0, 0)
-settingsRow.AutomaticSize = Enum.AutomaticSize.Y
-settingsRow.BackgroundTransparency = 1
-HList(settingsRow, 8)
+local settingsRow=Instance.new("Frame",TraitPage)
+settingsRow.Size=UDim2.new(1,0,0,0); settingsRow.AutomaticSize=Enum.AutomaticSize.Y
+settingsRow.BackgroundTransparency=1; HList(settingsRow,8)
 
-local rerollCard = Card(settingsRow)
-rerollCard.Size = UDim2.new(0.5, -4, 0, 0)
-rerollCard.AutomaticSize = Enum.AutomaticSize.Y
-Pad(rerollCard, 10, 12, 10, 12)
-VList(rerollCard, 8)
-SecLbl(rerollCard, "🎲 REROLL EINSTELLUNGEN")
+-- ── LINKE SEITE: Reroll-Einstellungen ────────────────────────
+local rerollCard=Card(settingsRow)
+rerollCard.Size=UDim2.new(0.5,-4,0,0); rerollCard.AutomaticSize=Enum.AutomaticSize.Y
+Pad(rerollCard,10,12,10,12); VList(rerollCard,8)
+SecLbl(rerollCard,"🎲 REROLL EINSTELLUNGEN")
 
-local TR_SELECTED_CURRENCY = "Shards"
-local currencyCard = Instance.new("Frame", rerollCard)
-currencyCard.Size                  = UDim2.new(1, 0, 0, 30)
-currencyCard.BackgroundTransparency = 1
-HList(currencyCard, 8)
-MkLbl(currencyCard, "Währung:", 14, D.TextLow).Size = UDim2.new(0.38, 0, 1, 0)
-local currencyLbl = MkLbl(currencyCard, TR_SELECTED_CURRENCY, 14, D.Cyan, true)
-currencyLbl.Size = UDim2.new(0.38, 0, 1, 0)
+local TR_SELECTED_CURRENCY="Shards"
+local currencyCard=Instance.new("Frame",rerollCard); currencyCard.Size=UDim2.new(1,0,0,30); currencyCard.BackgroundTransparency=1; HList(currencyCard,8)
+MkLbl(currencyCard,"Währung:",14,D.TextLow).Size=UDim2.new(0.38,0,1,0)
+local currencyLbl=MkLbl(currencyCard,TR_SELECTED_CURRENCY,14,D.Cyan,true); currencyLbl.Size=UDim2.new(0.38,0,1,0)
 
-local rerollCtrlRow = Instance.new("Frame", rerollCard)
-rerollCtrlRow.Size                  = UDim2.new(1, 0, 0, 36)
-rerollCtrlRow.BackgroundTransparency = 1
-HList(rerollCtrlRow, 8)
+local rerollCtrlRow=Instance.new("Frame",rerollCard); rerollCtrlRow.Size=UDim2.new(1,0,0,36); rerollCtrlRow.BackgroundTransparency=1; HList(rerollCtrlRow,8)
+startRerollBtn=Instance.new("TextButton",rerollCtrlRow); startRerollBtn.Size=UDim2.new(0.58,0,1,0); startRerollBtn.BackgroundColor3=Color3.fromRGB(14,42,28); startRerollBtn.BackgroundTransparency=0.22; startRerollBtn.Text="▶  Start Reroll"; startRerollBtn.TextColor3=D.GreenBright; startRerollBtn.TextSize=14; startRerollBtn.Font=Enum.Font.GothamBold; startRerollBtn.AutoButtonColor=false; startRerollBtn.BorderSizePixel=0; Corner(startRerollBtn,8); Stroke(startRerollBtn,D.Green,1.5,0.3)
+stopRerollBtn=Instance.new("TextButton",rerollCtrlRow); stopRerollBtn.Size=UDim2.new(0.38,0,1,0); stopRerollBtn.BackgroundColor3=Color3.fromRGB(48,16,18); stopRerollBtn.BackgroundTransparency=0.22; stopRerollBtn.Text="■  Stop"; stopRerollBtn.TextColor3=D.Red; stopRerollBtn.TextSize=14; stopRerollBtn.Font=Enum.Font.GothamBold; stopRerollBtn.AutoButtonColor=false; stopRerollBtn.BorderSizePixel=0; Corner(stopRerollBtn,8); Stroke(stopRerollBtn,D.Red,1.5,0.28)
 
-startRerollBtn = Instance.new("TextButton", rerollCtrlRow)
-startRerollBtn.Size                  = UDim2.new(0.58, 0, 1, 0)
-startRerollBtn.BackgroundColor3      = Color3.fromRGB(14, 42, 28)
-startRerollBtn.BackgroundTransparency = 0.22
-startRerollBtn.Text                  = "▶  Start Reroll"
-startRerollBtn.TextColor3            = D.GreenBright
-startRerollBtn.TextSize              = 14
-startRerollBtn.Font                  = Enum.Font.GothamBold
-startRerollBtn.AutoButtonColor       = false
-startRerollBtn.BorderSizePixel       = 0
-Corner(startRerollBtn, 8); Stroke(startRerollBtn, D.Green, 1.5, 0.3)
+local delayRow=Instance.new("Frame",rerollCard); delayRow.Size=UDim2.new(1,0,0,28); delayRow.BackgroundTransparency=1; HList(delayRow,6)
+MkLbl(delayRow,"Delay (s):",14,D.TextLow).Size=UDim2.new(0.45,0,1,0)
+local delayOuter,delayBox=MkInput(delayRow,"0.5",28); delayOuter.Size=UDim2.new(0.30,0,0,28); delayBox.Text="0.5"
+MkLbl(delayRow,"zwischen Rolls",14,D.TextLow).Size=UDim2.new(0.22,0,1,0)
 
-stopRerollBtn = Instance.new("TextButton", rerollCtrlRow)
-stopRerollBtn.Size                  = UDim2.new(0.38, 0, 1, 0)
-stopRerollBtn.BackgroundColor3      = Color3.fromRGB(48, 16, 18)
-stopRerollBtn.BackgroundTransparency = 0.22
-stopRerollBtn.Text                  = "■  Stop"
-stopRerollBtn.TextColor3            = D.Red
-stopRerollBtn.TextSize              = 14
-stopRerollBtn.Font                  = Enum.Font.GothamBold
-stopRerollBtn.AutoButtonColor       = false
-stopRerollBtn.BorderSizePixel       = 0
-Corner(stopRerollBtn, 8); Stroke(stopRerollBtn, D.Red, 1.5, 0.28)
+local singleRollBtn=NeonBtn(rerollCard,"🎲  Einmal Rollen (Main)",D.CyanDim,30)
 
-local delayRow = Instance.new("Frame", rerollCard)
-delayRow.Size                  = UDim2.new(1, 0, 0, 28)
-delayRow.BackgroundTransparency = 1
-HList(delayRow, 6)
-MkLbl(delayRow, "Delay (s):", 14, D.TextLow).Size = UDim2.new(0.45, 0, 1, 0)
-local delayOuter, delayBox = MkInput(delayRow, "0.5", 28)
-delayOuter.Size = UDim2.new(0.30, 0, 0, 28); delayBox.Text = "0.5"
-MkLbl(delayRow, "zwischen Rolls", 14, D.TextLow).Size = UDim2.new(0.22, 0, 1, 0)
-
-local singleRollBtn = NeonBtn(rerollCard, "🎲  Einmal Rollen (Main)", D.CyanDim, 30)
-
-SecLbl(rerollCard, "📈 STAT-ANZEIGE (aktuell)")
-
-TR.UI.Lbl.StatHeader = MkLbl(rerollCard, "Keine Einheit gewählt", 13, D.TextLow, true)
-TR.UI.Lbl.StatHeader.Size = UDim2.new(1, 0, 0, 18)
-
-local statKeyRow = Instance.new("Frame", rerollCard)
-statKeyRow.Size                  = UDim2.new(1, 0, 0, 20)
-statKeyRow.BackgroundTransparency = 1
-HList(statKeyRow, 8)
-
-TR.UI.Lbl.StatKeyCount = MkLbl(statKeyRow, "Stats Key: –", 13, D.Gold, true)
-TR.UI.Lbl.StatKeyCount.Size = UDim2.new(0.5, 0, 1, 0)
-
-TR.UI.Lbl.PerfectStatKeyCount = MkLbl(statKeyRow, "Perfect Stats Key: –", 13, D.Cyan, true)
-TR.UI.Lbl.PerfectStatKeyCount.Size           = UDim2.new(0.5, 0, 1, 0)
-TR.UI.Lbl.PerfectStatKeyCount.TextXAlignment = Enum.TextXAlignment.Right
-
--- ╔══════════════════════════════════════════════════════════╗
---  FIX #4 + #5 – Kompakte Stat-Anzeige (alle 5 Stats sichtbar)
---  Höhe 20px pro Zeile statt 24px → alle 5 passen ohne Scrollen.
---  valLbl wird von ReadStatFromLabel() ausgelesen (FIX #5).
--- ╚══════════════════════════════════════════════════════════╝
-local statList = Instance.new("Frame", rerollCard)
-statList.Size                  = UDim2.new(1, 0, 0, 0)
-statList.AutomaticSize         = Enum.AutomaticSize.Y
-statList.BackgroundTransparency = 1
-VList(statList, 2)  -- FIX #4: Padding 2px statt 3px für Kompaktheit
-
-TR.UI.Fr.StatRows = {}
-for _, statName in ipairs(STAT_POTENTIAL_NAMES) do
-    -- FIX #4: Zeilenhöhe 20px statt 24px → alle 5 Stats ohne Scrollen sichtbar
-    local row = Instance.new("Frame", statList)
-    row.Size                  = UDim2.new(1, 0, 0, 20)
-    row.BackgroundColor3      = D.Card
-    row.BackgroundTransparency = D.GlassPane or 0.18
-    row.BorderSizePixel       = 0
-    Corner(row, 5); Stroke(row, D.Border, 1, 0.45)
-
-    local nL = Instance.new("TextLabel", row)
-    nL.Name                   = "StatNameLabel"
-    nL.Position               = UDim2.new(0, 6, 0, 0)
-    nL.Size                   = UDim2.new(0.48, 0, 1, 0)
-    nL.BackgroundTransparency = 1
-    nL.Text                   = STAT_DISPLAY_NAMES[statName] or statName
-    nL.TextColor3             = D.TextMid
-    nL.TextSize               = 10
-    nL.Font                   = Enum.Font.GothamMedium
-    nL.TextScaled             = false
-    nL.RichText               = true
-    nL.TextXAlignment         = Enum.TextXAlignment.Left
-
-    -- FIX #5: valLbl – dieses Label wird von ReadStatFromLabel() gelesen
-    -- Format: "S+  (12)" – Rating zuerst, Raw-Wert in Klammern
-    local vL = Instance.new("TextLabel", row)
-    vL.Name                   = "StatValueLabel"  -- expliziter Name für ReadStatFromLabel
-    vL.Position               = UDim2.new(0.48, 0, 0, 0)
-    vL.Size                   = UDim2.new(0.34, -2, 1, 0)
-    vL.BackgroundTransparency = 1
-    vL.Text                   = "–"
-    vL.TextColor3             = D.TextLow
-    vL.TextSize               = 11
-    vL.Font                   = Enum.Font.GothamBold
-    vL.TextXAlignment         = Enum.TextXAlignment.Right
-
-    local tL = Instance.new("TextLabel", row)
-    tL.Position               = UDim2.new(0.82, 0, 0, 0)
-    tL.Size                   = UDim2.new(0.18, -3, 1, 0)
-    tL.BackgroundTransparency = 1
-    tL.Text                   = ""
-    tL.TextColor3             = D.CyanDim
-    tL.TextSize               = 9
-    tL.Font                   = Enum.Font.GothamBold
-    tL.TextXAlignment         = Enum.TextXAlignment.Right
-
-    TR.UI.Fr.StatRows[statName] = { nameLbl = nL, valLbl = vL, targetLbl = tL, row = row }
-end
-
--- ╔══════════════════════════════════════════════════════════╗
---  FIX #2 – Multi-Stat Ziel-Ratings
---  AND-Stop: Schleife stoppt wenn ALLE aktiven Stats >= Ziel
---  >= Vergleich: S+ stoppt auch wenn Ziel S war
--- ╚══════════════════════════════════════════════════════════╝
-local statsCard = Card(settingsRow)
-statsCard.Size = UDim2.new(0.5, -4, 0, 0)
-statsCard.AutomaticSize = Enum.AutomaticSize.Y
-Pad(statsCard, 10, 12, 10, 12)
-VList(statsCard, 8)
-SecLbl(statsCard, "🎯 STAT-ZIELE (AND-Verknüpfung, ≥)")
-
-local multiStatInfoLbl = MkLbl(statsCard,
-    "Stoppt wenn ALLE Stats ihr Ziel erreichen ODER ÜBERTREFFEN (≥).\nS+ stoppt auch wenn Ziel S war.", 10, D.TextLow)
-multiStatInfoLbl.Size = UDim2.new(1, 0, 0, 30)
-multiStatInfoLbl.TextWrapped = true
-
-local RATING_TIER_COLORS = {
-    ["C-"]="C"; ["C"]="C"; ["C+"]="C";
-    ["B-"]="B"; ["B"]="B"; ["B+"]="B";
-    ["A-"]="A"; ["A"]="A"; ["A+"]="A";
-    ["S-"]="S"; ["S"]="S"; ["S+"]="S";
-    ["SS"]="SS"; ["SSS"]="SS";
-    ["O-"]="O"; ["O"]="O"; ["O+"]="O";
-}
-local TIER_COLORS = {
-    C  = Color3.fromRGB(160, 160, 160),
-    B  = Color3.fromRGB(50,  200,  80),
-    A  = Color3.fromRGB(50,  120, 255),
-    S  = Color3.fromRGB(200, 130, 255),
-    SS = Color3.fromRGB(255, 180,   0),
-    O  = Color3.fromRGB(255,  60,  60),
-}
-local function GetRatingColor(rating)
-    local tier = RATING_TIER_COLORS[rating] or "C"
-    return TIER_COLORS[tier] or D.TextMid
-end
-
-TR.UI.Btn.StatTargetRows = {}
-
-local function RebuildMultiStatUI()
-    for _, entry in pairs(TR.UI.Btn.StatTargetRows) do
-        if entry.frame and entry.frame.Parent then entry.frame:Destroy() end
-    end
-    TR.UI.Btn.StatTargetRows = {}
-
-    for _, statName in ipairs(STAT_POTENTIAL_NAMES) do
-        local displayName   = STAT_DISPLAY_NAMES[statName] or statName
-        local currentTarget = TR.StatTargetRatings[statName]
-        local isActive      = currentTarget ~= nil
-
-        local statRowFrame = Instance.new("Frame", statsCard)
-        statRowFrame.Size                  = UDim2.new(1, 0, 0, 0)
-        statRowFrame.AutomaticSize         = Enum.AutomaticSize.Y
-        statRowFrame.BackgroundTransparency = 1
-        VList(statRowFrame, 3)
-
-        local hRow = Instance.new("Frame", statRowFrame)
-        hRow.Size                  = UDim2.new(1, 0, 0, 24)
-        hRow.BackgroundColor3      = isActive and Color3.fromRGB(14, 42, 28) or D.CardHover
-        hRow.BackgroundTransparency = 0.2
-        hRow.BorderSizePixel       = 0
-        Corner(hRow, 6)
-        Stroke(hRow, isActive and D.Green or D.Border, 1, isActive and 0 or 0.5)
-
-        local toggleBtn = Instance.new("TextButton", hRow)
-        toggleBtn.Size                  = UDim2.new(0, 18, 0, 18)
-        toggleBtn.Position              = UDim2.new(0, 3, 0.5, -9)
-        toggleBtn.BackgroundColor3      = isActive and D.Green or D.CardHover
-        toggleBtn.BackgroundTransparency = isActive and 0.1 or 0.5
-        toggleBtn.Text                  = isActive and "✓" or ""
-        toggleBtn.TextColor3            = Color3.new(1, 1, 1)
-        toggleBtn.TextSize              = 10
-        toggleBtn.Font                  = Enum.Font.GothamBold
-        toggleBtn.AutoButtonColor       = false
-        toggleBtn.BorderSizePixel       = 0
-        Corner(toggleBtn, 4)
-        Stroke(toggleBtn, isActive and D.Green or D.Border, 1, isActive and 0 or 0.5)
-
-        local statNameLbl = Instance.new("TextLabel", hRow)
-        statNameLbl.Position               = UDim2.new(0, 26, 0, 0)
-        statNameLbl.Size                   = UDim2.new(0.45, -26, 1, 0)
-        statNameLbl.BackgroundTransparency = 1
-        statNameLbl.Text                   = displayName
-        statNameLbl.TextColor3             = isActive and D.GreenBright or D.TextMid
-        statNameLbl.TextSize               = 11
-        statNameLbl.Font                   = Enum.Font.GothamBold
-        statNameLbl.TextXAlignment         = Enum.TextXAlignment.Left
-
-        local targetLbl = Instance.new("TextLabel", hRow)
-        targetLbl.Position               = UDim2.new(0.45, 0, 0, 0)
-        targetLbl.Size                   = UDim2.new(0.55, -4, 1, 0)
-        targetLbl.BackgroundTransparency = 1
-        -- FIX #2: Ziel-Label zeigt >= um den >= Vergleich klar zu kommunizieren
-        targetLbl.Text                   = currentTarget and ("≥ " .. currentTarget) or "kein Ziel"
-        targetLbl.TextColor3             = currentTarget and GetRatingColor(currentTarget) or D.TextLow
-        targetLbl.TextSize               = 11
-        targetLbl.Font                   = Enum.Font.GothamBold
-        targetLbl.TextXAlignment         = Enum.TextXAlignment.Right
-
-        local ratingPickerFrame = Instance.new("Frame", statRowFrame)
-        ratingPickerFrame.Size                  = UDim2.new(1, 0, 0, 0)
-        ratingPickerFrame.AutomaticSize         = Enum.AutomaticSize.Y
-        ratingPickerFrame.BackgroundTransparency = 1
-        ratingPickerFrame.Visible               = isActive
-
-        local ratingGrid = Instance.new("UIGridLayout", ratingPickerFrame)
-        ratingGrid.CellSize    = UDim2.new(0.25, -3, 0, 20)
-        ratingGrid.CellPadding = UDim2.new(0, 3, 0, 3)
-
-        for _, rating in ipairs(ALL_RATINGS) do
-            local col = GetRatingColor(rating)
-            local isThisTarget = currentTarget == rating
-            local rBtn = Instance.new("TextButton", ratingPickerFrame)
-            rBtn.BackgroundColor3      = isThisTarget and col or D.CardHover
-            rBtn.BackgroundTransparency = isThisTarget and 0.15 or 0.55
-            rBtn.BorderSizePixel       = 0
-            Corner(rBtn, 4)
-            Stroke(rBtn, isThisTarget and col or D.Border, 1, isThisTarget and 0 or 0.6)
-            rBtn.Text            = rating
-            rBtn.TextColor3      = isThisTarget and col or D.TextMid
-            rBtn.TextSize        = 9
-            rBtn.Font            = Enum.Font.GothamBold
-            rBtn.AutoButtonColor = false
-
-            local capStatName = statName
-            local capRating   = rating
-            rBtn.MouseButton1Click:Connect(function()
-                TR.StatTargetRatings[capStatName] = capRating
-                RebuildMultiStatUI()
-            end)
-        end
-
-        local capStatName = statName
-        toggleBtn.MouseButton1Click:Connect(function()
-            if TR.StatTargetRatings[capStatName] then
-                TR.StatTargetRatings[capStatName] = nil
-            else
-                TR.StatTargetRatings[capStatName] = "S"
-            end
-            RebuildMultiStatUI()
-        end)
-
-        TR.UI.Btn.StatTargetRows[statName] = {
-            frame     = statRowFrame,
-            targetLbl = targetLbl,
-            toggleBtn = toggleBtn,
-        }
-    end
-
-    local activeCount = 0
-    local parts = {}
-    for _, sn in ipairs(STAT_POTENTIAL_NAMES) do
-        if TR.StatTargetRatings[sn] then
-            activeCount = activeCount + 1
-            -- FIX #2: >= Symbol in der Zusammenfassung
-            table.insert(parts, (STAT_DISPLAY_NAMES[sn] or sn) .. "≥" .. TR.StatTargetRatings[sn])
-        end
-    end
-    if TR.UI.Lbl.MultiStatSummary then
-        if activeCount == 0 then
-            TR.UI.Lbl.MultiStatSummary.Text       = "Kein Stat-Ziel aktiv → kein Auto-Stop"
-            TR.UI.Lbl.MultiStatSummary.TextColor3 = D.TextLow
-        else
-            TR.UI.Lbl.MultiStatSummary.Text       = "Ziel (≥): " .. table.concat(parts, "  &  ")
-            TR.UI.Lbl.MultiStatSummary.TextColor3 = D.Cyan
-        end
-    end
-end
-
-TR.UI.Lbl.MultiStatSummary = MkLbl(statsCard, "Kein Stat-Ziel aktiv → kein Auto-Stop", 10, D.TextLow)
-TR.UI.Lbl.MultiStatSummary.Size = UDim2.new(1, 0, 0, 26)
-TR.UI.Lbl.MultiStatSummary.TextWrapped = true
-
-local presetRow = Instance.new("Frame", statsCard)
-presetRow.Size                  = UDim2.new(1, 0, 0, 26)
-presetRow.BackgroundTransparency = 1
-HList(presetRow, 5)
-
-local presetSBtn = Instance.new("TextButton", presetRow)
-presetSBtn.Size               = UDim2.new(0.32, 0, 1, 0)
-presetSBtn.BackgroundColor3   = D.CardHover; presetSBtn.BackgroundTransparency = 0.35
-presetSBtn.Text               = "⭐ Alle ≥S"; presetSBtn.TextColor3 = Color3.fromRGB(200, 130, 255)
-presetSBtn.TextSize           = 10; presetSBtn.Font = Enum.Font.GothamBold
-presetSBtn.AutoButtonColor    = false; presetSBtn.BorderSizePixel = 0
-Corner(presetSBtn, 6); Stroke(presetSBtn, Color3.fromRGB(200, 130, 255), 1, 0.3)
-presetSBtn.MouseButton1Click:Connect(function()
-    for _, sn in ipairs(STAT_POTENTIAL_NAMES) do TR.StatTargetRatings[sn] = "S" end
-    RebuildMultiStatUI()
-end)
-
-local presetSPlusBtn = Instance.new("TextButton", presetRow)
-presetSPlusBtn.Size               = UDim2.new(0.32, 0, 1, 0)
-presetSPlusBtn.BackgroundColor3   = D.CardHover; presetSPlusBtn.BackgroundTransparency = 0.35
-presetSPlusBtn.Text               = "✨ Alle ≥S+"; presetSPlusBtn.TextColor3 = D.Gold
-presetSPlusBtn.TextSize           = 10; presetSPlusBtn.Font = Enum.Font.GothamBold
-presetSPlusBtn.AutoButtonColor    = false; presetSPlusBtn.BorderSizePixel = 0
-Corner(presetSPlusBtn, 6); Stroke(presetSPlusBtn, D.Gold, 1, 0.3)
-presetSPlusBtn.MouseButton1Click:Connect(function()
-    for _, sn in ipairs(STAT_POTENTIAL_NAMES) do TR.StatTargetRatings[sn] = "S+" end
-    RebuildMultiStatUI()
-end)
-
-local clearStatsBtn = Instance.new("TextButton", presetRow)
-clearStatsBtn.Size               = UDim2.new(0.32, 0, 1, 0)
-clearStatsBtn.BackgroundColor3   = D.CardHover; clearStatsBtn.BackgroundTransparency = 0.35
-clearStatsBtn.Text               = "✕ Alle aus"; clearStatsBtn.TextColor3 = D.Red
-clearStatsBtn.TextSize           = 10; clearStatsBtn.Font = Enum.Font.GothamBold
-clearStatsBtn.AutoButtonColor    = false; clearStatsBtn.BorderSizePixel = 0
-Corner(clearStatsBtn, 6); Stroke(clearStatsBtn, D.Red, 1, 0.4)
-clearStatsBtn.MouseButton1Click:Connect(function()
-    TR.StatTargetRatings = {}
-    RebuildMultiStatUI()
-end)
-
-TR.UI.Lbl.StatRollRate = MkLbl(statsCard, "", 12, D.TextLow)
-TR.UI.Lbl.StatRollRate.Size           = UDim2.new(1, 0, 0, 14)
-TR.UI.Lbl.StatRollRate.TextXAlignment = Enum.TextXAlignment.Right
-
-local statCtrlRow = Instance.new("Frame", statsCard)
-statCtrlRow.Size                  = UDim2.new(1, 0, 0, 34)
-statCtrlRow.BackgroundTransparency = 1
-HList(statCtrlRow, 8)
-
-TR.UI.Btn.StartStat = Instance.new("TextButton", statCtrlRow)
-TR.UI.Btn.StartStat.Size                  = UDim2.new(0.58, 0, 1, 0)
-TR.UI.Btn.StartStat.BackgroundColor3      = Color3.fromRGB(14, 42, 28)
-TR.UI.Btn.StartStat.BackgroundTransparency = 0.22
-TR.UI.Btn.StartStat.Text                  = "▶  Start Stat-Reroll"
-TR.UI.Btn.StartStat.TextColor3            = D.GreenBright
-TR.UI.Btn.StartStat.TextSize              = 13
-TR.UI.Btn.StartStat.Font                  = Enum.Font.GothamBold
-TR.UI.Btn.StartStat.AutoButtonColor       = false
-TR.UI.Btn.StartStat.BorderSizePixel       = 0
-Corner(TR.UI.Btn.StartStat, 8); Stroke(TR.UI.Btn.StartStat, D.Green, 1.5, 0.3)
-
-TR.UI.Btn.StopStat = Instance.new("TextButton", statCtrlRow)
-TR.UI.Btn.StopStat.Size                  = UDim2.new(0.38, 0, 1, 0)
-TR.UI.Btn.StopStat.BackgroundColor3      = Color3.fromRGB(48, 16, 18)
-TR.UI.Btn.StopStat.BackgroundTransparency = 0.22
-TR.UI.Btn.StopStat.Text                  = "■  Stop"
-TR.UI.Btn.StopStat.TextColor3            = D.Red
-TR.UI.Btn.StopStat.TextSize              = 13
-TR.UI.Btn.StopStat.Font                  = Enum.Font.GothamBold
-TR.UI.Btn.StopStat.AutoButtonColor       = false
-TR.UI.Btn.StopStat.BorderSizePixel       = 0
-Corner(TR.UI.Btn.StopStat, 8); Stroke(TR.UI.Btn.StopStat, D.Red, 1.5, 0.28)
-
-local statModeCard = Instance.new("Frame", statsCard)
-statModeCard.Size                  = UDim2.new(1, 0, 0, 0)
-statModeCard.AutomaticSize         = Enum.AutomaticSize.Y
-statModeCard.BackgroundTransparency = 1
-VList(statModeCard, 4)
-SecLbl(statModeCard, "Reroll-Modus")
-
-local statModeGrid = Instance.new("Frame", statModeCard)
-statModeGrid.Size                  = UDim2.new(1, 0, 0, 0)
-statModeGrid.AutomaticSize         = Enum.AutomaticSize.Y
-statModeGrid.BackgroundTransparency = 1
-local statModeLayout = Instance.new("UIGridLayout", statModeGrid)
-statModeLayout.CellSize    = UDim2.new(0.49, 0, 0, 26)
-statModeLayout.CellPadding = UDim2.new(0, 6, 0, 6)
-
-TR.UI.Btn.StatMode = {}
+-- Reroll-Modus (welcher Stat)
+SecLbl(rerollCard,"Stat-Reroll Modus")
+local statModeGrid=Instance.new("Frame",rerollCard); statModeGrid.Size=UDim2.new(1,0,0,0); statModeGrid.AutomaticSize=Enum.AutomaticSize.Y; statModeGrid.BackgroundTransparency=1
+local statModeLayout=Instance.new("UIGridLayout",statModeGrid); statModeLayout.CellSize=UDim2.new(0.49,0,0,26); statModeLayout.CellPadding=UDim2.new(0,6,0,6)
+TR.UI.Btn.StatMode={}
 local function SetStatMode(mode)
-    TR.SelectedStatMode = mode
-    for k, b in pairs(TR.UI.Btn.StatMode) do
-        local active = (k == mode)
-        Tw(b, { BackgroundColor3 = active and (D.RowSelect or Color3.fromRGB(48, 50, 58)) or D.CardHover })
-        local s = b:FindFirstChildOfClass("UIStroke")
-        if s then s.Transparency = active and 0 or 0.4; s.Color = active and D.Cyan or D.Border end
+    TR.SelectedStatMode=mode
+    for k,b in pairs(TR.UI.Btn.StatMode) do
+        local active=(k==mode); Tw(b,{BackgroundColor3=active and (D.RowSelect or Color3.fromRGB(48,50,58)) or D.CardHover})
+        local s=b:FindFirstChildOfClass("UIStroke"); if s then s.Transparency=active and 0 or 0.4; s.Color=active and D.Cyan or D.Border end
     end
 end
-
-local allBtn = Instance.new("TextButton", statModeGrid)
-allBtn.BackgroundColor3 = D.CardHover; allBtn.Text = "All (Perfect Key)"; allBtn.TextColor3 = D.Cyan
-allBtn.TextSize = 11; allBtn.Font = Enum.Font.GothamBold; allBtn.AutoButtonColor = false; allBtn.BorderSizePixel = 0
-Corner(allBtn, 6); Stroke(allBtn, D.Cyan, 1, 0.2)
-TR.UI.Btn.StatMode["All"] = allBtn
-allBtn.MouseButton1Click:Connect(function() SetStatMode("All") end)
-
-for _, statName in ipairs(STAT_POTENTIAL_NAMES) do
-    local b = Instance.new("TextButton", statModeGrid)
-    b.BackgroundColor3 = D.CardHover; b.Text = STAT_DISPLAY_NAMES[statName] or statName; b.TextColor3 = D.TextMid
-    b.TextSize = 11; b.Font = Enum.Font.GothamMedium; b.AutoButtonColor = false; b.BorderSizePixel = 0
-    b.TextTruncate = Enum.TextTruncate.AtEnd
-    Corner(b, 6); Stroke(b, D.Border, 1, 0.4)
-    TR.UI.Btn.StatMode[statName] = b
-    b.MouseButton1Click:Connect(function() SetStatMode(statName) end)
+local allBtn=Instance.new("TextButton",statModeGrid); allBtn.BackgroundColor3=D.CardHover; allBtn.Text="All (Perfect Key)"; allBtn.TextColor3=D.Cyan; allBtn.TextSize=11; allBtn.Font=Enum.Font.GothamBold; allBtn.AutoButtonColor=false; allBtn.BorderSizePixel=0; Corner(allBtn,6); Stroke(allBtn,D.Cyan,1,0.2); TR.UI.Btn.StatMode["All"]=allBtn; allBtn.MouseButton1Click:Connect(function() SetStatMode("All") end)
+for _,statName in ipairs(STAT_POTENTIAL_NAMES) do
+    local b=Instance.new("TextButton",statModeGrid); b.BackgroundColor3=D.CardHover; b.Text=STAT_DISPLAY_NAMES[statName] or statName; b.TextColor3=D.TextMid; b.TextSize=11; b.Font=Enum.Font.GothamMedium; b.AutoButtonColor=false; b.BorderSizePixel=0; b.TextTruncate=Enum.TextTruncate.AtEnd; Corner(b,6); Stroke(b,D.Border,1,0.4); TR.UI.Btn.StatMode[statName]=b; b.MouseButton1Click:Connect(function() SetStatMode(statName) end)
 end
 SetStatMode("All")
 
--- ╔══════════════════════════════════════════════════════════╗
---  LOGIK – Trait-Reroll
--- ╚══════════════════════════════════════════════════════════╝
-local function CheckGoalReached()
-    if not TR.SelectedUnit then return false end
-    local main, sub = GetUnitTraits(TR.SelectedUnit)
-    if main and TR.TargetTraits[main] then
-        SetStatus("🎉 Ziel-Trait '" .. main .. "' ERREICHT! Gestoppt.", D.GreenBright); return true
-    end
-    if sub and TR.TargetTraits[sub] then
-        SetStatus("🎉 Ziel-Trait '" .. sub .. "' ERREICHT! Gestoppt.", D.GreenBright); return true
-    end
-    return false
+-- ── RECHTE SEITE: Stat-Ziele + Info-Bar ──────────────────────
+local statsCard=Card(settingsRow)
+statsCard.Size=UDim2.new(0.5,-4,0,0); statsCard.AutomaticSize=Enum.AutomaticSize.Y
+Pad(statsCard,10,12,10,12); VList(statsCard,6)
+
+-- ── FIX #4: INFO-BAR (Keys + Live Stats) ──────────────────────
+local infoBarCard=Instance.new("Frame",statsCard)
+infoBarCard.Size=UDim2.new(1,0,0,0); infoBarCard.AutomaticSize=Enum.AutomaticSize.Y
+infoBarCard.BackgroundColor3=Color3.fromRGB(10,24,38); infoBarCard.BackgroundTransparency=0.1
+infoBarCard.BorderSizePixel=0; Corner(infoBarCard,8); Stroke(infoBarCard,D.CyanDim,1,0.3)
+local ibInner=Instance.new("Frame",infoBarCard); ibInner.Size=UDim2.new(1,0,0,0); ibInner.AutomaticSize=Enum.AutomaticSize.Y; ibInner.BackgroundTransparency=1; Pad(ibInner,5,8,5,8); VList(ibInner,4)
+
+-- Key-Zeile
+local keyRow=Instance.new("Frame",ibInner); keyRow.Size=UDim2.new(1,0,0,18); keyRow.BackgroundTransparency=1; HList(keyRow,8)
+TR.UI.Lbl.StatKeyCount=Instance.new("TextLabel",keyRow); TR.UI.Lbl.StatKeyCount.Size=UDim2.new(0.5,0,1,0); TR.UI.Lbl.StatKeyCount.BackgroundTransparency=1; TR.UI.Lbl.StatKeyCount.Text="Stats Key: –"; TR.UI.Lbl.StatKeyCount.TextColor3=D.Gold; TR.UI.Lbl.StatKeyCount.TextSize=10; TR.UI.Lbl.StatKeyCount.Font=Enum.Font.GothamBold; TR.UI.Lbl.StatKeyCount.TextXAlignment=Enum.TextXAlignment.Left
+TR.UI.Lbl.PerfectStatKeyCount=Instance.new("TextLabel",keyRow); TR.UI.Lbl.PerfectStatKeyCount.Size=UDim2.new(0.5,0,1,0); TR.UI.Lbl.PerfectStatKeyCount.BackgroundTransparency=1; TR.UI.Lbl.PerfectStatKeyCount.Text="Perfect: –"; TR.UI.Lbl.PerfectStatKeyCount.TextColor3=D.Cyan; TR.UI.Lbl.PerfectStatKeyCount.TextSize=10; TR.UI.Lbl.PerfectStatKeyCount.Font=Enum.Font.GothamBold; TR.UI.Lbl.PerfectStatKeyCount.TextXAlignment=Enum.TextXAlignment.Right
+
+-- Einheit-Header
+TR.UI.Lbl.StatHeader=Instance.new("TextLabel",ibInner); TR.UI.Lbl.StatHeader.Size=UDim2.new(1,0,0,16); TR.UI.Lbl.StatHeader.BackgroundTransparency=1; TR.UI.Lbl.StatHeader.Text="Keine Einheit gewählt"; TR.UI.Lbl.StatHeader.TextColor3=D.TextLow; TR.UI.Lbl.StatHeader.TextSize=10; TR.UI.Lbl.StatHeader.Font=Enum.Font.GothamMedium; TR.UI.Lbl.StatHeader.TextXAlignment=Enum.TextXAlignment.Left
+
+-- Live-Stats 5 kompakte Zeilen (alle 5 Potentials)
+local statList=Instance.new("Frame",ibInner); statList.Size=UDim2.new(1,0,0,0); statList.AutomaticSize=Enum.AutomaticSize.Y; statList.BackgroundTransparency=1; VList(statList,2)
+TR.UI.Fr.StatRows={}
+for _,statName in ipairs(STAT_POTENTIAL_NAMES) do
+    local row=Instance.new("Frame",statList); row.Size=UDim2.new(1,0,0,19); row.BackgroundColor3=D.Card; row.BackgroundTransparency=D.GlassPane or 0.18; row.BorderSizePixel=0; Corner(row,5); Stroke(row,D.Border,1,0.45)
+    local nL=Instance.new("TextLabel",row); nL.Name="StatNameLabel"; nL.Position=UDim2.new(0,5,0,0); nL.Size=UDim2.new(0.46,0,1,0); nL.BackgroundTransparency=1; nL.Text=STAT_DISPLAY_NAMES[statName] or statName; nL.TextColor3=D.TextMid; nL.TextSize=9; nL.Font=Enum.Font.GothamMedium; nL.TextScaled=false; nL.RichText=true; nL.TextXAlignment=Enum.TextXAlignment.Left
+    local vL=Instance.new("TextLabel",row); vL.Name="StatValueLabel"; vL.Position=UDim2.new(0.46,0,0,0); vL.Size=UDim2.new(0.34,-2,1,0); vL.BackgroundTransparency=1; vL.Text="–"; vL.TextColor3=D.TextLow; vL.TextSize=10; vL.Font=Enum.Font.GothamBold; vL.TextXAlignment=Enum.TextXAlignment.Right
+    local tL=Instance.new("TextLabel",row); tL.Position=UDim2.new(0.80,0,0,0); tL.Size=UDim2.new(0.20,-3,1,0); tL.BackgroundTransparency=1; tL.Text=""; tL.TextColor3=D.CyanDim; tL.TextSize=8; tL.Font=Enum.Font.GothamBold; tL.TextXAlignment=Enum.TextXAlignment.Right
+    TR.UI.Fr.StatRows[statName]={nameLbl=nL,valLbl=vL,targetLbl=tL,row=row}
 end
 
-local function DoSingleReroll()
-    if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!", D.Orange); return false end
-    if not RerollRemote    then SetStatus("⚠ RerollTrait Remote nicht gefunden!", D.Orange); return false end
-    local curMain, curSub = GetUnitTraits(TR.SelectedUnit)
-    curMain = curMain or ""; curSub = curSub or ""
-    pcall(function() if TraitAckRemote then TraitAckRemote:FireServer() end end)
-    task.wait(0.06)
-    local ok = pcall(function()
-        RerollRemote:FireServer(TR.SelectedUnit, "Reroll", "Main", TR_SELECTED_CURRENCY, { curMain, curSub })
-    end)
-    if ok then TR.RollCount = TR.RollCount + 1 end
-    return ok
+SecLbl(statsCard,"🎯 STAT-ZIELE (≥, AND-Verknüpfung)")
+
+local multiStatInfoLbl=MkLbl(statsCard,"Stoppt wenn ALLE Stats ≥ Ziel (S+ stoppt auch bei Ziel S).",10,D.TextLow)
+multiStatInfoLbl.Size=UDim2.new(1,0,0,22); multiStatInfoLbl.TextWrapped=true
+
+-- Rating-Farben
+local RATING_TIER_COLORS={["C-"]="C",["C"]="C",["C+"]="C",["B-"]="B",["B"]="B",["B+"]="B",["A-"]="A",["A"]="A",["A+"]="A",["S-"]="S",["S"]="S",["S+"]="S",["SS"]="SS",["SSS"]="SS",["O-"]="O",["O"]="O",["O+"]="O"}
+local TIER_COLORS={C=Color3.fromRGB(160,160,160),B=Color3.fromRGB(50,200,80),A=Color3.fromRGB(50,120,255),S=Color3.fromRGB(200,130,255),SS=Color3.fromRGB(255,180,0),O=Color3.fromRGB(255,60,60)}
+local function GetRatingColor(rating)
+    local tier=RATING_TIER_COLORS[rating] or "C"; return TIER_COLORS[tier] or D.TextMid
 end
 
-local function ResolveStatRerollRemote()
-    local rr = nil
-    pcall(function()
-        local g = RS:WaitForChild("Remote", 5):WaitForChild("Server", 5):WaitForChild("Gambling", 5)
-        rr = g:WaitForChild("RerollPotential", 5)
-    end)
-    if rr then return rr end
-    pcall(function()
-        local g = RS:WaitForChild("Remote", 5):WaitForChild("Server", 5):WaitForChild("Gambling", 5)
-        for _, n in ipairs({ "RerollPotential", "RerollStat", "RerollStats", "PotentialReroll" }) do
-            local r = g:FindFirstChild(n)
-            if r then rr = r; break end
+TR.UI.Btn.StatTargetRows={}
+
+local function RebuildMultiStatUI()
+    for _,entry in pairs(TR.UI.Btn.StatTargetRows) do
+        if entry.frame and entry.frame.Parent then entry.frame:Destroy() end
+    end
+    TR.UI.Btn.StatTargetRows={}
+    for _,statName in ipairs(STAT_POTENTIAL_NAMES) do
+        local displayName=STAT_DISPLAY_NAMES[statName] or statName
+        local currentTarget=TR.StatTargetRatings[statName]; local isActive=currentTarget~=nil
+        local statRowFrame=Instance.new("Frame",statsCard); statRowFrame.Size=UDim2.new(1,0,0,0); statRowFrame.AutomaticSize=Enum.AutomaticSize.Y; statRowFrame.BackgroundTransparency=1; VList(statRowFrame,3)
+        local hRow=Instance.new("Frame",statRowFrame); hRow.Size=UDim2.new(1,0,0,24); hRow.BackgroundColor3=isActive and Color3.fromRGB(14,42,28) or D.CardHover; hRow.BackgroundTransparency=0.2; hRow.BorderSizePixel=0; Corner(hRow,6); Stroke(hRow,isActive and D.Green or D.Border,1,isActive and 0 or 0.5)
+        local toggleBtn=Instance.new("TextButton",hRow); toggleBtn.Size=UDim2.new(0,18,0,18); toggleBtn.Position=UDim2.new(0,3,0.5,-9); toggleBtn.BackgroundColor3=isActive and D.Green or D.CardHover; toggleBtn.BackgroundTransparency=isActive and 0.1 or 0.5; toggleBtn.Text=isActive and "✓" or ""; toggleBtn.TextColor3=Color3.new(1,1,1); toggleBtn.TextSize=10; toggleBtn.Font=Enum.Font.GothamBold; toggleBtn.AutoButtonColor=false; toggleBtn.BorderSizePixel=0; Corner(toggleBtn,4); Stroke(toggleBtn,isActive and D.Green or D.Border,1,isActive and 0 or 0.5)
+        local statNameLbl=Instance.new("TextLabel",hRow); statNameLbl.Position=UDim2.new(0,26,0,0); statNameLbl.Size=UDim2.new(0.45,-26,1,0); statNameLbl.BackgroundTransparency=1; statNameLbl.Text=displayName; statNameLbl.TextColor3=isActive and D.GreenBright or D.TextMid; statNameLbl.TextSize=11; statNameLbl.Font=Enum.Font.GothamBold; statNameLbl.TextXAlignment=Enum.TextXAlignment.Left
+        local targetLbl=Instance.new("TextLabel",hRow); targetLbl.Position=UDim2.new(0.45,0,0,0); targetLbl.Size=UDim2.new(0.55,-4,1,0); targetLbl.BackgroundTransparency=1; targetLbl.Text=currentTarget and ("≥ "..currentTarget) or "kein Ziel"; targetLbl.TextColor3=currentTarget and GetRatingColor(currentTarget) or D.TextLow; targetLbl.TextSize=11; targetLbl.Font=Enum.Font.GothamBold; targetLbl.TextXAlignment=Enum.TextXAlignment.Right
+        local ratingPickerFrame=Instance.new("Frame",statRowFrame); ratingPickerFrame.Size=UDim2.new(1,0,0,0); ratingPickerFrame.AutomaticSize=Enum.AutomaticSize.Y; ratingPickerFrame.BackgroundTransparency=1; ratingPickerFrame.Visible=isActive
+        local ratingGrid=Instance.new("UIGridLayout",ratingPickerFrame); ratingGrid.CellSize=UDim2.new(0.25,-3,0,20); ratingGrid.CellPadding=UDim2.new(0,3,0,3)
+        for _,rating in ipairs(ALL_RATINGS) do
+            local col=GetRatingColor(rating); local isThisTarget=currentTarget==rating
+            local rBtn=Instance.new("TextButton",ratingPickerFrame); rBtn.BackgroundColor3=isThisTarget and col or D.CardHover; rBtn.BackgroundTransparency=isThisTarget and 0.15 or 0.55; rBtn.BorderSizePixel=0; Corner(rBtn,4); Stroke(rBtn,isThisTarget and col or D.Border,1,isThisTarget and 0 or 0.6); rBtn.Text=rating; rBtn.TextColor3=isThisTarget and col or D.TextMid; rBtn.TextSize=9; rBtn.Font=Enum.Font.GothamBold; rBtn.AutoButtonColor=false
+            local capStatName=statName; local capRating=rating
+            rBtn.MouseButton1Click:Connect(function() TR.StatTargetRatings[capStatName]=capRating; RebuildMultiStatUI() end)
         end
-    end)
-    return rr
-end
-
-local function GetItemAmount(itemName)
-    local n = 0
-    pcall(function()
-        local items = RS:WaitForChild("Player_Data", 3):WaitForChild(LP.Name, 3):WaitForChild("Items", 3)
-        local it = items:FindFirstChild(itemName)
-        if not it then return end
-        local a = it:FindFirstChild("Amount") or it:FindFirstChild("Value")
-        n = tonumber(a and a.Value or it.Value) or 0
-    end)
-    return n
-end
-
-local function GetKeyCountForMode(mode)
-    if mode == "All" then return GetItemAmount("Perfect Stats Key") end
-    return GetItemAmount("Stats Key")
-end
-local function HasAnyStatKeyForMode()
-    return GetKeyCountForMode(TR.SelectedStatMode) > 0
-end
-
-local function EnsureTagValue()
-    if TR.SelectedUnitTagValue ~= nil then return true end
-    local tagUnitName = TR.SelectedUnitName or (TR.SelectedUnit and TR.SelectedUnit.Name) or nil
-    local tagVal = GetUnitTagValue(tagUnitName)
-    if tagVal == nil then
-        SetStatus("⏳ TagValue wird aktualisiert...", D.Yellow)
-        task.wait(0.5)
-        tagVal = GetUnitTagValue(tagUnitName)
+        local capStatName=statName
+        toggleBtn.MouseButton1Click:Connect(function()
+            if TR.StatTargetRatings[capStatName] then TR.StatTargetRatings[capStatName]=nil else TR.StatTargetRatings[capStatName]="S" end
+            RebuildMultiStatUI()
+        end)
+        TR.UI.Btn.StatTargetRows[statName]={frame=statRowFrame,targetLbl=targetLbl,toggleBtn=toggleBtn}
     end
-    TR.SelectedUnitTagValue = tagVal
-    return tagVal ~= nil
+    -- Summary
+    local activeCount=0; local parts={}
+    for _,sn in ipairs(STAT_POTENTIAL_NAMES) do
+        if TR.StatTargetRatings[sn] then activeCount=activeCount+1; table.insert(parts,(STAT_DISPLAY_NAMES[sn] or sn).."≥"..TR.StatTargetRatings[sn]) end
+    end
+    if TR.UI.Lbl.MultiStatSummary then
+        if activeCount==0 then TR.UI.Lbl.MultiStatSummary.Text="Kein Stat-Ziel aktiv → kein Auto-Stop"; TR.UI.Lbl.MultiStatSummary.TextColor3=D.TextLow
+        else TR.UI.Lbl.MultiStatSummary.Text="Ziel (≥): "..table.concat(parts,"  &  "); TR.UI.Lbl.MultiStatSummary.TextColor3=D.Cyan end
+    end
 end
 
-local function DoSingleStatReroll()
-    if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!", D.Orange); return false end
-    local statRemote = ResolveStatRerollRemote()
-    if not statRemote then SetStatus("⚠ RerollPotential Remote nicht gefunden!", D.Orange); return false end
-    if not HasAnyStatKeyForMode() then SetStatus("⚠ Keine Keys mehr für den ausgewählten Modus.", D.Orange); return false end
-    if not EnsureTagValue() then SetStatus("⚠ TagValue nicht gefunden!", D.Orange); return false end
+TR.UI.Lbl.MultiStatSummary=MkLbl(statsCard,"Kein Stat-Ziel aktiv → kein Auto-Stop",10,D.TextLow)
+TR.UI.Lbl.MultiStatSummary.Size=UDim2.new(1,0,0,26); TR.UI.Lbl.MultiStatSummary.TextWrapped=true
 
-    local ok = pcall(function()
-        if TR.SelectedStatMode == "All" then
-            statRemote:FireServer("All", TR.SelectedUnitTagValue, "All")
-        else
-            local sendName = STAT_SEND_NAMES[TR.SelectedStatMode] or TR.SelectedStatMode
-            statRemote:FireServer(sendName, TR.SelectedUnitTagValue, "Selective")
-        end
-    end)
-    if ok then TR.StatRollCount = TR.StatRollCount + 1 end
-    return ok
-end
+local presetRow=Instance.new("Frame",statsCard); presetRow.Size=UDim2.new(1,0,0,26); presetRow.BackgroundTransparency=1; HList(presetRow,5)
+local presetSBtn=Instance.new("TextButton",presetRow); presetSBtn.Size=UDim2.new(0.32,0,1,0); presetSBtn.BackgroundColor3=D.CardHover; presetSBtn.BackgroundTransparency=0.35; presetSBtn.Text="⭐ Alle ≥S"; presetSBtn.TextColor3=Color3.fromRGB(200,130,255); presetSBtn.TextSize=10; presetSBtn.Font=Enum.Font.GothamBold; presetSBtn.AutoButtonColor=false; presetSBtn.BorderSizePixel=0; Corner(presetSBtn,6); Stroke(presetSBtn,Color3.fromRGB(200,130,255),1,0.3); presetSBtn.MouseButton1Click:Connect(function() for _,sn in ipairs(STAT_POTENTIAL_NAMES) do TR.StatTargetRatings[sn]="S" end; RebuildMultiStatUI() end)
+local presetSPlusBtn=Instance.new("TextButton",presetRow); presetSPlusBtn.Size=UDim2.new(0.32,0,1,0); presetSPlusBtn.BackgroundColor3=D.CardHover; presetSPlusBtn.BackgroundTransparency=0.35; presetSPlusBtn.Text="✨ Alle ≥S+"; presetSPlusBtn.TextColor3=D.Gold; presetSPlusBtn.TextSize=10; presetSPlusBtn.Font=Enum.Font.GothamBold; presetSPlusBtn.AutoButtonColor=false; presetSPlusBtn.BorderSizePixel=0; Corner(presetSPlusBtn,6); Stroke(presetSPlusBtn,D.Gold,1,0.3); presetSPlusBtn.MouseButton1Click:Connect(function() for _,sn in ipairs(STAT_POTENTIAL_NAMES) do TR.StatTargetRatings[sn]="S+" end; RebuildMultiStatUI() end)
+local clearStatsBtn=Instance.new("TextButton",presetRow); clearStatsBtn.Size=UDim2.new(0.32,0,1,0); clearStatsBtn.BackgroundColor3=D.CardHover; clearStatsBtn.BackgroundTransparency=0.35; clearStatsBtn.Text="✕ Alle aus"; clearStatsBtn.TextColor3=D.Red; clearStatsBtn.TextSize=10; clearStatsBtn.Font=Enum.Font.GothamBold; clearStatsBtn.AutoButtonColor=false; clearStatsBtn.BorderSizePixel=0; Corner(clearStatsBtn,6); Stroke(clearStatsBtn,D.Red,1,0.4); clearStatsBtn.MouseButton1Click:Connect(function() TR.StatTargetRatings={}; RebuildMultiStatUI() end)
+
+TR.UI.Lbl.StatRollRate=MkLbl(statsCard,"",12,D.TextLow); TR.UI.Lbl.StatRollRate.Size=UDim2.new(1,0,0,14); TR.UI.Lbl.StatRollRate.TextXAlignment=Enum.TextXAlignment.Right
+
+local statCtrlRow=Instance.new("Frame",statsCard); statCtrlRow.Size=UDim2.new(1,0,0,34); statCtrlRow.BackgroundTransparency=1; HList(statCtrlRow,8)
+TR.UI.Btn.StartStat=Instance.new("TextButton",statCtrlRow); TR.UI.Btn.StartStat.Size=UDim2.new(0.58,0,1,0); TR.UI.Btn.StartStat.BackgroundColor3=Color3.fromRGB(14,42,28); TR.UI.Btn.StartStat.BackgroundTransparency=0.22; TR.UI.Btn.StartStat.Text="▶  Start Stat-Reroll"; TR.UI.Btn.StartStat.TextColor3=D.GreenBright; TR.UI.Btn.StartStat.TextSize=13; TR.UI.Btn.StartStat.Font=Enum.Font.GothamBold; TR.UI.Btn.StartStat.AutoButtonColor=false; TR.UI.Btn.StartStat.BorderSizePixel=0; Corner(TR.UI.Btn.StartStat,8); Stroke(TR.UI.Btn.StartStat,D.Green,1.5,0.3)
+TR.UI.Btn.StopStat=Instance.new("TextButton",statCtrlRow); TR.UI.Btn.StopStat.Size=UDim2.new(0.38,0,1,0); TR.UI.Btn.StopStat.BackgroundColor3=Color3.fromRGB(48,16,18); TR.UI.Btn.StopStat.BackgroundTransparency=0.22; TR.UI.Btn.StopStat.Text="■  Stop"; TR.UI.Btn.StopStat.TextColor3=D.Red; TR.UI.Btn.StopStat.TextSize=13; TR.UI.Btn.StopStat.Font=Enum.Font.GothamBold; TR.UI.Btn.StopStat.AutoButtonColor=false; TR.UI.Btn.StopStat.BorderSizePixel=0; Corner(TR.UI.Btn.StopStat,8); Stroke(TR.UI.Btn.StopStat,D.Red,1.5,0.28)
 
 -- ╔══════════════════════════════════════════════════════════╗
---  FIX #2 + #5 – CheckAllStatGoals (AND + >= + Label-Check)
---
---  Priorität der Stat-Quellen:
---    1. ReadStatFromLabel (GUI-Label, frischster Wert nach Roll)
---    2. GetStatRatings    (DataModel, Fallback)
---
---  Stop-Logik: allMet = true nur wenn ALLE aktiven Stats
---              StatValues[current] >= StatValues[target]
+--  LOGIK – CheckAllStatGoals
+--  FIX #1: Nutzt GradeIndex für sicheren Vergleich
+--  FIX #2: Bevorzugt GUI-Label (fresher), Fallback DataModel
 -- ╚══════════════════════════════════════════════════════════╝
 local function CheckAllStatGoals()
     if not TR.SelectedUnit then return false, {} end
-    local hasAnyTarget = false
-    for _ in pairs(TR.StatTargetRatings) do hasAnyTarget = true; break end
+    local hasAnyTarget=false
+    for _ in pairs(TR.StatTargetRatings) do hasAnyTarget=true; break end
     if not hasAnyTarget then return false, {} end
-
-    -- Hole frische Ratings aus dem DataModel
-    local ratings = GetStatRatings(TR.SelectedUnit)
-    local allMet  = true
-    local details = {}
-
-    for statName, targetRating in pairs(TR.StatTargetRatings) do
-        -- FIX #5: Bevorzuge GUI-Label-Wert (aktueller nach Roll)
-        local labelRating   = ReadStatFromLabel(statName)
-        local modelRating   = ratings[statName] and ratings[statName].rating or "C-"
-        -- Nehme den BESSEREN der beiden Werte um False-Negatives zu vermeiden
-        local lv = StatValues[labelRating or ""] or 0
-        local mv = StatValues[modelRating]       or 1
-        local currentRating = (lv >= mv) and (labelRating or modelRating) or modelRating
-
-        -- FIX #2: >= Vergleich (nicht ==)
-        local met = RankAtLeast(currentRating, targetRating)
-        details[statName] = {
-            current = currentRating,
-            target  = targetRating,
-            met     = met,
-        }
-        if not met then allMet = false end
+    local ratings=GetStatRatings(TR.SelectedUnit)
+    local allMet=true; local details={}
+    for statName,targetRating in pairs(TR.StatTargetRatings) do
+        local labelRating=ReadStatFromLabel(statName)
+        local modelRating=ratings[statName] and ratings[statName].rating or "C-"
+        -- FIX: Nimm den Wert mit höherem Index (konservativ)
+        local li=GradeIndex(labelRating or "C-")
+        local mi=GradeIndex(modelRating)
+        local currentRating=(li>0 and li>=mi) and (labelRating or modelRating) or modelRating
+        -- FIX #1: GradeIndex-Vergleich (nicht StatValues-Map)
+        local ci=GradeIndex(currentRating)
+        local ti=GradeIndex(ToRankString(targetRating))
+        local met=(ci>0 and ti>0 and ci>=ti)
+        details[statName]={current=currentRating,target=targetRating,met=met,ci=ci,ti=ti}
+        if not met then allMet=false end
     end
-    return allMet, details
+    return allMet,details
 end
 
 -- ── RefreshStatPanel ──────────────────────────────────────────
 function RefreshStatPanel()
     if not TR.UI.Fr.StatRows then return end
     if not TR.SelectedUnit then
-        TR.UI.Lbl.StatHeader.Text       = "Keine Einheit gewählt"
-        TR.UI.Lbl.StatHeader.TextColor3 = D.TextLow
-        for n, r in pairs(TR.UI.Fr.StatRows) do
-            r.nameLbl.Text      = STAT_DISPLAY_NAMES[n] or n
-            r.valLbl.Text       = "–"
-            r.valLbl.TextColor3 = D.TextLow
-            r.targetLbl.Text    = ""
-        end
+        TR.UI.Lbl.StatHeader.Text="Keine Einheit gewählt"; TR.UI.Lbl.StatHeader.TextColor3=D.TextLow
+        for n,r in pairs(TR.UI.Fr.StatRows) do r.nameLbl.Text=STAT_DISPLAY_NAMES[n] or n; r.valLbl.Text="–"; r.valLbl.TextColor3=D.TextLow; r.targetLbl.Text="" end
         return
     end
-    TR.UI.Lbl.StatHeader.Text       = "Stats: " .. TR.SelectedUnit.Name
-    TR.UI.Lbl.StatHeader.TextColor3 = D.Cyan
-    local ratings = GetStatRatings(TR.SelectedUnit)
-    local _, goalDetails = CheckAllStatGoals()
-
-    for n, r in pairs(TR.UI.Fr.StatRows) do
-        local d        = ratings[n]
-        local rating   = d and d.rating or "C-"
-        local raw      = d and d.raw    or "-"
-        local gd       = goalDetails[n]
-        local isTarget = gd and gd.met == true
-        local hasTarget = TR.StatTargetRatings[n] ~= nil
-
-        -- Farbe nach Rang
-        local col = isTarget and D.GreenBright
-                  or (RankAtLeast(rating, "S")  and D.Gold
-                  or (RankAtLeast(rating, "A")  and D.Yellow
-                  or D.TextMid))
-
-        r.nameLbl.Text      = STAT_DISPLAY_NAMES[n] or n
-        -- FIX #5: Format "RATING  (raw)" – ReadStatFromLabel extrahiert RATING
-        r.valLbl.Text       = tostring(rating) .. "  (" .. tostring(raw) .. ")"
-        r.valLbl.TextColor3 = col
-
+    TR.UI.Lbl.StatHeader.Text="Stats: "..(TR.SelectedUnitName or TR.SelectedUnit.Name)
+    TR.UI.Lbl.StatHeader.TextColor3=D.Cyan
+    local ratings=GetStatRatings(TR.SelectedUnit)
+    local _,goalDetails=CheckAllStatGoals()
+    for n,r in pairs(TR.UI.Fr.StatRows) do
+        local d=ratings[n]; local rating=d and d.rating or "C-"; local raw=d and d.raw or "-"
+        local gd=goalDetails[n]; local isTarget=gd and gd.met==true; local hasTarget=TR.StatTargetRatings[n]~=nil
+        local ri=GradeIndex(rating)
+        local col=isTarget and D.GreenBright or (ri>=GradeIndex("S") and D.Gold or (ri>=GradeIndex("A") and D.Yellow or D.TextMid))
+        r.nameLbl.Text=STAT_DISPLAY_NAMES[n] or n
+        r.valLbl.Text=tostring(rating).."  ("..tostring(raw)..")"
+        r.valLbl.TextColor3=col
         if hasTarget then
-            local targetRating = TR.StatTargetRatings[n]
-            if isTarget then
-                r.targetLbl.Text       = "≥" .. targetRating .. " ✓"
-                r.targetLbl.TextColor3 = D.GreenBright
-            else
-                r.targetLbl.Text       = "≥" .. targetRating
-                r.targetLbl.TextColor3 = D.CyanDim
-            end
-        else
-            r.targetLbl.Text = ""
-        end
-
-        Stroke(r.row, isTarget and D.GreenBright or D.Border, 1, isTarget and 0 or 0.45)
+            local targetRating=TR.StatTargetRatings[n]
+            if isTarget then r.targetLbl.Text="≥"..targetRating.." ✓"; r.targetLbl.TextColor3=D.GreenBright
+            else r.targetLbl.Text="≥"..targetRating; r.targetLbl.TextColor3=D.CyanDim end
+        else r.targetLbl.Text="" end
+        Stroke(r.row,isTarget and D.GreenBright or D.Border,1,isTarget and 0 or 0.45)
     end
+end
+
+-- ── Logik-Hilfsfunktionen ─────────────────────────────────────
+local function CheckGoalReached()
+    if not TR.SelectedUnit then return false end
+    local main,sub=GetUnitTraits(TR.SelectedUnit)
+    if main and TR.TargetTraits[main] then SetStatus("🎉 Ziel-Trait '"..main.."' ERREICHT!",D.GreenBright); return true end
+    if sub  and TR.TargetTraits[sub]  then SetStatus("🎉 Ziel-Trait '"..sub.."' ERREICHT!",D.GreenBright);  return true end
+    return false
+end
+
+local function DoSingleReroll()
+    if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!",D.Orange); return false end
+    if not RerollRemote    then SetStatus("⚠ RerollTrait Remote fehlt!",D.Orange); return false end
+    local curMain,curSub=GetUnitTraits(TR.SelectedUnit); curMain=curMain or ""; curSub=curSub or ""
+    pcall(function() if TraitAckRemote then TraitAckRemote:FireServer() end end)
+    task.wait(0.06)
+    local ok=pcall(function() RerollRemote:FireServer(TR.SelectedUnit,"Reroll","Main",TR_SELECTED_CURRENCY,{curMain,curSub}) end)
+    if ok then TR.RollCount=TR.RollCount+1 end
+    return ok
+end
+
+local function ResolveStatRerollRemote()
+    local rr=nil
+    pcall(function()
+        local g=RS:WaitForChild("Remote",5):WaitForChild("Server",5):WaitForChild("Gambling",5)
+        rr=g:WaitForChild("RerollPotential",5)
+    end)
+    if rr then return rr end
+    pcall(function()
+        local g=RS:WaitForChild("Remote",5):WaitForChild("Server",5):WaitForChild("Gambling",5)
+        for _,n in ipairs({"RerollPotential","RerollStat","RerollStats","PotentialReroll"}) do
+            local r=g:FindFirstChild(n); if r then rr=r; break end
+        end
+    end)
+    return rr
+end
+
+local function GetItemAmount(itemName)
+    local n=0
+    pcall(function()
+        local items=RS:WaitForChild("Player_Data",3):WaitForChild(LP.Name,3):WaitForChild("Items",3)
+        local it=items:FindFirstChild(itemName); if not it then return end
+        local a=it:FindFirstChild("Amount") or it:FindFirstChild("Value")
+        n=tonumber(a and a.Value or it.Value) or 0
+    end)
+    return n
+end
+
+local function GetKeyCountForMode(mode)
+    if mode=="All" then return GetItemAmount("Perfect Stats Key") end
+    return GetItemAmount("Stats Key")
+end
+local function HasAnyStatKeyForMode()
+    return GetKeyCountForMode(TR.SelectedStatMode)>0
+end
+
+local function EnsureTagValue()
+    if TR.SelectedUnitTagValue~=nil then return true end
+    local tagUnitName=TR.SelectedUnitName or (TR.SelectedUnit and TR.SelectedUnit.Name) or nil
+    local tagVal=GetUnitTagValue(tagUnitName)
+    if tagVal==nil then SetStatus("⏳ TagValue wird geladen...",D.Yellow); task.wait(0.5); tagVal=GetUnitTagValue(tagUnitName) end
+    TR.SelectedUnitTagValue=tagVal; return tagVal~=nil
+end
+
+local function DoSingleStatReroll()
+    if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!",D.Orange); return false end
+    local statRemote=ResolveStatRerollRemote()
+    if not statRemote then SetStatus("⚠ RerollPotential Remote fehlt!",D.Orange); return false end
+    if not HasAnyStatKeyForMode() then SetStatus("⚠ Keine Keys.",D.Orange); return false end
+    if not EnsureTagValue() then SetStatus("⚠ TagValue fehlt!",D.Orange); return false end
+    local ok=pcall(function()
+        if TR.SelectedStatMode=="All" then statRemote:FireServer("All",TR.SelectedUnitTagValue,"All")
+        else local sendName=STAT_SEND_NAMES[TR.SelectedStatMode] or TR.SelectedStatMode; statRemote:FireServer(sendName,TR.SelectedUnitTagValue,"Selective") end
+    end)
+    if ok then TR.StatRollCount=TR.StatRollCount+1 end
+    return ok
 end
 
 -- ── Einzel-Roll Button ────────────────────────────────────────
 singleRollBtn.MouseButton1Click:Connect(function()
-    DoSingleReroll()
-    task.wait(0.3); UpdateLiveTraitDisplay()
+    DoSingleReroll(); task.wait(0.3); UpdateLiveTraitDisplay()
     pcall(function()
         if TR.SelectedUnit and _G.HazeShared and _G.HazeShared.RecordSessionTrait then
-            local m, su = GetUnitTraits(TR.SelectedUnit)
-            if m and m ~= "" then
-                _G.HazeShared.RecordSessionTrait(su and su ~= "" and (m .. " / " .. su) or m)
-            end
+            local m,su=GetUnitTraits(TR.SelectedUnit)
+            if m and m~="" then _G.HazeShared.RecordSessionTrait(su and su~="" and (m.." / "..su) or m) end
         end
     end)
 end)
 
 -- ── Auto-Reroll Loop (Trait) ──────────────────────────────────
 local function AutoRerollLoop()
-    TR.Rolling = true; TR.RollCount = 0
-    startRerollBtn.Text       = "⏳ Rollt..."
-    startRerollBtn.TextColor3 = D.Yellow
-    Stroke(startRerollBtn, D.Yellow, 2, 0.15)
-    SetStatus("🎲 Auto-Reroll läuft...", D.Gold)
-    local rollStart = os.time()
+    TR.Rolling=true; TR.RollCount=0
+    startRerollBtn.Text="⏳ Rollt..."; startRerollBtn.TextColor3=D.Yellow; Stroke(startRerollBtn,D.Yellow,2,0.15)
+    SetStatus("🎲 Auto-Reroll läuft...",D.Gold); local rollStart=os.time()
     while TR.Rolling do
-        pcall(UpdateLiveTraitDisplay)
-        if CheckGoalReached() then TR.Rolling = false; break end
-        local ok = DoSingleReroll()
-        if not ok then SetStatus("❌ Reroll fehlgeschlagen!", D.Red); TR.Rolling = false; break end
-        task.wait(0.1); pcall(UpdateLiveTraitDisplay)
-        if CheckGoalReached() then TR.Rolling = false; break end
-        local elapsed = os.time() - rollStart
-        if elapsed > 0 then
-            pcall(function()
-                TR.UI.Lbl.RollRate.Text = string.format("%.1f r/min", TR.RollCount / math.max(1, elapsed) * 60)
-            end)
-        end
+        pcall(UpdateLiveTraitDisplay); if CheckGoalReached() then TR.Rolling=false; break end
+        local ok=DoSingleReroll()
+        if not ok then SetStatus("❌ Reroll fehlgeschlagen!",D.Red); TR.Rolling=false; break end
+        task.wait(0.1); pcall(UpdateLiveTraitDisplay); if CheckGoalReached() then TR.Rolling=false; break end
+        local elapsed=os.time()-rollStart
+        if elapsed>0 then pcall(function() TR.UI.Lbl.RollRate.Text=string.format("%.1f r/min",TR.RollCount/math.max(1,elapsed)*60) end) end
     end
-    TR.Rolling = false
-    startRerollBtn.Text       = "▶  Start Reroll"
-    startRerollBtn.TextColor3 = D.GreenBright
-    Stroke(startRerollBtn, D.Green, 1.5, 0.3)
-    Tw(startRerollBtn, { BackgroundColor3 = Color3.fromRGB(14, 42, 28), BackgroundTransparency = 0.22 })
-    pcall(UpdateLiveTraitDisplay)
+    TR.Rolling=false; startRerollBtn.Text="▶  Start Reroll"; startRerollBtn.TextColor3=D.GreenBright; Stroke(startRerollBtn,D.Green,1.5,0.3)
+    Tw(startRerollBtn,{BackgroundColor3=Color3.fromRGB(14,42,28),BackgroundTransparency=0.22}); pcall(UpdateLiveTraitDisplay)
 end
 
 startRerollBtn.MouseButton1Click:Connect(function()
-    if TR.Rolling then SetStatus("⚠ Läuft bereits!", D.Yellow); return end
-    if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!", D.Orange); return end
-    if next(TR.TargetTraits) == nil then SetStatus("⚠ Keine Ziel-Traits gesetzt!", D.Orange); return end
+    if TR.Rolling then SetStatus("⚠ Läuft bereits!",D.Yellow); return end
+    if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!",D.Orange); return end
+    if next(TR.TargetTraits)==nil then SetStatus("⚠ Keine Ziel-Traits gesetzt!",D.Orange); return end
     task.spawn(AutoRerollLoop)
 end)
 stopRerollBtn.MouseButton1Click:Connect(function()
-    TR.Rolling = false
-    startRerollBtn.Text       = "▶  Start Reroll"
-    startRerollBtn.TextColor3 = D.GreenBright
-    Stroke(startRerollBtn, D.Green, 1.5, 0.3)
-    Tw(startRerollBtn, { BackgroundColor3 = Color3.fromRGB(14, 42, 28), BackgroundTransparency = 0.22 })
-    SetStatus("⏹ Auto-Reroll gestoppt.", D.TextMid)
+    TR.Rolling=false; startRerollBtn.Text="▶  Start Reroll"; startRerollBtn.TextColor3=D.GreenBright
+    Stroke(startRerollBtn,D.Green,1.5,0.3); Tw(startRerollBtn,{BackgroundColor3=Color3.fromRGB(14,42,28),BackgroundTransparency=0.22})
+    SetStatus("⏹ Gestoppt.",D.TextMid)
 end)
 
 -- ╔══════════════════════════════════════════════════════════╗
---  FIX #2 + #3 + #5 – AutoStatRerollLoop v2.8.0
+--  FIX #3 – AutoStatRerollLoop v2.9.0
 --
---  FIX #3 Anti-Skip Ablauf je Iteration:
---    1. task.wait(0.15)       ← Mindest-Delay VOR Check
---    2. CheckAllStatGoals()   ← PRE-Roll Check (>= Vergleich)
---    3. DoSingleStatReroll()  ← Remote feuern
---    4. task.wait(delay)      ← konfigurierbares Delay (min 0.15)
---    5. RefreshStatPanel()    ← GUI aktualisieren (FIX #5)
---    6. CheckAllStatGoals()   ← POST-Roll Check (Double-Check)
---
---  FIX #2: Beide Checks nutzen RankAtLeast (>= statt ==)
---  FIX #5: CheckAllStatGoals bevorzugt ReadStatFromLabel
+--  Wichtige Timing-Änderungen:
+--    • Min-Delay VOR Check: 0.35s (statt 0.15s)
+--    • Min-Delay NACH Roll: max(0.35, userDelay)
+--    • RefreshStatPanel VOR Post-Check
+--  FIX #1: CheckAllStatGoals nutzt GradeIndex
 -- ╚══════════════════════════════════════════════════════════╝
 local function SendStatSuccessWebhook(details)
-    local cfg = HS.Config
-    local url = cfg and cfg.WebhookURL or nil
-    if not url or url == "" or not url:find("discord.com") then return end
-    local ava = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(LP.UserId) .. "&width=150&height=150&format=png"
-    local fields = {
-        { name = "Account", value = "`" .. tostring(LP.Name) .. "`",  inline = true },
-        { name = "Einheit", value = "`" .. tostring(TR.SelectedUnitName or "?") .. "`", inline = true },
-        { name = "Rolls",   value = "`" .. tostring(TR.StatRollCount) .. "`", inline = true },
-    }
-    for statName, gd in pairs(details) do
-        table.insert(fields, {
-            name   = STAT_DISPLAY_NAMES[statName] or statName,
-            value  = "`" .. gd.current .. "` ≥ `" .. gd.target .. "`",
-            inline = true,
-        })
-    end
-    local embed = {
-        color  = 0x00FFAA,
-        title  = "Stat Reroll · Alle Ziele erreicht! ✅",
-        fields = fields,
-        footer = { text = "Haze Hub v" .. VERSION .. " · " .. os.date("%Y-%m-%d %H:%M:%S") },
-    }
+    local cfg=HS.Config; local url=cfg and cfg.WebhookURL or nil
+    if not url or url=="" or not url:find("discord.com") then return end
+    local ava="https://www.roblox.com/headshot-thumbnail/image?userId="..tostring(LP.UserId).."&width=150&height=150&format=png"
+    local fields={{name="Account",value="`"..tostring(LP.Name).."`",inline=true},{name="Einheit",value="`"..tostring(TR.SelectedUnitName or "?").."`",inline=true},{name="Rolls",value="`"..tostring(TR.StatRollCount).."`",inline=true}}
+    for statName,gd in pairs(details) do table.insert(fields,{name=STAT_DISPLAY_NAMES[statName] or statName,value="`"..gd.current.."` ≥ `"..gd.target.."`",inline=true}) end
+    local embed={color=0x00FFAA,title="Stat Reroll · Alle Ziele erreicht! ✅",fields=fields,footer={text="Haze Hub v"..VERSION.." · "..os.date("%Y-%m-%d %H:%M:%S")}}
     pcall(function()
-        local fn = request or http_request or (syn and syn.request)
-        if not fn then return end
-        fn({
-            Url     = url:gsub("discord%.com", "webhook.lewisakura.moe"),
-            Method  = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body    = HS.Svc and HS.Svc.Http and HS.Svc.Http:JSONEncode({
-                username   = "Haze Hub",
-                avatar_url = ava,
-                embeds     = { embed },
-            }) or "",
-        })
+        local fn=request or http_request or (syn and syn.request); if not fn then return end
+        fn({Url=url:gsub("discord%.com","webhook.lewisakura.moe"),Method="POST",Headers={["Content-Type"]="application/json"},Body=HS.Svc and HS.Svc.Http and HS.Svc.Http:JSONEncode({username="Haze Hub",avatar_url=ava,embeds={embed}}) or ""})
     end)
 end
 
 local function AutoStatRerollLoop()
-    TR.StatRolling    = true
-    TR.StatRollCount  = 0
-    _G.HazeHUB.StatLoopActive = true
-
-    TR.UI.Btn.StartStat.Text       = "⏳ Rollt..."
-    TR.UI.Btn.StartStat.TextColor3 = D.Yellow
-    Stroke(TR.UI.Btn.StartStat, D.Yellow, 2, 0.15)
-    SetStatus("🎯 Auto-Stat-Reroll läuft...", D.Gold)
-
-    local targetParts = {}
-    for _, sn in ipairs(STAT_POTENTIAL_NAMES) do
-        if TR.StatTargetRatings[sn] then
-            table.insert(targetParts, (STAT_DISPLAY_NAMES[sn] or sn) .. "≥" .. TR.StatTargetRatings[sn])
-        end
-    end
-    print(string.format("[HazeHub-Trait] AutoStatRerollLoop v%s | unit=%s | mode=%s | targets=%s",
-        VERSION,
-        tostring(TR.SelectedUnit and TR.SelectedUnit.Name),
-        tostring(TR.SelectedStatMode),
-        table.concat(targetParts, ", ")))
-
-    local t0 = os.clock()
+    TR.StatRolling=true; TR.StatRollCount=0; _G.HazeHUB.StatLoopActive=true
+    TR.UI.Btn.StartStat.Text="⏳ Rollt..."; TR.UI.Btn.StartStat.TextColor3=D.Yellow; Stroke(TR.UI.Btn.StartStat,D.Yellow,2,0.15)
+    SetStatus("🎯 Auto-Stat-Reroll läuft...",D.Gold)
+    local targetParts={}
+    for _,sn in ipairs(STAT_POTENTIAL_NAMES) do if TR.StatTargetRatings[sn] then table.insert(targetParts,(STAT_DISPLAY_NAMES[sn] or sn).."≥"..TR.StatTargetRatings[sn]) end end
+    print(string.format("[HazeHub-Trait] AutoStatRerollLoop v%s | unit=%s | mode=%s | targets=%s",VERSION,tostring(TR.SelectedUnit and TR.SelectedUnit.Name),tostring(TR.SelectedStatMode),table.concat(targetParts,", ")))
+    local t0=os.clock()
 
     while TR.StatRolling and _G.HazeHUB.StatLoopActive do
-        if not TR.SelectedUnit then
-            SetStatus("⚠ Keine Einheit gewählt!", D.Orange); break
-        end
+        if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit gewählt!",D.Orange); break end
 
-        -- ── FIX #3: Schritt 1 – Mindest-Delay VOR dem Check ────────
-        -- Gibt dem Engine Zeit, den vorherigen Roll zu verarbeiten.
-        -- Ohne dieses Wait würde der Loop direkt nach dem Remote-Call
-        -- prüfen, bevor der neue Wert im DataModel steht.
-        task.wait(0.15)
+        -- FIX #3: Schritt 1 – Mindest-Delay VOR Check (0.35s, nicht 0.15s)
+        task.wait(0.35)
         if not TR.StatRolling or not _G.HazeHUB.StatLoopActive then break end
 
-        -- ── FIX #2 + #3: Schritt 2 – PRE-Roll Check (>= Vergleich) ──
-        -- Verhindert unnötige Rolls wenn das Ziel bereits erreicht ist.
-        local allMetPre, detailsPre = CheckAllStatGoals()
+        -- Schritt 2 – PRE-Roll Check (GradeIndex-basiert)
+        local allMetPre,detailsPre=CheckAllStatGoals()
         if allMetPre then
-            local sp = {}
-            for sn, gd in pairs(detailsPre) do
-                table.insert(sp, (STAT_DISPLAY_NAMES[sn] or sn) .. "=" .. gd.current)
-            end
-            SetStatus("✅ Alle Ziele bereits erreicht! " .. table.concat(sp, "  "), D.GreenBright)
-            pcall(RefreshStatPanel)
-            pcall(function() SendStatSuccessWebhook(detailsPre) end)
-            break
+            local sp={}; for sn,gd in pairs(detailsPre) do table.insert(sp,(STAT_DISPLAY_NAMES[sn] or sn).."="..gd.current) end
+            SetStatus("✅ Alle Ziele bereits erreicht! "..table.concat(sp,"  "),D.GreenBright)
+            pcall(RefreshStatPanel); pcall(function() SendStatSuccessWebhook(detailsPre) end); break
         end
 
-        -- Fortschritt anzeigen
-        local metCount, totalCount = 0, 0
+        local metCount,totalCount=0,0
         for statName in pairs(TR.StatTargetRatings) do
-            totalCount = totalCount + 1
-            if detailsPre[statName] and detailsPre[statName].met then
-                metCount = metCount + 1
-            end
+            totalCount=totalCount+1
+            if detailsPre[statName] and detailsPre[statName].met then metCount=metCount+1 end
         end
-        SetStatus(string.format("🎯 Rerolling... (%d/%d Stats ✓, %d Rolls, Mode=%s)",
-            metCount, totalCount, TR.StatRollCount, TR.SelectedStatMode), D.Gold)
+        SetStatus(string.format("🎯 Rerolling... (%d/%d Stats ✓, Roll #%d, Mode=%s)",metCount,totalCount,TR.StatRollCount,TR.SelectedStatMode),D.Gold)
 
-        if not HasAnyStatKeyForMode() then
-            SetStatus("⛔ Keys leer. Stop.", D.Orange); break
-        end
-
-        -- Abbruch-Check VOR Remote
+        if not HasAnyStatKeyForMode() then SetStatus("⛔ Keys leer. Stop.",D.Orange); break end
         if not TR.StatRolling or not _G.HazeHUB.StatLoopActive then break end
 
-        -- ── FIX #3: Schritt 3 – Remote feuern ────────────────────────
-        local ok = DoSingleStatReroll()
-        if not ok then SetStatus("❌ Stat-Reroll fehlgeschlagen.", D.Red); break end
+        -- Schritt 3 – Remote feuern
+        local ok=DoSingleStatReroll()
+        if not ok then SetStatus("❌ Stat-Reroll fehlgeschlagen.",D.Red); break end
 
-        local dt = os.clock() - t0
-        if dt > 0 and TR.UI.Lbl.StatRollRate then
-            TR.UI.Lbl.StatRollRate.Text = string.format("%.1f r/min", TR.StatRollCount / dt * 60)
+        local dt=os.clock()-t0
+        if dt>0 and TR.UI.Lbl.StatRollRate then
+            TR.UI.Lbl.StatRollRate.Text=string.format("%.1f r/min",TR.StatRollCount/dt*60)
         end
 
-        -- ── FIX #3: Schritt 4 – konfigurierbares Delay nach dem Roll ─
-        -- Mindestens 0.15s damit das DataModel den neuen Wert schreiben kann.
-        -- Ohne dieses Wait liest ReadStatFromLabel noch den alten Wert.
-        local delay = math.max(0.15, tonumber(delayBox.Text) or 0.5)
+        -- FIX #3: Schritt 4 – Mindest-Delay NACH dem Roll (0.35s min)
+        local delay=math.max(0.35,tonumber(delayBox.Text) or 0.5)
         task.wait(delay)
-
         if not TR.StatRolling or not _G.HazeHUB.StatLoopActive then break end
 
-        -- ── FIX #3 + #5: Schritt 5 – GUI aktualisieren ────────────────
-        -- RefreshStatPanel schreibt die neuen Werte in die valLbl-Labels.
-        -- WICHTIG: Muss VOR dem POST-Roll-Check stehen, damit
-        -- ReadStatFromLabel() frische Werte sieht.
+        -- Schritt 5 – GUI aktualisieren (MUSS vor Post-Check kommen)
         pcall(RefreshStatPanel)
 
-        -- ── FIX #2 + #3 + #5: Schritt 6 – POST-Roll Double-Check ──────
-        -- Liest Werte aus GUI-Labels (ReadStatFromLabel, FIX #5).
-        -- Nutzt >= Vergleich (FIX #2).
-        -- Stoppt auch wenn der Wert BESSER als das Ziel ist.
-        local allMetPost, detailsPost = CheckAllStatGoals()
+        -- Schritt 6 – POST-Roll Double-Check (GradeIndex)
+        local allMetPost,detailsPost=CheckAllStatGoals()
         if allMetPost then
-            local sp = {}
-            for sn, gd in pairs(detailsPost) do
-                table.insert(sp, (STAT_DISPLAY_NAMES[sn] or sn) .. "=" .. gd.current)
-            end
-            SetStatus("✅ Ziel erreicht! " .. table.concat(sp, "  "), D.GreenBright)
-            pcall(RefreshStatPanel)
-            pcall(function() SendStatSuccessWebhook(detailsPost) end)
-            break
+            local sp={}; for sn,gd in pairs(detailsPost) do table.insert(sp,(STAT_DISPLAY_NAMES[sn] or sn).."="..gd.current) end
+            SetStatus("✅ Ziel erreicht! "..table.concat(sp,"  "),D.GreenBright)
+            pcall(RefreshStatPanel); pcall(function() SendStatSuccessWebhook(detailsPost) end); break
         end
     end
 
-    -- Aufräumen
-    TR.StatRolling = false
-    _G.HazeHUB.StatLoopActive = false
-    TR.UI.Btn.StartStat.Text       = "▶  Start Stat-Reroll"
-    TR.UI.Btn.StartStat.TextColor3 = D.GreenBright
-    Stroke(TR.UI.Btn.StartStat, D.Green, 1.5, 0.3)
-    Tw(TR.UI.Btn.StartStat, { BackgroundColor3 = Color3.fromRGB(14, 42, 28), BackgroundTransparency = 0.22 })
+    TR.StatRolling=false; _G.HazeHUB.StatLoopActive=false
+    TR.UI.Btn.StartStat.Text="▶  Start Stat-Reroll"; TR.UI.Btn.StartStat.TextColor3=D.GreenBright
+    Stroke(TR.UI.Btn.StartStat,D.Green,1.5,0.3); Tw(TR.UI.Btn.StartStat,{BackgroundColor3=Color3.fromRGB(14,42,28),BackgroundTransparency=0.22})
 end
 
 TR.UI.Btn.StartStat.MouseButton1Click:Connect(function()
-    if TR.StatRolling then SetStatus("⚠ Stat-Reroll läuft bereits.", D.Yellow); return end
-    if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit ausgewählt.", D.Orange); return end
-    if not HasAnyStatKeyForMode() then SetStatus("⛔ Keine Keys für diesen Modus.", D.Orange); return end
-    local hasTarget = false
-    for _ in pairs(TR.StatTargetRatings) do hasTarget = true; break end
-    if not hasTarget then
-        SetStatus("⚠ Keine Stat-Ziele gesetzt! Wähle mindestens ein Stat-Ziel.", D.Orange); return
-    end
-    local allMet, _ = CheckAllStatGoals()
-    if allMet then
-        SetStatus("🎯 Alle Stat-Ziele bereits erreicht!", D.GreenBright); return
-    end
+    if TR.StatRolling then SetStatus("⚠ Stat-Reroll läuft bereits.",D.Yellow); return end
+    if not TR.SelectedUnit then SetStatus("⚠ Keine Einheit ausgewählt.",D.Orange); return end
+    if not HasAnyStatKeyForMode() then SetStatus("⛔ Keine Keys.",D.Orange); return end
+    local hasTarget=false; for _ in pairs(TR.StatTargetRatings) do hasTarget=true; break end
+    if not hasTarget then SetStatus("⚠ Keine Stat-Ziele gesetzt!",D.Orange); return end
+    local allMet,_=CheckAllStatGoals()
+    if allMet then SetStatus("🎯 Alle Ziele bereits erreicht!",D.GreenBright); return end
     task.spawn(AutoStatRerollLoop)
 end)
-
 TR.UI.Btn.StopStat.MouseButton1Click:Connect(function()
-    TR.StatRolling = false
-    _G.HazeHUB.StatLoopActive = false
-    SetStatus("⏹ Stat-Reroll gestoppt.", D.TextMid)
+    TR.StatRolling=false; _G.HazeHUB.StatLoopActive=false; SetStatus("⏹ Stat-Reroll gestoppt.",D.TextMid)
 end)
 
 -- Tab-Wechsel → Abbruch-Sicherung
 task.spawn(function()
-    local lastTab = nil
-    while true do
-        task.wait(0.5)
+    local lastTab=nil
+    while true do task.wait(0.5)
         pcall(function()
-            local currentTab = HS.State and HS.State.ActiveTab
-            if currentTab ~= lastTab then
-                if lastTab == "Traits" and currentTab ~= "Traits" then
-                    if TR.StatRolling then
-                        _G.HazeHUB.StatLoopActive = false
-                        SetStatus("⏹ Stat-Reroll: Tab gewechselt, Loop wird beendet.", D.Yellow)
-                    end
+            local currentTab=HS.State and HS.State.ActiveTab
+            if currentTab~=lastTab then
+                if lastTab=="Traits" and currentTab~="Traits" then
+                    if TR.StatRolling then _G.HazeHUB.StatLoopActive=false; SetStatus("⏹ Tab gewechselt – Loop endet.",D.Yellow) end
                 end
-                lastTab = currentTab
+                lastTab=currentTab
             end
         end)
     end
@@ -2043,21 +1174,17 @@ end)
 
 -- Live-Counter (Keys + Trait Rerolls)
 task.spawn(function()
-    while true do
-        task.wait(1)
-        local rr = "–"
+    while true do task.wait(1)
+        local rr="–"
         pcall(function()
-            local items  = RS:WaitForChild("Player_Data", 3):WaitForChild(LP.Name, 3):WaitForChild("Items", 3)
-            local traitR = items:FindFirstChild("Trait Reroll")
-            if traitR then
-                local amt = traitR:FindFirstChild("Amount") or traitR:FindFirstChild("Value")
-                if amt then rr = tostring(amt.Value) end
-            end
+            local items=RS:WaitForChild("Player_Data",3):WaitForChild(LP.Name,3):WaitForChild("Items",3)
+            local traitR=items:FindFirstChild("Trait Reroll")
+            if traitR then local amt=traitR:FindFirstChild("Amount") or traitR:FindFirstChild("Value"); if amt then rr=tostring(amt.Value) end end
         end)
         pcall(function()
-            TR.UI.Lbl.RollCount.Text          = "Trait Reroll: " .. rr
-            TR.UI.Lbl.StatKeyCount.Text        = "Stats Key: "         .. tostring(GetItemAmount("Stats Key"))
-            TR.UI.Lbl.PerfectStatKeyCount.Text = "Perfect Stats Key: " .. tostring(GetItemAmount("Perfect Stats Key"))
+            TR.UI.Lbl.RollCount.Text="Trait Reroll: "..rr
+            TR.UI.Lbl.StatKeyCount.Text="Stats Key: "..tostring(GetItemAmount("Stats Key"))
+            TR.UI.Lbl.PerfectStatKeyCount.Text="Perfect: "..tostring(GetItemAmount("Perfect Stats Key"))
             RefreshStatPanel()
         end)
     end
@@ -2066,237 +1193,86 @@ end)
 -- ╔══════════════════════════════════════════════════════════╗
 --  TRAIT-ÜBERSICHT
 -- ╚══════════════════════════════════════════════════════════╝
-local overviewCard = Card(TraitPage); Pad(overviewCard, 10, 12, 10, 12); VList(overviewCard, 6)
-SecLbl(overviewCard, "📖 TRAIT ÜBERSICHT (Detail-Ansicht)")
-local trSearchOuter, trSearchBox = MkInput(overviewCard, "Trait suchen...", 28)
-trSearchOuter.Size = UDim2.new(1, 0, 0, 28)
-local trListFrame = Instance.new("Frame", overviewCard)
-trListFrame.Size                  = UDim2.new(1, 0, 0, 0)
-trListFrame.AutomaticSize         = Enum.AutomaticSize.Y
-trListFrame.BackgroundTransparency = 1
-VList(trListFrame, 3)
+local overviewCard=Card(TraitPage); Pad(overviewCard,10,12,10,12); VList(overviewCard,6)
+SecLbl(overviewCard,"📖 TRAIT ÜBERSICHT")
+local trSearchOuter,trSearchBox=MkInput(overviewCard,"Trait suchen...",28); trSearchOuter.Size=UDim2.new(1,0,0,28)
+local trListFrame=Instance.new("Frame",overviewCard); trListFrame.Size=UDim2.new(1,0,0,0); trListFrame.AutomaticSize=Enum.AutomaticSize.Y; trListFrame.BackgroundTransparency=1; VList(trListFrame,3)
 
 local function BuildTraitOverview(filter)
-    for _, v in pairs(trListFrame:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
-    filter = (filter or ""):lower()
-    local sorted = {}
-    for name, data in pairs(AllTraits) do
-        if filter == "" or name:lower():find(filter, 1, true) then
-            table.insert(sorted, { name = name, data = data })
-        end
+    for _,v in pairs(trListFrame:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
+    filter=(filter or ""):lower()
+    local sorted={}
+    for name,data in pairs(AllTraits) do
+        if filter=="" or name:lower():find(filter,1,true) then table.insert(sorted,{name=name,data=data}) end
     end
-    table.sort(sorted, function(a, b)
-        local ra = RARITY_ORDER[(a.data and a.data.Rarity) or "Common"] or 99
-        local rb = RARITY_ORDER[(b.data and b.data.Rarity) or "Common"] or 99
-        if ra ~= rb then return ra < rb end
-        return a.name:lower() < b.name:lower()
+    table.sort(sorted,function(a,b)
+        local ra=RARITY_ORDER[(a.data and a.data.Rarity) or "Common"] or 99
+        local rb=RARITY_ORDER[(b.data and b.data.Rarity) or "Common"] or 99
+        if ra~=rb then return ra<rb end; return a.name:lower()<b.name:lower()
     end)
-    for _, entry in ipairs(sorted) do
-        local td  = entry.data
-        local col = GetRarityColor(td and td.Rarity)
-        local row = Instance.new("Frame", trListFrame)
-        row.Size                  = UDim2.new(1, 0, 0, 0)
-        row.AutomaticSize         = Enum.AutomaticSize.Y
-        row.BorderSizePixel       = 0
-        Corner(row, 7)
-        row.BackgroundColor3 = D.Card
-        Stroke(row, col, 1, 0.5)
-
-        local acBar = Instance.new("Frame", row)
-        acBar.Name = "AccentBar"
-        acBar.Size = UDim2.new(0, 3, 0, 40)
-        acBar.BackgroundColor3 = col
-        acBar.BorderSizePixel = 0
-        Corner(acBar, 2)
-
-        local inner = Instance.new("Frame", row)
-        inner.Size = UDim2.new(1, -6, 0, 0)
-        inner.Position = UDim2.new(0, 3, 0, 0)
-        inner.AutomaticSize = Enum.AutomaticSize.Y
-        inner.BackgroundTransparency = 1
-        Pad(inner, 5, 8, 5, 8)
-
-        local innerLay = Instance.new("UIListLayout", inner)
-        innerLay.FillDirection = Enum.FillDirection.Vertical
-        innerLay.Padding = UDim.new(0, 4)
-        innerLay.SortOrder = Enum.SortOrder.LayoutOrder
-
-        local headRow = Instance.new("Frame", inner)
-        headRow.Size = UDim2.new(1, 0, 0, 18)
-        headRow.BackgroundTransparency = 1
-
-        local nL = Instance.new("TextLabel", headRow)
-        nL.Size = UDim2.new(0.65, 0, 1, 0)
-        nL.BackgroundTransparency = 1
-        nL.Text = entry.name
-        nL.TextColor3 = col
-        nL.TextSize = 14
-        nL.Font = Enum.Font.GothamBold
-        nL.TextXAlignment = Enum.TextXAlignment.Left
-
-        local rL = Instance.new("TextLabel", headRow)
-        rL.Size = UDim2.new(0.35, 0, 1, 0)
-        rL.Position = UDim2.new(0.65, 0, 0, 0)
-        rL.BackgroundTransparency = 1
-        rL.Text = (td and td.Rarity) or ""
-        rL.TextColor3 = col
-        rL.TextSize = 12
-        rL.Font = Enum.Font.GothamMedium
-        rL.TextXAlignment = Enum.TextXAlignment.Right
-
-        local function syncBarHeight()
-            local h = inner.AbsoluteSize.Y
-            if h > 0 then acBar.Size = UDim2.new(0, 3, 0, h) end
-        end
-        inner:GetPropertyChangedSignal("AbsoluteSize"):Connect(syncBarHeight)
-        innerLay:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncBarHeight)
-        task.defer(syncBarHeight)
-
-        if td and td.Description then
-            local dL = Instance.new("TextLabel", inner)
-            dL.Size = UDim2.new(1, 0, 0, 0)
-            dL.AutomaticSize = Enum.AutomaticSize.Y
-            dL.BackgroundTransparency = 1
-            dL.Text = td.Description
-            dL.TextColor3 = D.TextLow
-            dL.TextSize = 12
-            dL.Font = Enum.Font.GothamMedium
-            dL.TextXAlignment = Enum.TextXAlignment.Left
-            dL.TextWrapped = true
-        end
+    for _,entry in ipairs(sorted) do
+        local td=entry.data; local col=GetRarityColor(td and td.Rarity)
+        local row=Instance.new("Frame",trListFrame); row.Size=UDim2.new(1,0,0,0); row.AutomaticSize=Enum.AutomaticSize.Y; row.BorderSizePixel=0; Corner(row,7); row.BackgroundColor3=D.Card; Stroke(row,col,1,0.5)
+        local acBar=Instance.new("Frame",row); acBar.Name="AccentBar"; acBar.Size=UDim2.new(0,3,0,40); acBar.BackgroundColor3=col; acBar.BorderSizePixel=0; Corner(acBar,2)
+        local inner=Instance.new("Frame",row); inner.Size=UDim2.new(1,-6,0,0); inner.Position=UDim2.new(0,3,0,0); inner.AutomaticSize=Enum.AutomaticSize.Y; inner.BackgroundTransparency=1; Pad(inner,5,8,5,8)
+        local innerLay=Instance.new("UIListLayout",inner); innerLay.FillDirection=Enum.FillDirection.Vertical; innerLay.Padding=UDim.new(0,4); innerLay.SortOrder=Enum.SortOrder.LayoutOrder
+        local headRow=Instance.new("Frame",inner); headRow.Size=UDim2.new(1,0,0,18); headRow.BackgroundTransparency=1
+        local nL=Instance.new("TextLabel",headRow); nL.Size=UDim2.new(0.65,0,1,0); nL.BackgroundTransparency=1; nL.Text=entry.name; nL.TextColor3=col; nL.TextSize=14; nL.Font=Enum.Font.GothamBold; nL.TextXAlignment=Enum.TextXAlignment.Left
+        local rL=Instance.new("TextLabel",headRow); rL.Size=UDim2.new(0.35,0,1,0); rL.Position=UDim2.new(0.65,0,0,0); rL.BackgroundTransparency=1; rL.Text=(td and td.Rarity) or ""; rL.TextColor3=col; rL.TextSize=12; rL.Font=Enum.Font.GothamMedium; rL.TextXAlignment=Enum.TextXAlignment.Right
+        local function syncBarHeight() local h=inner.AbsoluteSize.Y; if h>0 then acBar.Size=UDim2.new(0,3,0,h) end end
+        inner:GetPropertyChangedSignal("AbsoluteSize"):Connect(syncBarHeight); innerLay:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncBarHeight); task.defer(syncBarHeight)
+        if td and td.Description then local dL=Instance.new("TextLabel",inner); dL.Size=UDim2.new(1,0,0,0); dL.AutomaticSize=Enum.AutomaticSize.Y; dL.BackgroundTransparency=1; dL.Text=td.Description; dL.TextColor3=D.TextLow; dL.TextSize=12; dL.Font=Enum.Font.GothamMedium; dL.TextXAlignment=Enum.TextXAlignment.Left; dL.TextWrapped=true end
         if td and td.Stats then
-            local statParts = {}
-            for stat, val in pairs(td.Stats) do
-                local sign = val >= 0 and "+" or ""
-                table.insert(statParts, sign .. val .. "% " .. stat)
-            end
-            if #statParts > 0 then
-                local sL = Instance.new("TextLabel", inner)
-                sL.Size = UDim2.new(1, 0, 0, 0)
-                sL.AutomaticSize = Enum.AutomaticSize.Y
-                sL.BackgroundTransparency = 1
-                sL.Text = table.concat(statParts, ", ")
-                sL.TextColor3 = col
-                sL.TextSize = 12
-                sL.Font = Enum.Font.GothamBold
-                sL.TextXAlignment = Enum.TextXAlignment.Left
-                sL.TextWrapped = true
-            end
+            local statParts={}; for stat,val in pairs(td.Stats) do local sign=val>=0 and "+" or ""; table.insert(statParts,sign..val.."% "..stat) end
+            if #statParts>0 then local sL=Instance.new("TextLabel",inner); sL.Size=UDim2.new(1,0,0,0); sL.AutomaticSize=Enum.AutomaticSize.Y; sL.BackgroundTransparency=1; sL.Text=table.concat(statParts,", "); sL.TextColor3=col; sL.TextSize=12; sL.Font=Enum.Font.GothamBold; sL.TextXAlignment=Enum.TextXAlignment.Left; sL.TextWrapped=true end
         end
     end
-    if #sorted == 0 then
-        local eL = MkLbl(trListFrame, "Keine Traits gefunden.", 11, D.TextLow)
-        eL.Size           = UDim2.new(1, 0, 0, 26)
-        eL.TextXAlignment = Enum.TextXAlignment.Center
-    end
+    if #sorted==0 then local eL=MkLbl(trListFrame,"Keine Traits gefunden.",11,D.TextLow); eL.Size=UDim2.new(1,0,0,26); eL.TextXAlignment=Enum.TextXAlignment.Center end
 end
 
-trSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-    task.spawn(function() pcall(function() BuildTraitOverview(trSearchBox.Text) end) end)
-end)
-NeonBtn(overviewCard, "📋 Alle Traits anzeigen", D.CyanDim, 26).MouseButton1Click:Connect(function()
+trSearchBox:GetPropertyChangedSignal("Text"):Connect(function() task.spawn(function() pcall(function() BuildTraitOverview(trSearchBox.Text) end) end) end)
+NeonBtn(overviewCard,"📋 Alle Traits anzeigen",D.CyanDim,26).MouseButton1Click:Connect(function()
     task.spawn(function() pcall(function() BuildTraitOverview(trSearchBox.Text) end) end)
 end)
 
--- ── Responsive Layout ────────────────────────────────────────
-local function traitSetFramePad(fr, top, right, bottom, left)
-    if not fr then return end
-    local p = fr:FindFirstChildOfClass("UIPadding")
-    if p then
-        p.PaddingTop    = UDim.new(0, top)
-        p.PaddingRight  = UDim.new(0, right)
-        p.PaddingBottom = UDim.new(0, bottom)
-        p.PaddingLeft   = UDim.new(0, left)
-    end
+-- ── Responsive Layout ─────────────────────────────────────────
+local function traitSetFramePad(fr,top,right,bottom,left)
+    if not fr then return end; local p=fr:FindFirstChildOfClass("UIPadding")
+    if p then p.PaddingTop=UDim.new(0,top); p.PaddingRight=UDim.new(0,right); p.PaddingBottom=UDim.new(0,bottom); p.PaddingLeft=UDim.new(0,left) end
 end
-local function traitSetVListGap(fr, gap)
-    if not fr then return end
-    local lay = fr:FindFirstChildOfClass("UIListLayout")
-    if lay then lay.Padding = UDim.new(0, gap) end
+local function traitSetVListGap(fr,gap)
+    if not fr then return end; local lay=fr:FindFirstChildOfClass("UIListLayout"); if lay then lay.Padding=UDim.new(0,gap) end
 end
-
 local function ApplyTraitResponsiveLayout()
-    local touch = (HS._isTouchClient == true) or UserInputService.TouchEnabled
+    local touch=(HS._isTouchClient==true) or UserInputService.TouchEnabled
     if touch then
-        unitGrid.FillDirection = Enum.FillDirection.Horizontal
-        unitGrid.FillDirectionMaxCells = 1
-        unitGrid.CellPadding = UDim2.new(0, 4, 0, 5)
-        syncMobileUnitTileCell()
-        unitScroll.Size = UDim2.new(1, 0, 0, 268)
-        unitScroll.ScrollBarThickness = 3
-        unitScroll.ElasticBehavior = Enum.ElasticBehavior.Never
-        unitCard.Size = UDim2.new(1, 0, 0, 0)
-        unitCard.AutomaticSize = Enum.AutomaticSize.Y
-        overviewCard.Size = UDim2.new(1, 0, 0, 0)
-        overviewCard.AutomaticSize = Enum.AutomaticSize.Y
-        traitListScroll.Size = UDim2.new(1, 0, 0, 180)
-        traitListScroll.ScrollBarThickness = 3
-        traitSetFramePad(unitCard, 6, 8, 6, 8)
-        traitSetFramePad(currentTraitCard, 6, 8, 6, 8)
-        traitSetFramePad(targetCard, 6, 8, 6, 8)
-        traitSetFramePad(rerollCard, 6, 8, 6, 8)
-        traitSetFramePad(statsCard, 6, 8, 6, 8)
-        traitSetFramePad(overviewCard, 6, 8, 6, 8)
-        traitSetVListGap(unitCard, 4)
-        traitSetVListGap(currentTraitCard, 5)
-        traitSetVListGap(targetCard, 5)
-        traitSetVListGap(rerollCard, 5)
-        traitSetVListGap(statsCard, 5)
-        traitSetVListGap(overviewCard, 3)
-        traitSetVListGap(TraitPage, 5)
+        unitGrid.FillDirection=Enum.FillDirection.Horizontal; unitGrid.FillDirectionMaxCells=1; unitGrid.CellPadding=UDim2.new(0,4,0,5); syncMobileUnitTileCell(); unitScroll.Size=UDim2.new(1,0,0,268); unitScroll.ScrollBarThickness=3; unitScroll.ElasticBehavior=Enum.ElasticBehavior.Never; unitCard.Size=UDim2.new(1,0,0,0); unitCard.AutomaticSize=Enum.AutomaticSize.Y; overviewCard.Size=UDim2.new(1,0,0,0); overviewCard.AutomaticSize=Enum.AutomaticSize.Y; traitListScroll.Size=UDim2.new(1,0,0,180); traitListScroll.ScrollBarThickness=3
+        for _,card in ipairs({unitCard,currentTraitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetFramePad(card,6,8,6,8) end
+        for _,card in ipairs({unitCard,currentTraitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetVListGap(card,5) end
+        traitSetVListGap(TraitPage,5)
     else
-        unitGrid.FillDirection = Enum.FillDirection.Horizontal
-        unitGrid.FillDirectionMaxCells = 0
-        unitGrid.CellSize = UDim2.new(0, 150, 0, 180)
-        unitGrid.CellPadding = UDim2.new(0, 6, 0, 8)
-        unitScroll.Size = UDim2.new(1, 0, 0, 240)
-        unitScroll.ScrollBarThickness = 0
-        unitScroll.ElasticBehavior = Enum.ElasticBehavior.Never
-        unitCard.Size = UDim2.new(1, 0, 0, 0)
-        unitCard.AutomaticSize = Enum.AutomaticSize.Y
-        overviewCard.Size = UDim2.new(1, 0, 0, 0)
-        overviewCard.AutomaticSize = Enum.AutomaticSize.Y
-        traitListScroll.Size = UDim2.new(1, 0, 0, 220)
-        traitListScroll.ScrollBarThickness = 3
-        traitSetFramePad(unitCard, 10, 12, 10, 12)
-        traitSetFramePad(currentTraitCard, 10, 12, 10, 12)
-        traitSetFramePad(targetCard, 10, 12, 10, 12)
-        traitSetFramePad(rerollCard, 10, 12, 10, 12)
-        traitSetFramePad(statsCard, 10, 12, 10, 12)
-        traitSetFramePad(overviewCard, 10, 12, 10, 12)
-        traitSetVListGap(unitCard, 7)
-        traitSetVListGap(currentTraitCard, 8)
-        traitSetVListGap(targetCard, 8)
-        traitSetVListGap(rerollCard, 8)
-        traitSetVListGap(statsCard, 8)
-        traitSetVListGap(overviewCard, 6)
-        traitSetVListGap(TraitPage, 8)
+        unitGrid.FillDirection=Enum.FillDirection.Horizontal; unitGrid.FillDirectionMaxCells=0; unitGrid.CellSize=UDim2.new(0,150,0,180); unitGrid.CellPadding=UDim2.new(0,6,0,8); unitScroll.Size=UDim2.new(1,0,0,240); unitScroll.ScrollBarThickness=0; unitScroll.ElasticBehavior=Enum.ElasticBehavior.Never; unitCard.Size=UDim2.new(1,0,0,0); unitCard.AutomaticSize=Enum.AutomaticSize.Y; overviewCard.Size=UDim2.new(1,0,0,0); overviewCard.AutomaticSize=Enum.AutomaticSize.Y; traitListScroll.Size=UDim2.new(1,0,0,220); traitListScroll.ScrollBarThickness=3
+        for _,card in ipairs({unitCard,currentTraitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetFramePad(card,10,12,10,12) end
+        for _,card in ipairs({unitCard,currentTraitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetVListGap(card,8) end
+        traitSetVListGap(TraitPage,8)
     end
-    task.defer(function()
-        pcall(refreshUnitScrollCanvas)
-        pcall(refreshTraitScrollCanvas)
-    end)
+    task.defer(function() pcall(refreshUnitScrollCanvas); pcall(refreshTraitScrollCanvas) end)
 end
-_G.HazeShared._ApplyTraitResponsiveLayout = ApplyTraitResponsiveLayout
+_G.HazeShared._ApplyTraitResponsiveLayout=ApplyTraitResponsiveLayout
 
 -- ── Startup ───────────────────────────────────────────────────
-task.delay(1, function()
+task.delay(1,function()
     pcall(function()
-        ScanUnits()
-        BuildUnitList("")
-        RebuildTraitTargetList("")
-        RebuildMultiStatUI()
-        BuildTraitOverview("")
-        pcall(ApplyTraitResponsiveLayout)
+        ScanUnits(); BuildUnitList(""); RebuildTraitTargetList(""); RebuildMultiStatUI(); BuildTraitOverview(""); pcall(ApplyTraitResponsiveLayout)
     end)
 end)
 task.defer(function() pcall(ApplyTraitResponsiveLayout) end)
 
 pcall(function()
     if HS.ApplySharpTypography then
-        local r = TraitPageRoot or TraitPage
-        if r then for _, o in ipairs(r:GetDescendants()) do HS.ApplySharpTypography(o) end end
+        local r=TraitPageRoot or TraitPage
+        if r then for _,o in ipairs(r:GetDescendants()) do HS.ApplySharpTypography(o) end end
     end
 end)
 
-print(string.format("[HazeHub-Trait] v%s geladen | %s", VERSION, LP.Name))
+print(string.format("[HazeHub-Trait] v%s geladen | %s",VERSION,LP.Name))
