@@ -17,7 +17,7 @@
 --      (kein separates Scrollen nötig)
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "2.9.0"
+local VERSION = "3.1.0"
 
 -- ── Warten bis HazeShared bereit ──────────────────────────────
 local _w = 0
@@ -284,39 +284,6 @@ end)
 TR.UI.Fr.UnitList = unitListFrame
 local unitEmptyLbl = MkLbl(unitListFrame,"Keine Einheiten gefunden.",11,D.TextLow)
 unitEmptyLbl.Size=UDim2.new(1,0,0,26); TR.UI.Lbl.UnitEmpty=unitEmptyLbl
-
--- ── 2-spaltige Zeile: Aktueller Trait + Ziel ──────────────────
-local traitsRow = Instance.new("Frame",TraitPage)
-traitsRow.Size=UDim2.new(1,0,0,0); traitsRow.AutomaticSize=Enum.AutomaticSize.Y
-traitsRow.BackgroundTransparency=1; HList(traitsRow,8)
-
--- Linke Spalte: Aktueller Trait (Live)
-local currentTraitCard = Card(traitsRow)
-currentTraitCard.Size=UDim2.new(0.5,-4,0,0); currentTraitCard.AutomaticSize=Enum.AutomaticSize.Y
-Pad(currentTraitCard,10,12,10,12); VList(currentTraitCard,8)
-SecLbl(currentTraitCard,"🔍 AKTUELLER TRAIT (Live)")
-
-TR.UI.Lbl.UnitName=MkLbl(currentTraitCard,"Keine Einheit gewählt",16,D.TextHi,true)
-TR.UI.Lbl.UnitName.Size=UDim2.new(1,0,0,22)
-
-local mainRow=Instance.new("Frame",currentTraitCard)
-mainRow.Size=UDim2.new(1,0,0,48); mainRow.BackgroundColor3=D.Input
-mainRow.BackgroundTransparency=D.GlassPane or 0.18; mainRow.BorderSizePixel=0
-Corner(mainRow,8); Stroke(mainRow,D.Gold,1,0.4)
-Instance.new("Frame",mainRow).Size=UDim2.new(0,3,1,0); mainRow:FindFirstChildOfClass("Frame").BackgroundColor3=D.Gold; mainRow:FindFirstChildOfClass("Frame").BorderSizePixel=0; Corner(mainRow:FindFirstChildOfClass("Frame"),2)
-local mMainLabel=Instance.new("TextLabel",mainRow); mMainLabel.Position=UDim2.new(0,10,0,3); mMainLabel.Size=UDim2.new(0.35,0,0,16); mMainLabel.BackgroundTransparency=1; mMainLabel.Text="MAIN TRAIT"; mMainLabel.TextColor3=D.Gold; mMainLabel.TextSize=12; mMainLabel.Font=Enum.Font.GothamBold; mMainLabel.TextXAlignment=Enum.TextXAlignment.Left
-TR.UI.Lbl.MainTrait=Instance.new("TextLabel",mainRow); TR.UI.Lbl.MainTrait.Position=UDim2.new(0,10,0,20); TR.UI.Lbl.MainTrait.Size=UDim2.new(1,-14,0,22); TR.UI.Lbl.MainTrait.BackgroundTransparency=1; TR.UI.Lbl.MainTrait.Text="–"; TR.UI.Lbl.MainTrait.TextColor3=D.TextHi; TR.UI.Lbl.MainTrait.TextSize=16; TR.UI.Lbl.MainTrait.Font=Enum.Font.GothamBold; TR.UI.Lbl.MainTrait.TextXAlignment=Enum.TextXAlignment.Left
-TR.UI.Lbl.MainRarity=Instance.new("TextLabel",mainRow); TR.UI.Lbl.MainRarity.Position=UDim2.new(0.6,0,0,3); TR.UI.Lbl.MainRarity.Size=UDim2.new(0.39,-4,0,16); TR.UI.Lbl.MainRarity.BackgroundTransparency=1; TR.UI.Lbl.MainRarity.Text=""; TR.UI.Lbl.MainRarity.TextColor3=D.Gold; TR.UI.Lbl.MainRarity.TextSize=12; TR.UI.Lbl.MainRarity.Font=Enum.Font.GothamMedium; TR.UI.Lbl.MainRarity.TextXAlignment=Enum.TextXAlignment.Right
-
-local subRow=Instance.new("Frame",currentTraitCard)
-subRow.Size=UDim2.new(1,0,0,48); subRow.BackgroundColor3=D.Input
-subRow.BackgroundTransparency=(D.GlassPane or 0.18)+0.04; subRow.BorderSizePixel=0
-Corner(subRow,8); Stroke(subRow,D.Purple,1,0.4)
-Instance.new("Frame",subRow).Size=UDim2.new(0,3,1,0); subRow:FindFirstChildOfClass("Frame").BackgroundColor3=D.Purple; subRow:FindFirstChildOfClass("Frame").BorderSizePixel=0; Corner(subRow:FindFirstChildOfClass("Frame"),2)
-local mSubLabel=Instance.new("TextLabel",subRow); mSubLabel.Position=UDim2.new(0,10,0,3); mSubLabel.Size=UDim2.new(0.35,0,0,16); mSubLabel.BackgroundTransparency=1; mSubLabel.Text="SUB TRAIT"; mSubLabel.TextColor3=D.Purple; mSubLabel.TextSize=12; mSubLabel.Font=Enum.Font.GothamBold; mSubLabel.TextXAlignment=Enum.TextXAlignment.Left
-TR.UI.Lbl.SubTrait=Instance.new("TextLabel",subRow); TR.UI.Lbl.SubTrait.Position=UDim2.new(0,10,0,20); TR.UI.Lbl.SubTrait.Size=UDim2.new(1,-14,0,22); TR.UI.Lbl.SubTrait.BackgroundTransparency=1; TR.UI.Lbl.SubTrait.Text="–"; TR.UI.Lbl.SubTrait.TextColor3=D.TextHi; TR.UI.Lbl.SubTrait.TextSize=16; TR.UI.Lbl.SubTrait.Font=Enum.Font.GothamBold; TR.UI.Lbl.SubTrait.TextXAlignment=Enum.TextXAlignment.Left
-TR.UI.Lbl.SubRarity=Instance.new("TextLabel",subRow); TR.UI.Lbl.SubRarity.Position=UDim2.new(0.6,0,0,3); TR.UI.Lbl.SubRarity.Size=UDim2.new(0.39,-4,0,16); TR.UI.Lbl.SubRarity.BackgroundTransparency=1; TR.UI.Lbl.SubRarity.Text=""; TR.UI.Lbl.SubRarity.TextColor3=D.Purple; TR.UI.Lbl.SubRarity.TextSize=12; TR.UI.Lbl.SubRarity.Font=Enum.Font.GothamMedium; TR.UI.Lbl.SubRarity.TextXAlignment=Enum.TextXAlignment.Right
-TR.UI.Lbl.TraitInfo=MkLbl(currentTraitCard,"",14,D.TextLow); TR.UI.Lbl.TraitInfo.Size=UDim2.new(1,0,0,40)
 
 -- ── Hilfsfunktionen ───────────────────────────────────────────
 local function GetUnitTraits(unitInstance)
@@ -599,7 +566,7 @@ unitRefBtn.MouseButton1Click:Connect(function()
     end)
 end)
 unitSearchBox:GetPropertyChangedSignal("Text"):Connect(function() BuildUnitList(unitSearchBox.Text) end)
-NeonBtn(currentTraitCard,"🔄 Trait aktualisieren",D.CyanDim,26).MouseButton1Click:Connect(function() UpdateLiveTraitDisplay() end)
+NeonBtn(rerollCard,"🔄 Trait aktualisieren",D.CyanDim,26).MouseButton1Click:Connect(function() UpdateLiveTraitDisplay() end)
 task.spawn(function()
     while true do task.wait(2)
         if HS.State and HS.State.ActiveTab=="Traits" then pcall(UpdateLiveTraitDisplay) end
@@ -607,8 +574,8 @@ task.spawn(function()
 end)
 
 -- ── Ziel-Traits (rechte Spalte von traitsRow) ─────────────────
-local targetCard=Card(traitsRow)
-targetCard.Size=UDim2.new(0.5,-4,0,0); targetCard.AutomaticSize=Enum.AutomaticSize.Y
+local targetCard=Card(rerollCard)
+targetCard.Size=UDim2.new(1,0,0,0); targetCard.AutomaticSize=Enum.AutomaticSize.Y
 Pad(targetCard,10,12,10,12); VList(targetCard,6)
 SecLbl(targetCard,"🎯 ZIEL-TRAITS")
 TR.UI.Lbl.SelectedTraitsInfo=MkLbl(targetCard,"Keine Ziel-Traits gewählt",10,D.TextLow)
@@ -924,15 +891,179 @@ TR.UI.Lbl.StatRollRate=MkLbl(statsCard,"",10,D.TextLow); TR.UI.Lbl.StatRollRate.
 -- ★ ZIEL-GRADES (ersetzt altes Dropdown-System)
 -- Pro Stat: Toggle (AN/AUS) + kompakter Grade-Picker (C- … O+)
 -- Mehrere Stats gleichzeitig wählbar (AND-Logik)
-SecLbl(statsCard,"🎯 ZIEL-GRADES (≥ Index, AND)")
-local multiStatInfoLbl=MkLbl(statsCard,"Stoppt wenn ALLE gewählten Stats ihren Grade ≥ Ziel erreichen.",8,D.TextLow)
-multiStatInfoLbl.Size=UDim2.new(1,0,0,16); multiStatInfoLbl.TextWrapped=true
+-- ════════════════════════════════════════════════════════════════════
+--  ZIEL-GRADES DROPDOWN  (Pro Stat: Toggle + Grade-Picker C- … O+)
+--
+--  Layout pro Stat:
+--    ┌─[✓]─ StatName ──────── ≥ S-  ─┐   ← Toggle-Zeile
+--    │ C- │ C │ C+ │ B- │ B │ B+ │ …│   ← Grade-Grid (wenn aktiv)
+--    └────────────────────────────────┘
+--
+--  Logik: GradeIndex(current) >= GradeIndex(target) → STOP
+--  Mehrere Stats aktiv = AND-Verknüpfung
+-- ════════════════════════════════════════════════════════════════════
+SecLbl(statsCard,"🎯 ZIEL-GRADES  (≥ Ranking, AND-Logik)")
+local multiStatInfoLbl=MkLbl(statsCard,"Stoppt wenn ALLE aktiven Stats ihren Ziel-Grade erreichen.",8,D.TextLow)
+multiStatInfoLbl.Size=UDim2.new(1,0,0,14); multiStatInfoLbl.TextWrapped=true
 
+-- Tier-Farben für Grade-Buttons
 local RATING_TIER_COLORS={["C-"]="C",["C"]="C",["C+"]="C",["B-"]="B",["B"]="B",["B+"]="B",["A-"]="A",["A"]="A",["A+"]="A",["S-"]="S",["S"]="S",["S+"]="S",["SS"]="SS",["SSS"]="SS",["O-"]="O",["O"]="O",["O+"]="O"}
 local TIER_COLORS={C=Color3.fromRGB(160,160,160),B=Color3.fromRGB(50,200,80),A=Color3.fromRGB(50,120,255),S=Color3.fromRGB(200,130,255),SS=Color3.fromRGB(255,180,0),O=Color3.fromRGB(255,60,60)}
 local function GetRatingColor(rating)
     local tier=RATING_TIER_COLORS[rating] or "C"; return TIER_COLORS[tier] or D.TextMid
 end
+
+-- Container für alle Stat-Ziel-Zeilen (wird von RebuildMultiStatUI neu gebaut)
+local multiStatContainer=Instance.new("Frame",statsCard)
+multiStatContainer.Size=UDim2.new(1,0,0,0); multiStatContainer.AutomaticSize=Enum.AutomaticSize.Y
+multiStatContainer.BackgroundTransparency=1; VList(multiStatContainer,3)
+
+TR.UI.Btn.StatTargetRows={}
+
+-- ── RebuildMultiStatUI ─────────────────────────────────────────────
+-- Baut alle Stat-Zeilen mit Toggle + Grade-Picker neu auf.
+-- Wird aufgerufen bei: Init, Klick auf Toggle, Klick auf Grade-Button.
+local function RebuildMultiStatUI()
+    -- Alte Zeilen entfernen
+    for _,entry in pairs(TR.UI.Btn.StatTargetRows) do
+        if entry.frame and entry.frame.Parent then entry.frame:Destroy() end
+    end
+    TR.UI.Btn.StatTargetRows={}
+
+    for _,statName in ipairs(STAT_POTENTIAL_NAMES) do
+        local displayName = STAT_DISPLAY_NAMES[statName] or statName
+        local currentTarget = TR.StatTargetRatings[statName]   -- nil = inaktiv
+        local isActive = currentTarget ~= nil
+
+        -- Äußerer Container für Toggle-Zeile + Grade-Grid
+        local statRowFrame=Instance.new("Frame",multiStatContainer)
+        statRowFrame.Size=UDim2.new(1,0,0,0); statRowFrame.AutomaticSize=Enum.AutomaticSize.Y
+        statRowFrame.BackgroundTransparency=1; VList(statRowFrame,2)
+
+        -- ── Toggle-Zeile (Stat-Name + aktuelles Ziel) ────────────
+        local hRow=Instance.new("Frame",statRowFrame)
+        hRow.Size=UDim2.new(1,0,0,22)
+        hRow.BackgroundColor3=isActive and Color3.fromRGB(14,36,24) or D.CardHover
+        hRow.BackgroundTransparency=0.2; hRow.BorderSizePixel=0
+        Corner(hRow,6); Stroke(hRow,isActive and D.GreenBright or D.Border,1,isActive and 0.15 or 0.55)
+
+        -- Toggle-Checkbox
+        local toggleBtn=Instance.new("TextButton",hRow)
+        toggleBtn.Size=UDim2.new(0,18,0,18); toggleBtn.Position=UDim2.new(0,3,0.5,-9)
+        toggleBtn.BackgroundColor3=isActive and D.Green or D.CardHover
+        toggleBtn.BackgroundTransparency=isActive and 0.05 or 0.45
+        toggleBtn.Text=isActive and "✓" or ""; toggleBtn.TextColor3=Color3.new(1,1,1)
+        toggleBtn.TextSize=10; toggleBtn.Font=Enum.Font.GothamBold
+        toggleBtn.AutoButtonColor=false; toggleBtn.BorderSizePixel=0
+        toggleBtn.TextScaled=false; toggleBtn.RichText=true; toggleBtn.TextStrokeTransparency=1
+        Corner(toggleBtn,4); Stroke(toggleBtn,isActive and D.GreenBright or D.Border,1,isActive and 0 or 0.5)
+
+        -- Stat-Name
+        local statNameLbl=Instance.new("TextLabel",hRow)
+        statNameLbl.Position=UDim2.new(0,26,0,0); statNameLbl.Size=UDim2.new(0.48,-26,1,0)
+        statNameLbl.BackgroundTransparency=1; statNameLbl.Text=displayName
+        statNameLbl.TextColor3=isActive and D.GreenBright or D.TextMid
+        statNameLbl.TextSize=10; statNameLbl.Font=Enum.Font.GothamBold
+        statNameLbl.TextXAlignment=Enum.TextXAlignment.Left
+        statNameLbl.TextScaled=false; statNameLbl.RichText=true; statNameLbl.TextStrokeTransparency=1
+
+        -- Aktueller Ziel-Grade (rechts)
+        local targetLbl=Instance.new("TextLabel",hRow)
+        targetLbl.Position=UDim2.new(0.48,0,0,0); targetLbl.Size=UDim2.new(0.52,-4,1,0)
+        targetLbl.BackgroundTransparency=1
+        targetLbl.Text=currentTarget and ("≥ "..currentTarget) or "kein Ziel"
+        targetLbl.TextColor3=currentTarget and GetRatingColor(currentTarget) or D.TextLow
+        targetLbl.TextSize=10; targetLbl.Font=Enum.Font.GothamBold
+        targetLbl.TextXAlignment=Enum.TextXAlignment.Right
+        targetLbl.TextScaled=false; targetLbl.RichText=true; targetLbl.TextStrokeTransparency=1
+
+        -- ── Grade-Picker Grid (nur sichtbar wenn isActive) ───────
+        local pickerFrame=Instance.new("Frame",statRowFrame)
+        pickerFrame.Size=UDim2.new(1,0,0,0); pickerFrame.AutomaticSize=Enum.AutomaticSize.Y
+        pickerFrame.BackgroundTransparency=1; pickerFrame.Visible=isActive
+        local pickerGrid=Instance.new("UIGridLayout",pickerFrame)
+        -- 4 Spalten: C-/C/C+ | B-/B/B+ | A-/A/A+ | S-/S/S+ | SS/SSS | O-/O/O+
+        pickerGrid.CellSize=UDim2.new(0.25,-3,0,18); pickerGrid.CellPadding=UDim2.new(0,3,0,3)
+
+        for _,rating in ipairs(ALL_RATINGS) do
+            local col=GetRatingColor(rating)
+            local isThisTarget=(currentTarget==rating)
+            local rBtn=Instance.new("TextButton",pickerFrame)
+            rBtn.BackgroundColor3=isThisTarget and col or D.CardHover
+            rBtn.BackgroundTransparency=isThisTarget and 0.1 or 0.55
+            rBtn.BorderSizePixel=0; Corner(rBtn,4)
+            Stroke(rBtn,isThisTarget and col or D.Border,1,isThisTarget and 0 or 0.65)
+            rBtn.Text=rating; rBtn.TextColor3=isThisTarget and Color3.new(1,1,1) or D.TextMid
+            rBtn.TextSize=8; rBtn.Font=Enum.Font.GothamBold
+            rBtn.AutoButtonColor=false; rBtn.TextScaled=false; rBtn.RichText=true; rBtn.TextStrokeTransparency=1
+
+            local capStat=statName; local capRating=rating
+            rBtn.MouseButton1Click:Connect(function()
+                TR.StatTargetRatings[capStat]=capRating
+                RebuildMultiStatUI()
+            end)
+        end
+
+        -- Toggle-Logik: AN/AUS schalten
+        local capStat=statName
+        toggleBtn.MouseButton1Click:Connect(function()
+            if TR.StatTargetRatings[capStat] then
+                TR.StatTargetRatings[capStat]=nil    -- deaktivieren
+            else
+                TR.StatTargetRatings[capStat]="S"   -- Standard: S
+            end
+            RebuildMultiStatUI()
+        end)
+
+        TR.UI.Btn.StatTargetRows[statName]={frame=statRowFrame,targetLbl=targetLbl,toggleBtn=toggleBtn}
+    end
+
+    -- Preset-Buttons (Schnellwahl)
+    local presetRow=Instance.new("Frame",multiStatContainer)
+    presetRow.Size=UDim2.new(1,0,0,22); presetRow.BackgroundTransparency=1; HList(presetRow,4)
+
+    local function mkPreset(parent,txt,col,fn)
+        local b=Instance.new("TextButton",parent); b.Size=UDim2.new(0.32,0,1,0)
+        b.BackgroundColor3=D.CardHover; b.BackgroundTransparency=0.3
+        b.Text=txt; b.TextColor3=col; b.TextSize=9; b.Font=Enum.Font.GothamBold
+        b.AutoButtonColor=false; b.BorderSizePixel=0
+        b.TextScaled=false; b.RichText=true; b.TextStrokeTransparency=1
+        Corner(b,6); Stroke(b,col,1,0.35); b.MouseButton1Click:Connect(fn); return b
+    end
+    mkPreset(presetRow,"⭐ Alle ≥S",Color3.fromRGB(200,130,255),function()
+        for _,sn in ipairs(STAT_POTENTIAL_NAMES) do TR.StatTargetRatings[sn]="S" end
+        RebuildMultiStatUI()
+    end)
+    mkPreset(presetRow,"✨ Alle ≥S+",D.Gold,function()
+        for _,sn in ipairs(STAT_POTENTIAL_NAMES) do TR.StatTargetRatings[sn]="S+" end
+        RebuildMultiStatUI()
+    end)
+    mkPreset(presetRow,"✕ Reset",D.Red,function()
+        TR.StatTargetRatings={}; RebuildMultiStatUI()
+    end)
+
+    -- Summary-Label aktualisieren
+    local activeCount=0; local parts={}
+    for _,sn in ipairs(STAT_POTENTIAL_NAMES) do
+        if TR.StatTargetRatings[sn] then
+            activeCount=activeCount+1
+            table.insert(parts,(STAT_DISPLAY_NAMES[sn] or sn).."≥"..TR.StatTargetRatings[sn])
+        end
+    end
+    if TR.UI.Lbl.MultiStatSummary then
+        if activeCount==0 then
+            TR.UI.Lbl.MultiStatSummary.Text="Kein Stat-Ziel aktiv – kein Auto-Stopp"
+            TR.UI.Lbl.MultiStatSummary.TextColor3=D.TextLow
+        else
+            TR.UI.Lbl.MultiStatSummary.Text="Ziel (≥): "..table.concat(parts,"  &  ")
+            TR.UI.Lbl.MultiStatSummary.TextColor3=D.Cyan
+        end
+    end
+end
+
+TR.UI.Lbl.MultiStatSummary=MkLbl(statsCard,"Kein Stat-Ziel aktiv – kein Auto-Stopp",8,D.TextLow)
+TR.UI.Lbl.MultiStatSummary.Size=UDim2.new(1,0,0,14); TR.UI.Lbl.MultiStatSummary.TextWrapped=true
+
 
 -- ╔══════════════════════════════════════════════════════════╗
 --  LOGIK – CheckAllStatGoals
@@ -1301,13 +1432,13 @@ local function ApplyTraitResponsiveLayout()
     local touch=(HS._isTouchClient==true) or UserInputService.TouchEnabled
     if touch then
         unitGrid.FillDirection=Enum.FillDirection.Horizontal; unitGrid.FillDirectionMaxCells=1; unitGrid.CellPadding=UDim2.new(0,4,0,5); syncMobileUnitTileCell(); unitScroll.Size=UDim2.new(1,0,0,268); unitScroll.ScrollBarThickness=3; unitScroll.ElasticBehavior=Enum.ElasticBehavior.Never; unitCard.Size=UDim2.new(1,0,0,0); unitCard.AutomaticSize=Enum.AutomaticSize.Y; overviewCard.Size=UDim2.new(1,0,0,0); overviewCard.AutomaticSize=Enum.AutomaticSize.Y; traitListScroll.Size=UDim2.new(1,0,0,180); traitListScroll.ScrollBarThickness=3
-        for _,card in ipairs({unitCard,currentTraitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetFramePad(card,6,8,6,8) end
-        for _,card in ipairs({unitCard,currentTraitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetVListGap(card,5) end
+        for _,card in ipairs({unitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetFramePad(card,6,8,6,8) end
+        for _,card in ipairs({unitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetVListGap(card,5) end
         traitSetVListGap(TraitPage,5)
     else
         unitGrid.FillDirection=Enum.FillDirection.Horizontal; unitGrid.FillDirectionMaxCells=0; unitGrid.CellSize=UDim2.new(0,150,0,180); unitGrid.CellPadding=UDim2.new(0,6,0,8); unitScroll.Size=UDim2.new(1,0,0,240); unitScroll.ScrollBarThickness=0; unitScroll.ElasticBehavior=Enum.ElasticBehavior.Never; unitCard.Size=UDim2.new(1,0,0,0); unitCard.AutomaticSize=Enum.AutomaticSize.Y; overviewCard.Size=UDim2.new(1,0,0,0); overviewCard.AutomaticSize=Enum.AutomaticSize.Y; traitListScroll.Size=UDim2.new(1,0,0,220); traitListScroll.ScrollBarThickness=3
-        for _,card in ipairs({unitCard,currentTraitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetFramePad(card,10,12,10,12) end
-        for _,card in ipairs({unitCard,currentTraitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetVListGap(card,8) end
+        for _,card in ipairs({unitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetFramePad(card,10,12,10,12) end
+        for _,card in ipairs({unitCard,targetCard,rerollCard,statsCard,overviewCard}) do traitSetVListGap(card,8) end
         traitSetVListGap(TraitPage,8)
     end
     task.defer(function() pcall(refreshUnitScrollCanvas); pcall(refreshTraitScrollCanvas) end)
