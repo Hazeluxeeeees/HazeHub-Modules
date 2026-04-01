@@ -63,7 +63,7 @@ if _G.HazHubLoaded then return end
 _G.HazHubLoaded = true
 
 -- ★ Initialer Stabilitäts-Wait (10s für langsame Executoren / Race-Conditions)
-task.wait(10)
+task.wait(5) -- ★ 5s Executor-Stabilität (von 10s reduziert)
 
 -- ★ Account-spezifische Dynamik (für Multi-Account korrekt)
 local LP = game:GetService('Players').LocalPlayer
@@ -2580,6 +2580,102 @@ task.spawn(function()
             end
         end
         task.wait(2)
+    end
+end)
+
+
+-- ════════════════════════════════════════════════════════════
+--  ★ AUTO-MATCH-RESTART  (alle 600s = 10 Min)
+--  Persistent: Config["AutoMatchRestart"] in Haze_Config.json
+-- ════════════════════════════════════════════════════════════
+local restartCard = Card(MiscPage)
+Pad(restartCard,10,12,10,12); VList(restartCard,8)
+SecLbl(restartCard,"⚡  AUTO-MATCH-RESTART")
+
+local restartInfoLbl = MkLbl(restartCard,
+    "Feuert alle 10 Min den MatchRestart-Remote, wenn der Toggle aktiv ist.",
+    10, D.TextLow)
+
+local restartRow = Instance.new("Frame", restartCard)
+restartRow.Size = UDim2.new(1,0,0,34); restartRow.BackgroundTransparency=1; HList(restartRow,8)
+
+local restartStatusLbl = Instance.new("TextLabel", restartRow)
+restartStatusLbl.Size=UDim2.new(0.55,0,1,0); restartStatusLbl.BackgroundTransparency=1
+restartStatusLbl.Text="Auto-Restart: AUS"; restartStatusLbl.TextColor3=D.TextMid
+restartStatusLbl.TextSize=12; restartStatusLbl.Font=Enum.Font.GothamBold
+restartStatusLbl.TextXAlignment=Enum.TextXAlignment.Left
+restartStatusLbl.TextScaled=false; restartStatusLbl.RichText=true; restartStatusLbl.TextStrokeTransparency=1
+
+local restartToggleBtn = Instance.new("TextButton", restartRow)
+restartToggleBtn.Size=UDim2.new(0.42,0,1,0)
+restartToggleBtn.BackgroundColor3=D.Red; restartToggleBtn.BackgroundTransparency=0.25
+restartToggleBtn.Text="● AUS"; restartToggleBtn.TextColor3=D.Red
+restartToggleBtn.TextSize=11; restartToggleBtn.Font=Enum.Font.GothamBold
+restartToggleBtn.AutoButtonColor=false; restartToggleBtn.BorderSizePixel=0
+Corner(restartToggleBtn,8); Stroke(restartToggleBtn,D.Red,1,0.25)
+restartToggleBtn.TextScaled=false; restartToggleBtn.RichText=true; restartToggleBtn.TextStrokeTransparency=1
+
+local _restartIntervalLbl = MkLbl(restartCard,"⏱ Intervall: 10 Minuten",10,D.TextLow)
+
+-- Status-Sync-Helper
+local function SyncRestartBtn()
+    local on = H.Config.AutoMatchRestart == true
+    restartToggleBtn.Text            = on and "● AN" or "● AUS"
+    restartToggleBtn.TextColor3      = on and D.GreenBright or D.Red
+    restartToggleBtn.BackgroundColor3= on and Color3.fromRGB(10,40,18) or Color3.fromRGB(48,10,10)
+    restartStatusLbl.Text            = on and "Auto-Restart: AN" or "Auto-Restart: AUS"
+    restartStatusLbl.TextColor3      = on and D.GreenBright or D.TextMid
+    local st = restartToggleBtn:FindFirstChildOfClass("UIStroke")
+    if st then st.Color = on and D.Green or D.Red end
+end
+
+-- Config laden
+if H.Config.AutoMatchRestart == nil then H.Config.AutoMatchRestart = false end
+SyncRestartBtn()
+
+restartToggleBtn.MouseButton1Click:Connect(function()
+    H.Config.AutoMatchRestart = not H.Config.AutoMatchRestart
+    pcall(SaveConfig)
+    SyncRestartBtn()
+    print("[HazeHUB] Auto-Match-Restart: " .. (H.Config.AutoMatchRestart and "AN" or "AUS"))
+end)
+
+-- ★ Restart-Loop (600s Intervall)
+task.spawn(function()
+    local INTERVAL = 600  -- 10 Minuten
+    while S.Running and ScreenGui.Parent do
+        task.wait(INTERVAL)
+        if H.Config.AutoMatchRestart then
+            pcall(function()
+                -- Remote-Pfad 1: OnGame.RestartMatch
+                local remote1 = game:GetService("ReplicatedStorage")
+                    :FindFirstChild("Remote")
+                    and game:GetService("ReplicatedStorage").Remote
+                    :FindFirstChild("Server")
+                    and game:GetService("ReplicatedStorage").Remote.Server
+                    :FindFirstChild("OnGame")
+                    and game:GetService("ReplicatedStorage").Remote.Server.OnGame
+                    :FindFirstChild("MatchRestart")
+                if remote1 then
+                    remote1:FireServer()
+                    print("[HazeHUB] Auto-Match-Restart ausgelöst (OnGame.MatchRestart)")
+                    return
+                end
+                -- Remote-Pfad 2: Gameplay.MatchRestart
+                local remote2 = game:GetService("ReplicatedStorage")
+                    :FindFirstChild("Remote")
+                    and game:GetService("ReplicatedStorage").Remote
+                    :FindFirstChild("Server")
+                    and game:GetService("ReplicatedStorage").Remote.Server
+                    :FindFirstChild("Gameplay")
+                    and game:GetService("ReplicatedStorage").Remote.Server.Gameplay
+                    :FindFirstChild("MatchRestart")
+                if remote2 then
+                    remote2:FireServer()
+                    print("[HazeHUB] Auto-Match-Restart ausgelöst (Gameplay.MatchRestart)")
+                end
+            end)
+        end
     end
 end)
 
