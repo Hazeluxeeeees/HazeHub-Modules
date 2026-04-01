@@ -15,7 +15,7 @@
 --    + Alle Pfade dynamisch via LP.Name
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "1.3.0"
+local VERSION = "1.4.0"
 
 -- ============================================================
 --  WARTEN BIS SHARED BEREIT
@@ -107,20 +107,35 @@ local function GetItemBuyAmount(itemInst)
     return maxBuy
 end
 
--- Berechnet die optimale Kaufmenge:
---   qty = min(BuyAmount, floor(balance / cost))
---   Falls BuyAmount = 0/nil: unbegrenzt → nur durch Balance limitiert
+-- ★ Berechnet die optimale Kaufmenge:
+--   1. Verfügbarer Bestand: max(0, Quantity - BuyAmount)  [wenn Quantity > 0]
+--   2. Bezahlbar mit Balance: floor(balance / cost)
+--   3. Ergebnis: min(affordable, available)
 local function CalcMaxQty(itemInst, currencyKey)
     local cost    = GetItemCost(itemInst)
     if cost <= 0 then return 1 end  -- Preis unbekannt → sicher 1
     local balance = GetBalanceFor(currencyKey)
     if balance < cost then return 0 end  -- kann nicht mal 1 kaufen
     local affordable = math.floor(balance / cost)
-    local buyLimit   = GetItemBuyAmount(itemInst)
-    if buyLimit > 0 then
-        return math.min(affordable, buyLimit)
-    end
-    return affordable
+
+    -- Restbestand: Quantity - BuyAmount (falls Quantity vorhanden)
+    local rawQty=0; pcall(function()
+        local qv=itemInst:FindFirstChild("Quantity") or itemInst:FindFirstChild("Stock") or itemInst:FindFirstChild("Amount")
+        if qv then rawQty=tonumber(qv.Value) or 0 end
+    end)
+    local rawBought=0; pcall(function()
+        local bv=itemInst:FindFirstChild("BuyAmount")
+        if bv then rawBought=tonumber(bv.Value) or 0 end
+    end)
+    local available = rawQty > 0 and math.max(0, rawQty - rawBought) or affordable
+
+    -- Transaktions-Limit (MaxBuy / MaxAmount)
+    local txLimit = GetItemBuyAmount(itemInst)
+
+    -- Minimum aller drei Grenzen
+    local result = math.min(affordable, available)
+    if txLimit > 0 then result = math.min(result, txLimit) end
+    return result
 end
 
 -- Lese .Value aus RS.Player_Data.[LP.Name].Data.[key]
@@ -673,12 +688,24 @@ local function BuildItemList(parent, folderGetter, shopDef, acc)
             nL.TextXAlignment=Enum.TextXAlignment.Left; nL.TextTruncate=Enum.TextTruncate.AtEnd
             nL.TextScaled=false; nL.RichText=true; nL.TextStrokeTransparency=1
 
-            -- Preis + BuyAmount Info
+            -- ★ Dynamische Bestands-Anzeige:
+            --   CurrencyType (wenn vorhanden), Preis, Bestand (Quantity - BuyAmount)
+            local rawQty=0; pcall(function()
+                local qv=item:FindFirstChild("Quantity") or item:FindFirstChild("Stock") or item:FindFirstChild("Amount")
+                if qv then rawQty=tonumber(qv.Value) or 0 end
+            end)
+            local rawBought=0; pcall(function()
+                local bv=item:FindFirstChild("BuyAmount")
+                if bv then rawBought=tonumber(bv.Value) or 0 end
+            end)
+            local rawAvail = (rawQty>0) and math.max(0,rawQty-rawBought) or 0
+            local availStr = rawQty>0 and (FmtNum(rawAvail).."/"..FmtNum(rawQty).." verfügbar") or "∞"
             local iL = Instance.new("TextLabel",row)
             iL.Position = UDim2.new(0,10,0,24); iL.Size = UDim2.new(1,-16,0,13)
             iL.BackgroundTransparency=1
-            iL.Text = string.format("Preis: %s  |  Limit: %s", costStr, buyAmtStr)
-            iL.TextColor3=D.TextLow; iL.TextSize=9; iL.Font=Enum.Font.Gotham
+            iL.Text = string.format("Preis: %s  |  %s", costStr, availStr)
+            iL.TextColor3 = (rawAvail==0 and rawQty>0) and D.Red or D.TextLow
+            iL.TextSize=9; iL.Font=Enum.Font.Gotham
             iL.TextXAlignment=Enum.TextXAlignment.Left
             iL.TextScaled=false; iL.RichText=true; iL.TextStrokeTransparency=1
 
@@ -785,6 +812,54 @@ end
 -- ============================================================
 --  SHOP BUILDER HELPER
 -- ============================================================
+-- ════════════════════════════════════════════════════════════════
+--  ★ MINIMIZE-HELPER
+--  Fügt einen ─ Button rechts in einen Header ein.
+--  Beim Klick: Inhalt ein-/ausblenden (Tween Height auf 0/auto).
+-- ════════════════════════════════════════════════════════════════
+local function AddMinimizeBtn(headerLbl, contentFrames, accent)
+    accent = accent or D.CyanDim
+    local minimized = false
+    local minBtn = Instance.new("TextButton", headerLbl.Parent)
+    minBtn.Size        = UDim2.new(0,20,0,20)
+    minBtn.Position    = UDim2.new(1,-24,0.5,-10)
+    minBtn.AnchorPoint = Vector2.new(0,0)
+    minBtn.BackgroundColor3       = accent
+    minBtn.BackgroundTransparency = 0.7
+    minBtn.Text        = "─"
+    minBtn.TextColor3  = accent
+    minBtn.TextSize    = 11
+    minBtn.Font        = Enum.Font.GothamBold
+    minBtn.AutoButtonColor = false
+    minBtn.BorderSizePixel = 0
+    minBtn.ZIndex      = 5
+    minBtn.TextScaled  = false
+    minBtn.RichText    = true
+    minBtn.TextStrokeTransparency = 1
+    Corner(minBtn, 5)
+    Stroke(minBtn, accent, 1, 0.35)
+
+    minBtn.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        minBtn.Text       = minimized and "+" or "─"
+        minBtn.TextColor3 = minimized and D.Orange or accent
+        local s = minBtn:FindFirstChildOfClass("UIStroke")
+        if s then s.Color = minimized and D.Orange or accent end
+        for _, fr in ipairs(contentFrames) do
+            pcall(function()
+                if minimized then
+                    Tw(fr, {Size = UDim2.new(fr.Size.X.Scale, fr.Size.X.Offset, 0, 0)},
+                        TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+                    task.delay(0.23, function() pcall(function() fr.Visible = false end) end)
+                else
+                    fr.Visible = true; fr.AutomaticSize = Enum.AutomaticSize.Y
+                end
+            end)
+        end
+    end)
+    return minBtn
+end
+
 local function BuildShop(opts)
     -- ★ In Shop-Registry eintragen (für Auto-Buy RunAutoBuy)
     if not _G._ShopRegistry then _G._ShopRegistry = {} end
@@ -801,9 +876,12 @@ local function BuildShop(opts)
     local shopCard = Card(opts.parent)
     Pad(shopCard,10,12,10,12); VList(shopCard,7)
     Stroke(shopCard, opts.accent, 1.5, 0.25)
-    BuildShopHeader(shopCard, opts.name, opts.currencyKey, opts.accent)
+
+    -- Header mit Shop-Name
+    local shopHdr = BuildShopHeader(shopCard, opts.name, opts.currencyKey, opts.accent)
     BuildResetTimer(shopCard, opts.timerType)
-    local _, rebuildFn = BuildItemList(shopCard, opts.folderGetter, opts.shopDef, opts.accent)
+
+    local itemContainer, rebuildFn = BuildItemList(shopCard, opts.folderGetter, opts.shopDef, opts.accent)
     local refBtn = NeonBtn(shopCard, "🔄 Shop neu laden", D.CyanDim, 26)
     refBtn.MouseButton1Click:Connect(function()
         refBtn.Text="⏳ Lädt..."; refBtn.TextColor3=D.Yellow
@@ -812,6 +890,12 @@ local function BuildShop(opts)
             pcall(function() refBtn.Text="🔄 Shop neu laden"; refBtn.TextColor3=D.CyanDim end)
         end)
     end)
+
+    -- ★ Minimize-Button (einklappt alles außer Header)
+    if shopHdr then
+        AddMinimizeBtn(shopHdr, {itemContainer, refBtn}, opts.accent)
+    end
+
     return shopCard
 end
 
@@ -1028,6 +1112,54 @@ do
         end)
     end)
 end
+
+-- ============================================================
+--  SHOP 5 – BOUNTY HUNT SHOP
+--  ★ Pfad  : RS.Player_Data.[Name].BountyHunt_Shop.BountyHunt
+--  ★ Remote: BountyHunt_Shop("BountyHunt", ItemName, Menge)
+--  ★ Währung: Bounty Hunt Coins
+-- ============================================================
+BuildShop({
+    parent       = ShopPage,
+    name         = "🎯  Bounty Hunt Shop",
+    currencyKey  = "Bounty Hunt Coins",
+    accent       = Color3.fromRGB(255,140,0),
+    timerType    = "daily415",
+    folderGetter = function()
+        local f = nil
+        -- Primärpfad: BountyHunt_Shop.BountyHunt
+        pcall(function()
+            f = RS:WaitForChild("Player_Data",10)
+                 :WaitForChild(LP.Name,5)
+                 :WaitForChild("BountyHunt_Shop",3)
+                 :WaitForChild("BountyHunt",3)
+        end)
+        if not f then
+            task.wait(2)
+            pcall(function()
+                f = RS:WaitForChild("Player_Data",5)
+                     :WaitForChild(LP.Name,5)
+                     :WaitForChild("BountyHunt_Shop",3)
+                     :WaitForChild("BountyHunt",3)
+            end)
+        end
+        -- Fallback: direkt BountyHunt_Shop ohne Sub-Ordner
+        if not f then
+            pcall(function()
+                f = RS:WaitForChild("Player_Data",5)
+                     :WaitForChild(LP.Name,5)
+                     :WaitForChild("BountyHunt_Shop",3)
+            end)
+        end
+        return f
+    end,
+    shopDef = {
+        remoteName = "BountyHunt_Shop",
+        currencyKey = "Bounty Hunt Coins",
+        -- ★ Remote-Signatur: BountyHunt_Shop:FireServer("BountyHunt", ItemName, Menge)
+        extraArgs  = function(name,qty) return {"BountyHunt", name, qty} end,
+    },
+})
 
 -- ============================================================
 print(string.format("[HazeHub-Shops] v%s geladen | %s", VERSION, LP.Name))
