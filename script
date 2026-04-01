@@ -2958,20 +2958,57 @@ do
 end
 local currencyCard=Instance.new("Frame",statsAndCurrencyRow); currencyCard.Size=UDim2.new(0.5,-3,0,0); currencyCard.AutomaticSize=Enum.AutomaticSize.Y; currencyCard.BackgroundColor3=D.Card; currencyCard.BackgroundTransparency=D.GlassPane; currencyCard.BorderSizePixel=0; Corner(currencyCard,8); Stroke(currencyCard,D.Border,1,D.GlassStroke); Pad(currencyCard,10,10,10,10); VList(currencyCard,6)
 SecLbl(currencyCard,"💰 SHOP CURRENCY")
-local CURRENCIES={{key="Boss Coins",icon="🏆",color=D.Gold},{key="Esper Token",icon="🔮",color=D.Purple},{key="Cursed Scrolls",icon="📜",color=D.Lavender},{key="Cursed Essence",icon="💜",color=D.Purple},{key="CurseToken",icon="🌀",color=D.Cyan},{key="Gem",icon="💎",color=D.Cyan},{key="Gold",icon="🟡",color=D.Gold},{key="Sol Token",icon="☀️",color=D.Orange},{key="RCCells",icon="🔬",color=D.Teal}}
+-- ★ Erweiterte Währungsliste inkl. Bounty Hunt Coins + Invasion Coins
+-- dataPath = abweichender Schlüssel in Player_Data.Data (falls key ≠ DataName)
+local CURRENCIES={
+    {key="Boss Coins",          icon="🏆",  color=D.Gold},
+    {key="Esper Token",         icon="🔮",  color=D.Purple},
+    {key="Cursed Scrolls",      icon="📜",  color=D.Lavender},
+    {key="Cursed Essence",      icon="💜",  color=D.Purple},
+    {key="CurseToken",          icon="🌀",  color=D.Cyan},
+    {key="Gem",                 icon="💎",  color=D.Cyan},
+    {key="Gold",                icon="🟡",  color=D.Gold},
+    {key="Sol Token",           icon="☀️",  color=D.Orange},
+    {key="RCCells",             icon="🔬",  color=D.Teal},
+    -- ★ NEU
+    {key="Bounty Hunt Coins",   icon="🎯",  color=Color3.fromRGB(255,140,0),  dataPath="Bounty Hunt Coins"},
+    {key="Invasion Coins",      icon="⚔️",  color=Color3.fromRGB(255,70,70),  dataPath="Invasion Coins"},
+}
 H.UI.Lbl.Currencies={}
 for _,cur in ipairs(CURRENCIES) do
     local cRow=Instance.new("Frame",currencyCard); cRow.Size=UDim2.new(1,0,0,26); cRow.BackgroundColor3=D.CardHover; cRow.BorderSizePixel=0; Corner(cRow,7); Stroke(cRow,cur.color,1,0.65)
     local cBar=Instance.new("Frame",cRow); cBar.Size=UDim2.new(0,3,0.6,0); cBar.Position=UDim2.new(0,0,0.2,0); cBar.BackgroundColor3=cur.color; cBar.BorderSizePixel=0; Corner(cBar,2)
-    local cNameLbl=Instance.new("TextLabel",cRow); cNameLbl.Position=UDim2.new(0,8,0,0); cNameLbl.Size=UDim2.new(0.6,-8,1,0); cNameLbl.BackgroundTransparency=1; cNameLbl.Text=cur.icon.."  "..cur.key; cNameLbl.TextColor3=cur.color; cNameLbl.TextSize=10; cNameLbl.Font=Enum.Font.GothamSemibold; cNameLbl.TextXAlignment=Enum.TextXAlignment.Left; cNameLbl.TextTruncate=Enum.TextTruncate.AtEnd
-    local cValLbl=Instance.new("TextLabel",cRow); cValLbl.Position=UDim2.new(0.6,0,0,0); cValLbl.Size=UDim2.new(0.4,-4,1,0); cValLbl.BackgroundTransparency=1; cValLbl.Text="–"; cValLbl.TextColor3=D.TextHi; cValLbl.TextSize=11; cValLbl.Font=Enum.Font.GothamBold; cValLbl.TextXAlignment=Enum.TextXAlignment.Right
+    local cNameLbl=Instance.new("TextLabel",cRow); cNameLbl.Position=UDim2.new(0,8,0,0); cNameLbl.Size=UDim2.new(0.60,-8,1,0); cNameLbl.BackgroundTransparency=1; cNameLbl.Text=cur.icon.."  "..cur.key; cNameLbl.TextColor3=cur.color; cNameLbl.TextSize=10; cNameLbl.Font=Enum.Font.GothamSemibold; cNameLbl.TextXAlignment=Enum.TextXAlignment.Left; cNameLbl.TextTruncate=Enum.TextTruncate.AtEnd
+    local cValLbl=Instance.new("TextLabel",cRow); cValLbl.Position=UDim2.new(0.60,0,0,0); cValLbl.Size=UDim2.new(0.40,-4,1,0); cValLbl.BackgroundTransparency=1; cValLbl.Text="–"; cValLbl.TextColor3=D.TextHi; cValLbl.TextSize=11; cValLbl.Font=Enum.Font.GothamBold; cValLbl.TextXAlignment=Enum.TextXAlignment.Right
     H.UI.Lbl.Currencies[cur.key]=cValLbl
+
+    -- ★ Live-Scan: ValueChanged sofort anzeigen
+    task.spawn(function()
+        local key=cur.dataPath or cur.key
+        pcall(function()
+            local dataFolder=Svc.RS:WaitForChild("Player_Data",10):WaitForChild(LP.Name,10):WaitForChild("Data",5)
+            local valObj=dataFolder:WaitForChild(key,5)
+            if valObj then
+                cValLbl.Text=FmtNum(tonumber(valObj.Value) or 0); cValLbl.TextColor3=D.TextHi
+                valObj:GetPropertyChangedSignal("Value"):Connect(function()
+                    pcall(function() cValLbl.Text=FmtNum(tonumber(valObj.Value) or 0); cValLbl.TextColor3=D.TextHi end)
+                end)
+            end
+        end)
+    end)
 end
+
 local function RebuildCurrencies()
     for _,cur in ipairs(CURRENCIES) do
         local lbl=H.UI.Lbl.Currencies[cur.key]; if not lbl then continue end
-        local val=nil; pcall(function() val=Svc.RS:WaitForChild("Player_Data",3):WaitForChild(LP.Name,3):WaitForChild("Data",3):FindFirstChild(cur.key); if val then val=val.Value end end)
-        if val~=nil then lbl.Text=FmtNum(val); lbl.TextColor3=D.TextHi else lbl.Text="–"; lbl.TextColor3=D.TextLow end
+        local key=cur.dataPath or cur.key
+        local val=nil
+        pcall(function()
+            val=Svc.RS:WaitForChild("Player_Data",3):WaitForChild(LP.Name,3):WaitForChild("Data",3):FindFirstChild(key)
+            if val then val=val.Value end
+        end)
+        if val~=nil then lbl.Text=FmtNum(tonumber(val) or 0); lbl.TextColor3=D.TextHi
+        else lbl.Text="–"; lbl.TextColor3=D.TextLow end
     end
 end
 NeonBtn(currencyCard,"🔄 Aktualisieren",D.CyanDim,26).MouseButton1Click:Connect(function() task.spawn(function() pcall(RebuildCurrencies) end) end)
@@ -3620,34 +3657,7 @@ local SPLASH_STEPS = {
     { pct=1.00,  label="Fertig  ✓"                            },
 }
 
-task.spawn(function()
-    local stepCount = #SPLASH_STEPS
-    local timePerStep = SPLASH_DURATION / stepCount
-    for _, step in ipairs(SPLASH_STEPS) do
-        splStatus.Text = step.label
-        Tw(splBarFill, {Size=UDim2.new(step.pct,0,1,0)},
-           TweenInfo.new(timePerStep*0.85,Enum.EasingStyle.Quad,Enum.EasingDirection.Out))
-        task.wait(timePerStep)
-    end
-    task.wait(0.3)
-    -- Fade-Out
-    local fadeTI = TweenInfo.new(0.6,Enum.EasingStyle.Quad,Enum.EasingDirection.Out)
-    Svc.Tween:Create(splBg, fadeTI, {BackgroundTransparency=1}):Play()
-    Svc.Tween:Create(splCenter, fadeTI, {BackgroundTransparency=1}):Play()
-    for _, ch in ipairs(splCenter:GetDescendants()) do
-        if ch:IsA("TextLabel") or ch:IsA("ImageLabel") then
-            pcall(function() Svc.Tween:Create(ch,fadeTI,{TextTransparency=1,ImageTransparency=1}):Play() end)
-        elseif ch:IsA("Frame") then
-            pcall(function() Svc.Tween:Create(ch,fadeTI,{BackgroundTransparency=1}):Play() end)
-        end
-    end
-    task.wait(0.65)
-    pcall(function() SplashGui:Destroy() end)
-    -- ★ Main-GUI freischalten
-    MainFrame.Visible = S.GuiVisible
-    pcall(function() if HazeHubBlur then HazeHubBlur.Enabled=S.GuiVisible end end)
-    print("[HazeHUB] Splash fertig – Main-GUI aktiv")
-end)
+-- ★ Splash-Animation wird vom sequenziellen Loader gesteuert (siehe unten)
 
 -- ════════════════════════════════════════════════════════════
 --  ★ PlaceID Game-State + 15-Min Runden-Restart
@@ -3892,165 +3902,155 @@ local function LoadModule(url,name,delay,onErr)
     end)
 end
 
-LoadModule(K.AF_URL,   "Autofarm",  1)
-LoadModule(K.SHOP_URL, "Shops",     2)
-LoadModule(K.CRAFT_URL,"Crafting",  3, function(err)
-    pcall(function()
-        if _G._CraftWaitLbl then _G._CraftWaitLbl.Text="❌ Craft-Fehler: "..err; _G._CraftWaitLbl.TextColor3=D.Red end
-    end)
-end)
-LoadModule(K.TRAIT_URL,"Traits",    4, function(err)
-    pcall(function()
-        if _G._TraitWaitLbl then _G._TraitWaitLbl.Text="❌ Trait-Fehler: "..err; _G._TraitWaitLbl.TextColor3=D.Red end
-    end)
-end)
-task.delay(6,function()
-    pcall(function() for _, ch in ipairs(ScreenGui:GetDescendants()) do ApplySharpTypography(ch) end end)
-end)
--- NACH: LoadModule(K.TRAIT_URL, "Traits", 4, ...)
-LoadModule(K.TEAMS_URL, "Teams", 5, function(err)
-    pcall(function()
-        if _G._TeamsWaitLbl then
-            _G._TeamsWaitLbl.Text = "❌ Teams-Fehler: " .. err
-            _G._TeamsWaitLbl.TextColor3 = D.Red
-        end
-    end)
-end)
-
--- ★ Summon-Modul mit 3-Versuchs-Retry (Syntaxfehler → kein Retry)
+-- ════════════════════════════════════════════════════════════
+--  ★ SERIELLER (SEQUENZIELLER) STARTVORGANG
+--
+--  Reihenfolge:
+--    Phase 1 (15%)  → Profil-Daten & Inventar
+--    Phase 2 (40%)  → Shop-Module & Bestände
+--    Phase 3 (70%)  → Trait/Craft/Teams-Modul
+--    Phase 4 (90%)  → Summon-Modul
+--    Phase 5 (100%) → Fertig
+--
+--  Der Fortschrittsbalken synchronisiert sich mit diesen echten Schritten.
+-- ════════════════════════════════════════════════════════════
 task.spawn(function()
-    local MAX_TRIES = 3
-    for attempt = 1, MAX_TRIES do
-        task.wait(7 + (attempt - 1) * 6)
-        repeat task.wait(0.5) until _G.HazeHUB_Ready == true
 
-        if _G.HazeHUB and _G.HazeHUB.Modules and _G.HazeHUB.Modules["Summon"] then break end
-
-        print(string.format("[HazeHUB] Summon Ladeversuch %d/%d...", attempt, MAX_TRIES))
-
-        local httpOk, raw = pcall(function() return game:HttpGet(K.SUMMON_URL) end)
-        if not httpOk or not raw or #raw < 20 then
-            warn("[HazeHUB] Summon HttpGet Versuch " .. attempt .. " fehlgeschlagen")
-            if attempt == MAX_TRIES then
-                pcall(function()
-                    if _G._SummonWaitLbl then
-                        _G._SummonWaitLbl.Text = "❌ Summon: Netzwerk-Fehler"
-                        _G._SummonWaitLbl.TextColor3 = D.Red
-                    end
-                end)
+    -- Helper: Fortschrittsbalken-Update
+    local function SetProgress(pct, label)
+        pcall(function()
+            if splBarFill then
+                Svc.Tween:Create(splBarFill,
+                    TweenInfo.new(0.4,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),
+                    {Size=UDim2.new(math.clamp(pct,0,1),0,1,0)}):Play()
             end
-            continue
-        end
+            if splStatus then splStatus.Text=label end
+            print(string.format("[HazeHUB-Init] %.0f%%  %s", pct*100, label))
+        end)
+    end
 
-        -- nil-Check auf loadstring (Syntaxfehler = kein Retry)
-        local fn, compErr = loadstring(raw)
-        if not fn then
-            warn("[HazeHUB] Summon Kompilierungsfehler: " .. tostring(compErr))
-            pcall(function()
-                if _G._SummonWaitLbl then
-                    _G._SummonWaitLbl.Text = "❌ Summon: Syntax-Fehler"
-                    _G._SummonWaitLbl.TextColor3 = D.Red
-                end
-            end)
-            break   -- Syntaxfehler → Retry sinnlos
-        end
+    -- Helper: einzelnes Modul sequenziell laden + auf Erfolg warten
+    local function LoadSeq(url, name, timeout)
+        timeout = timeout or 20
+        local done = false
+        local ok   = false
 
-        local runOk, runResult = pcall(fn)
-        if not runOk then
-            warn("[HazeHUB] Summon Ausführungsfehler: " .. tostring(runResult):sub(1,100))
-            if attempt < MAX_TRIES then continue end
-            pcall(function()
-                if _G._SummonWaitLbl then
-                    _G._SummonWaitLbl.Text = "❌ Summon: Ladefehler"
-                    _G._SummonWaitLbl.TextColor3 = D.Red
-                end
-            end)
-        else
+        task.spawn(function()
+            local httpOk,raw = pcall(function() return game:HttpGet(url) end)
+            if not httpOk or not raw or #raw < 20 then
+                warn("[HazeHUB-Init] "..name..": HttpGet fehlgeschlagen"); done=true; return
+            end
+            local fn, err = loadstring(raw)
+            if not fn then
+                warn("[HazeHUB-Init] "..name..": Kompilierungsfehler – "..tostring(err)); done=true; return
+            end
+            local runOk, res = pcall(fn)
+            if not runOk then
+                warn("[HazeHUB-Init] "..name..": Fehler – "..tostring(res):sub(1,100)); done=true; return
+            end
             if not _G.HazeHUB.Modules then _G.HazeHUB.Modules = {} end
-            if type(runResult) == "table" then
-                _G.HazeHUB.Modules["Summon"] = runResult
-                if type(runResult.Init) == "function" then pcall(runResult.Init) end
-            end
-            print("[HazeHUB] Summon-Modul geladen (Versuch " .. attempt .. ")")
-            break
-        end
-    end
-end)
+            if type(res)=="table" then _G.HazeHUB.Modules[name]=res end
+            ok=true; done=true
+            print("[HazeHUB-Init] ✓ "..name.." geladen")
+        end)
 
--- === WORLDCACHE BEIM START LADEN ===
-task.spawn(function()
-    -- Versuche gespeicherten WorldCache zu laden
-    if _G.HazeHUB.LoadWorldCache and type(_G.HazeHUB.LoadWorldCache) == "function" then
-        local loaded = pcall(_G.HazeHUB.LoadWorldCache)
-        if loaded then
-            print("[HazeHUB] WorldCache erfolgreich geladen")
-            
-            -- UI aktualisieren
-            if RebuildWorldList then
-                pcall(RebuildWorldList)
-            end
-            
-            -- Status aktualisieren
-            if H.UI.Lbl.WorldStatus then
-                H.UI.Lbl.WorldStatus.Text = "✅ WorldCache geladen"
-                H.UI.Lbl.WorldStatus.TextColor3 = D.Green
-            end
-            
-            -- DataReady Flag setzen
-            _G.HazeHUB.DataReady = true
-            
-        else
-            print("[HazeHUB] Kein WorldCache gefunden - starte ChapterLevels Scan")
-            
-            -- Status aktualisieren
-            if H.UI.Lbl.WorldStatus then
-                H.UI.Lbl.WorldStatus.Text = "🔄 Scanne ChapterLevels..."
-                H.UI.Lbl.WorldStatus.TextColor3 = D.Yellow
-            end
-            
-            -- Wenn kein Cache existiert, starte ChapterLevels Scan
-            task.spawn(function()
-                task.wait(2) -- Kurze Verzögerung für UI-Initialisierung
-                local scannedData = ScanChapterLevels()
-                
-                if scannedData then
-                    -- Daten übernehmen
-                    _G.HazeHUB.WorldData = scannedData
-                    
-                    -- Speichern
-                    pcall(_G.HazeHUB.SaveWorldCache)
-                    
-                    -- UI aktualisieren
-                    if RebuildWorldList then
-                        pcall(RebuildWorldList)
-                    end
-                    
-                    -- Status aktualisieren
-                    if H.UI.Lbl.WorldStatus then
-                        H.UI.Lbl.WorldStatus.Text = "✅ ChapterLevels gescannt & gespeichert"
-                        H.UI.Lbl.WorldStatus.TextColor3 = D.Green
-                    end
-                    
-                    -- DataReady Flag setzen
-                    _G.HazeHUB.DataReady = true
-                    
-                    print("[HazeHUB] ChapterLevels Scan abgeschlossen und gespeichert")
-                else
-                    -- Fehlerstatus
-                    if H.UI.Lbl.WorldStatus then
-                        H.UI.Lbl.WorldStatus.Text = "❌ ChapterLevels Scan fehlgeschlagen"
-                        H.UI.Lbl.WorldStatus.TextColor3 = D.Red
-                    end
-                    
-                    -- DataReady Flag trotzdem setzen, damit Module starten können
-                    _G.HazeHUB.DataReady = true
+        local elapsed=0
+        while not done and elapsed<timeout do task.wait(0.25); elapsed=elapsed+0.25 end
+        if not done then warn("[HazeHUB-Init] "..name..": Timeout nach "..timeout.."s") end
+        return ok
+    end
+
+    -- ────────────────────────────────────────────────────────
+    --  PHASE 1: Profil-Daten & Inventar  (15%)
+    -- ────────────────────────────────────────────────────────
+    SetProgress(0.05, "Warte auf Spieler-Daten...")
+    local RS=Svc.RS
+    local profileReady=false
+    local profileTimeout=15
+    local pt=0
+    while not profileReady and pt<profileTimeout do
+        pcall(function()
+            local pd=RS:FindFirstChild("Player_Data")
+            if pd and pd:FindFirstChild(LP.Name) then profileReady=true end
+        end)
+        if not profileReady then task.wait(0.5); pt=pt+0.5 end
+    end
+    if profileReady then SetProgress(0.15, "✓ Profil-Daten geladen")
+    else SetProgress(0.15, "⚠ Profil-Daten nicht gefunden (fortfahren)") end
+    task.wait(0.2)
+
+    -- ────────────────────────────────────────────────────────
+    --  PHASE 2: Shop-Module & Bestände  (40%)
+    -- ────────────────────────────────────────────────────────
+    SetProgress(0.20, "Lade Shop-Module...")
+    LoadSeq(K.SHOP_URL, "Shops", 25)
+    SetProgress(0.35, "Lade Crafting-Modul...")
+    LoadSeq(K.CRAFT_URL, "Crafting", 20)
+    SetProgress(0.40, "✓ Shop & Crafting bereit")
+    task.wait(0.15)
+
+    -- ────────────────────────────────────────────────────────
+    --  PHASE 3: Trait / Teams / Autofarm  (70%)
+    -- ────────────────────────────────────────────────────────
+    SetProgress(0.45, "Lade Trait-Modul...")
+    LoadSeq(K.TRAIT_URL, "Traits", 25)
+    SetProgress(0.60, "Lade Teams-Modul...")
+    LoadSeq(K.TEAMS_URL, "Teams", 20)
+    SetProgress(0.70, "Lade Autofarm-Modul...")
+    LoadSeq(K.AF_URL, "Autofarm", 20)
+    SetProgress(0.70, "✓ Trait / Teams / Farm bereit")
+    task.wait(0.15)
+
+    -- ────────────────────────────────────────────────────────
+    --  PHASE 4: Summon-Modul  (90%)
+    -- ────────────────────────────────────────────────────────
+    SetProgress(0.75, "Lade Summon-Modul...")
+    local summonLoaded=false
+    for attempt=1,3 do
+        SetProgress(0.75+(attempt-1)*0.04, string.format("Summon Versuch %d/3...", attempt))
+        summonLoaded=LoadSeq(K.SUMMON_URL, "Summon", 20)
+        if summonLoaded then break end
+        if attempt<3 then task.wait(3) end
+    end
+    if summonLoaded then SetProgress(0.90, "✓ Summon-Modul geladen")
+    else SetProgress(0.90, "⚠ Summon nicht geladen") end
+    task.wait(0.15)
+
+    -- ────────────────────────────────────────────────────────
+    --  PHASE 5: Fertig  (100%)
+    -- ────────────────────────────────────────────────────────
+    SetProgress(1.00, "🟢  HazeHUB bereit!")
+    task.wait(0.5)
+
+    -- Splash-Fade-Out + Main-GUI freischalten
+    pcall(function()
+        local fadeTI=TweenInfo.new(0.55,Enum.EasingStyle.Quad,Enum.EasingDirection.Out)
+        if splBg then Svc.Tween:Create(splBg,fadeTI,{BackgroundTransparency=1}):Play() end
+        if splCenter then
+            Svc.Tween:Create(splCenter,fadeTI,{BackgroundTransparency=1}):Play()
+            for _,ch in ipairs(splCenter:GetDescendants()) do
+                if ch:IsA("TextLabel") or ch:IsA("ImageLabel") then
+                    pcall(function() Svc.Tween:Create(ch,fadeTI,{TextTransparency=1,ImageTransparency=1}):Play() end)
+                elseif ch:IsA("Frame") then
+                    pcall(function() Svc.Tween:Create(ch,fadeTI,{BackgroundTransparency=1}):Play() end)
                 end
-            end)
+            end
         end
-    end
-end)
+    end)
+    task.wait(0.65)
+    pcall(function() if SplashGui and SplashGui.Parent then SplashGui:Destroy() end end)
 
--- === HAUPTSKRIPT GELADEN - MODULE KÖNNEN STARTEN ===
-_G.HazeHUB_Loaded = true
-_G.HazeHUB_Ready = true
-print("[HazeHUB] Hauptskript vollständig geladen - Module können jetzt starten")
+    -- MainFrame einblenden
+    MainFrame.Visible = S.GuiVisible
+    pcall(function() if HazeHubBlur then HazeHubBlur.Enabled=S.GuiVisible end end)
+
+    -- Typography-Pass
+    task.delay(0.5, function()
+        pcall(function() for _,ch in ipairs(ScreenGui:GetDescendants()) do ApplySharpTypography(ch) end end)
+    end)
+
+    -- HAUPTSKRIPT BEREIT
+    _G.HazeHUB_Loaded = true
+    _G.HazeHUB_Ready  = true
+    print("[HazeHUB] Sequenzieller Init abgeschlossen – alle Module geladen")
+end)
