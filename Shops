@@ -15,7 +15,7 @@
 --    + Alle Pfade dynamisch via LP.Name
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "1.4.0"
+local VERSION = "1.5.0"
 
 -- ============================================================
 --  WARTEN BIS SHARED BEREIT
@@ -817,45 +817,44 @@ end
 --  Fügt einen ─ Button rechts in einen Header ein.
 --  Beim Klick: Inhalt ein-/ausblenden (Tween Height auf 0/auto).
 -- ════════════════════════════════════════════════════════════════
-local function AddMinimizeBtn(headerLbl, contentFrames, accent)
+-- ════════════════════════════════════════════════════════════════
+--  ★ MINIMIZE-HELPER  (Visible=false → UIListLayout füllt Lücken auto)
+-- ════════════════════════════════════════════════════════════════
+local function AddMinimizeBtn(headerFrame, contentFrames, accent)
     accent = accent or D.CyanDim
     local minimized = false
-    local minBtn = Instance.new("TextButton", headerLbl.Parent)
-    minBtn.Size        = UDim2.new(0,20,0,20)
-    minBtn.Position    = UDim2.new(1,-24,0.5,-10)
-    minBtn.AnchorPoint = Vector2.new(0,0)
-    minBtn.BackgroundColor3       = accent
-    minBtn.BackgroundTransparency = 0.7
-    minBtn.Text        = "─"
-    minBtn.TextColor3  = accent
-    minBtn.TextSize    = 11
-    minBtn.Font        = Enum.Font.GothamBold
-    minBtn.AutoButtonColor = false
-    minBtn.BorderSizePixel = 0
-    minBtn.ZIndex      = 5
-    minBtn.TextScaled  = false
-    minBtn.RichText    = true
+
+    -- Button direkt in headerFrame (absolute Position rechts oben)
+    local minBtn = Instance.new("TextButton", headerFrame)
+    minBtn.Size               = UDim2.new(0, 22, 0, 22)
+    minBtn.Position           = UDim2.new(1, -26, 0.5, -11)
+    minBtn.AnchorPoint        = Vector2.new(0, 0)
+    minBtn.BackgroundColor3   = accent
+    minBtn.BackgroundTransparency = 0.65
+    minBtn.Text               = "─"
+    minBtn.TextColor3         = accent
+    minBtn.TextSize           = 12
+    minBtn.Font               = Enum.Font.GothamBold
+    minBtn.AutoButtonColor    = false
+    minBtn.BorderSizePixel    = 0
+    minBtn.ZIndex             = 8
+    minBtn.TextScaled         = false
+    minBtn.RichText           = true
     minBtn.TextStrokeTransparency = 1
     Corner(minBtn, 5)
-    Stroke(minBtn, accent, 1, 0.35)
+    Stroke(minBtn, accent, 1, 0.3)
 
     minBtn.MouseButton1Click:Connect(function()
         minimized = not minimized
+        -- Direkt Visible toggling → UIListLayout schließt Lücken sofort
+        for _, fr in ipairs(contentFrames) do
+            pcall(function() fr.Visible = not minimized end)
+        end
         minBtn.Text       = minimized and "+" or "─"
         minBtn.TextColor3 = minimized and D.Orange or accent
         local s = minBtn:FindFirstChildOfClass("UIStroke")
         if s then s.Color = minimized and D.Orange or accent end
-        for _, fr in ipairs(contentFrames) do
-            pcall(function()
-                if minimized then
-                    Tw(fr, {Size = UDim2.new(fr.Size.X.Scale, fr.Size.X.Offset, 0, 0)},
-                        TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
-                    task.delay(0.23, function() pcall(function() fr.Visible = false end) end)
-                else
-                    fr.Visible = true; fr.AutomaticSize = Enum.AutomaticSize.Y
-                end
-            end)
-        end
+        minBtn.BackgroundColor3 = minimized and Color3.fromRGB(60,20,0) or accent
     end)
     return minBtn
 end
@@ -873,8 +872,11 @@ local function BuildShop(opts)
     -- ★ Weitergabe von currencyKey an shopDef (für CalcMaxQty in BuildItemList)
     opts.shopDef.currencyKey = opts.currencyKey
 
+    -- ★ 50%-Breite für 2-Spalten-Grid-Zeilen; AutomaticSize=Y für variable Höhe
     local shopCard = Card(opts.parent)
-    Pad(shopCard,10,12,10,12); VList(shopCard,7)
+    shopCard.Size = UDim2.new(0.5, -3, 0, 0)
+    shopCard.AutomaticSize = Enum.AutomaticSize.Y
+    Pad(shopCard,8,10,8,10); VList(shopCard,6)
     Stroke(shopCard, opts.accent, 1.5, 0.25)
 
     -- Header mit Shop-Name
@@ -899,251 +901,169 @@ local function BuildShop(opts)
     return shopCard
 end
 
--- ============================================================
---  SHOP 1 – GHOUL HUNT
---  Pfad  : RS.Player_Data.[Name].GhoulHunt
---  Remote: GhoulHuntExchange(ItemName, Menge)
---  Währung: RCCells
--- ============================================================
-BuildShop({
-    parent       = ShopPage,
-    name         = "👻  Ghoul Hunt",
-    currencyKey  = "RCCells",
-    accent       = D.Teal,
-    timerType    = "daily415",
-    folderGetter = function()
-        local f = nil
-        -- Versuch 1
+-- ════════════════════════════════════════════════════════════════
+--  ★ SHOP-GRID: 2 Spalten × 4 Zeilen
+--    Jede Zeile = HList-Frame  (gap 6px)
+--    Jede Karte = 50% Breite, AutomaticSize=Y
+--    Minimize → Visible=false → UIListLayout schließt Lücken sofort
+-- ════════════════════════════════════════════════════════════════
+local shopGrid = Instance.new("Frame", ShopPage)
+shopGrid.Name              = "ShopGrid"
+shopGrid.Size              = UDim2.new(1,0,0,0)
+shopGrid.AutomaticSize     = Enum.AutomaticSize.Y
+shopGrid.BackgroundTransparency = 1
+VList(shopGrid, 8)
+
+local function MkShopRow(parent)
+    local row = Instance.new("Frame", parent)
+    row.Size              = UDim2.new(1,0,0,0)
+    row.AutomaticSize     = Enum.AutomaticSize.Y
+    row.BackgroundTransparency = 1
+    local hl = Instance.new("UIListLayout", row)
+    hl.FillDirection      = Enum.FillDirection.Horizontal
+    hl.Padding            = UDim.new(0,6)
+    hl.SortOrder          = Enum.SortOrder.LayoutOrder
+    hl.VerticalAlignment  = Enum.VerticalAlignment.Top
+    return row
+end
+
+-- Helper: Retry-Ordner-Getter (2 Versuche)
+local function SafeGetFolder(...)
+    local path = {...}
+    local f = nil
+    pcall(function()
+        f = RS:WaitForChild("Player_Data",10):WaitForChild(LP.Name,5)
+        for i = 3, #path do f = f:WaitForChild(path[i], 3) end
+    end)
+    if not f then
+        task.wait(2)
         pcall(function()
-            f = RS:WaitForChild("Player_Data",10)
-                 :WaitForChild(LP.Name,5)
-                 :WaitForChild("GhoulHunt",3)
+            f = RS:WaitForChild("Player_Data",5):WaitForChild(LP.Name,5)
+            for i = 3, #path do f = f:WaitForChild(path[i], 3) end
         end)
-        -- Retry nach 2s falls nil
-        if not f then
-            task.wait(2)
-            pcall(function()
-                f = RS:WaitForChild("Player_Data",5)
-                     :WaitForChild(LP.Name,5)
-                     :WaitForChild("GhoulHunt",3)
-            end)
-        end
-        return f
-    end,
-    shopDef = {
+    end
+    return f
+end
+
+-- ────────────────────────────────────────────────────────────
+--  ZEILE 1: Ghoul Hunt (L) | Merchant (R)
+-- ────────────────────────────────────────────────────────────
+local row1 = MkShopRow(shopGrid)
+
+BuildShop({
+    parent      = row1,
+    name        = "👻  Ghoul Hunt",
+    currencyKey = "RCCells",
+    accent      = D.Teal,
+    timerType   = "daily415",
+    folderGetter = function() return SafeGetFolder("Player_Data", LP.Name, "GhoulHunt") end,
+    shopDef     = {
         remoteName = "GhoulHuntExchange",
-        extraArgs  = function(name,qty) return {name,qty} end,
+        extraArgs  = function(n,q) return {n,q} end,
     },
 })
 
--- ============================================================
---  SHOP 2 – MERCHANT
---  Pfad  : RS.Player_Data.[Name].Merchant
---  Remote: Merchant(ItemName, Menge)
---  Währung: Gold
--- ============================================================
 BuildShop({
-    parent       = ShopPage,
-    name         = "🏦  Merchant",
-    currencyKey  = "Gold",
-    accent       = D.Gold,
-    timerType    = "hourly15",
+    parent      = row1,
+    name        = "🏦  Merchant",
+    currencyKey = "Gold",
+    accent      = D.Gold,
+    timerType   = "hourly15",
+    folderGetter = function() return SafeGetFolder("Player_Data", LP.Name, "Merchant") end,
+    shopDef     = {
+        remoteName = "Merchant",
+        extraArgs  = function(n,q) return {n,q} end,
+    },
+})
+
+-- ────────────────────────────────────────────────────────────
+--  ZEILE 2: Calamity – FireForce (L) | Calamity – JJK (R)
+-- ────────────────────────────────────────────────────────────
+local row2 = MkShopRow(shopGrid)
+
+BuildShop({
+    parent      = row2,
+    name        = "⚡  Calamity – FireForce",
+    currencyKey = "Sol Token",
+    accent      = D.Orange,
+    timerType   = "daily415",
     folderGetter = function()
-        local f = nil
-        pcall(function()
-            f = RS:WaitForChild("Player_Data",10)
-                 :WaitForChild(LP.Name,5)
-                 :WaitForChild("Merchant",3)
-        end)
-        if not f then
-            task.wait(2)
-            pcall(function()
-                f = RS:WaitForChild("Player_Data",5)
-                     :WaitForChild(LP.Name,5)
-                     :WaitForChild("Merchant",3)
-            end)
-        end
-        return f
+        return SafeGetFolder("Player_Data", LP.Name, "Calamity_Shop", "FireForce")
     end,
     shopDef = {
-        remoteName = "Merchant",
-        extraArgs  = function(name,qty) return {name,qty} end,
+        remoteName = "Calamity_Shop",
+        currencyKey = "Sol Token",
+        extraArgs  = function(n,q) return {"FireForce",n,q} end,
     },
 })
 
--- ============================================================
---  SHOP 3 – CALAMITY (FireForce + JJK)
---  ★ Pfad : RS.Player_Data.[Name].Calamity_Shop.FireForce / .JJK
---  Remote: Calamity_Shop(ShopType, ItemName, Menge)
---  Währung: Sol Token | Cursed Essence
--- ============================================================
-do
-    local calCard = Card(ShopPage); Pad(calCard,10,12,10,12); VList(calCard,8)
-    Stroke(calCard, D.Orange, 1.5, 0.25)
-
-    local hdr = Instance.new("TextLabel",calCard)
-    hdr.Size=UDim2.new(1,0,0,22); hdr.BackgroundTransparency=1
-    hdr.Text="⚡  Calamity Shop"; hdr.TextColor3=D.Orange
-    hdr.TextSize=13; hdr.Font=Enum.Font.GothamBold; hdr.TextXAlignment=Enum.TextXAlignment.Left
-
-    BuildResetTimer(calCard,"daily415")
-
-    -- Helper: Calamity-Ordner mit Retry
-    local function GetCalamitySubfolder(subName)
-        local f = nil
-        pcall(function()
-            f = RS:WaitForChild("Player_Data",10)
-                 :WaitForChild(LP.Name,5)
-                 :WaitForChild("Calamity_Shop",3)
-                 :WaitForChild(subName,3)
-        end)
-        if not f then
-            task.wait(2)
-            pcall(function()
-                f = RS:WaitForChild("Player_Data",5)
-                     :WaitForChild(LP.Name,5)
-                     :WaitForChild("Calamity_Shop",3)
-                     :WaitForChild(subName,3)
-            end)
-        end
-        return f
-    end
-
-    -- FireForce (Sol Token)
-    Instance.new("Frame",calCard).Size = UDim2.new(1,0,0,1)
-    BuildShopHeader(calCard,"🔥  FireForce","Sol Token",D.Orange)
-    local _,rebFF = BuildItemList(calCard,
-        function() return GetCalamitySubfolder("FireForce") end,
-        { remoteName="Calamity_Shop", currencyKey="Sol Token",
-          extraArgs=function(n,q) return {"FireForce",n,q} end },
-        D.Orange)
-    local rfFF = NeonBtn(calCard,"🔄 FireForce neu laden",D.Orange,24)
-    rfFF.MouseButton1Click:Connect(function()
-        rfFF.Text="⏳..."; rfFF.TextColor3=D.Yellow
-        task.spawn(function() pcall(rebFF)
-            pcall(function() rfFF.Text="🔄 FireForce neu laden"; rfFF.TextColor3=D.Orange end)
-        end)
-    end)
-
-    -- JJK (Cursed Essence)
-    Instance.new("Frame",calCard).Size = UDim2.new(1,0,0,1)
-    BuildShopHeader(calCard,"🌀  JJK","Cursed Essence",D.Purple)
-    local _,rebJJK = BuildItemList(calCard,
-        function() return GetCalamitySubfolder("JJK") end,
-        { remoteName="Calamity_Shop", currencyKey="Cursed Essence",
-          extraArgs=function(n,q) return {"JJK",n,q} end },
-        D.Purple)
-    local rfJJK = NeonBtn(calCard,"🔄 JJK neu laden",D.CyanDim,24)
-    rfJJK.MouseButton1Click:Connect(function()
-        rfJJK.Text="⏳..."; rfJJK.TextColor3=D.Yellow
-        task.spawn(function() pcall(rebJJK)
-            pcall(function() rfJJK.Text="🔄 JJK neu laden"; rfJJK.TextColor3=D.CyanDim end)
-        end)
-    end)
-end
-
--- ============================================================
---  SHOP 4 – RAID SHOP (Esper + JJK)
---  ★ Pfad : RS.Player_Data.[Name].JJK_Raid_Shop.Esper / .JJK
---  Remote: JJK_RaidShop(ShopType, ItemName, Menge)
---  Währung: Esper Token | Cursed Scrolls
--- ============================================================
-do
-    local raidCard = Card(ShopPage); Pad(raidCard,10,12,10,12); VList(raidCard,8)
-    Stroke(raidCard, D.Purple, 1.5, 0.25)
-
-    local hdr = Instance.new("TextLabel",raidCard)
-    hdr.Size=UDim2.new(1,0,0,22); hdr.BackgroundTransparency=1
-    hdr.Text="⚔️  Raid Shop"; hdr.TextColor3=D.Purple
-    hdr.TextSize=13; hdr.Font=Enum.Font.GothamBold; hdr.TextXAlignment=Enum.TextXAlignment.Left
-
-    BuildResetTimer(raidCard,"daily415")
-
-    -- Helper: Raid-Ordner mit Retry
-    local function GetRaidSubfolder(subName)
-        local f = nil
-        pcall(function()
-            f = RS:WaitForChild("Player_Data",10)
-                 :WaitForChild(LP.Name,5)
-                 :WaitForChild("JJK_Raid_Shop",3)
-                 :WaitForChild(subName,3)
-        end)
-        if not f then
-            task.wait(2)
-            pcall(function()
-                f = RS:WaitForChild("Player_Data",5)
-                     :WaitForChild(LP.Name,5)
-                     :WaitForChild("JJK_Raid_Shop",3)
-                     :WaitForChild(subName,3)
-            end)
-        end
-        return f
-    end
-
-    -- Esper (Esper Token)
-    Instance.new("Frame",raidCard).Size = UDim2.new(1,0,0,1)
-    BuildShopHeader(raidCard,"🔮  Esper","Esper Token",D.Purple)
-    local _,rebEsp = BuildItemList(raidCard,
-        function() return GetRaidSubfolder("Esper") end,
-        { remoteName="JJK_RaidShop", currencyKey="Esper Token",
-          extraArgs=function(n,q) return {"Esper",n,q} end },
-        D.Purple)
-    local rfEsp = NeonBtn(raidCard,"🔄 Esper neu laden",D.CyanDim,24)
-    rfEsp.MouseButton1Click:Connect(function()
-        rfEsp.Text="⏳..."; rfEsp.TextColor3=D.Yellow
-        task.spawn(function() pcall(rebEsp)
-            pcall(function() rfEsp.Text="🔄 Esper neu laden"; rfEsp.TextColor3=D.CyanDim end)
-        end)
-    end)
-
-    -- JJK (Cursed Scrolls)
-    Instance.new("Frame",raidCard).Size = UDim2.new(1,0,0,1)
-    BuildShopHeader(raidCard,"📜  JJK (Raid)","Cursed Scrolls",D.Lavender)
-    local _,rebJJK2 = BuildItemList(raidCard,
-        function() return GetRaidSubfolder("JJK") end,
-        { remoteName="JJK_RaidShop", currencyKey="Cursed Scrolls",
-          extraArgs=function(n,q) return {"JJK",n,q} end },
-        D.Lavender)
-    local rfJJK2 = NeonBtn(raidCard,"🔄 JJK (Raid) neu laden",D.CyanDim,24)
-    rfJJK2.MouseButton1Click:Connect(function()
-        rfJJK2.Text="⏳..."; rfJJK2.TextColor3=D.Yellow
-        task.spawn(function() pcall(rebJJK2)
-            pcall(function() rfJJK2.Text="🔄 JJK (Raid) neu laden"; rfJJK2.TextColor3=D.CyanDim end)
-        end)
-    end)
-end
-
--- ============================================================
---  SHOP 5 – BOUNTY HUNT SHOP
---  ★ Pfad  : RS.Player_Data.[Name].BountyHunt_Shop.BountyHunt
---  ★ Remote: BountyHunt_Shop("BountyHunt", ItemName, Menge)
---  ★ Währung: Bounty Hunt Coins
--- ============================================================
 BuildShop({
-    parent       = ShopPage,
-    name         = "🎯  Bounty Hunt Shop",
-    currencyKey  = "Bounty Hunt Coins",
-    accent       = Color3.fromRGB(255,140,0),
-    timerType    = "daily415",
+    parent      = row2,
+    name        = "🌀  Calamity – JJK",
+    currencyKey = "Cursed Essence",
+    accent      = D.Purple,
+    timerType   = "daily415",
     folderGetter = function()
-        local f = nil
-        -- Primärpfad: BountyHunt_Shop.BountyHunt
-        pcall(function()
-            f = RS:WaitForChild("Player_Data",10)
-                 :WaitForChild(LP.Name,5)
-                 :WaitForChild("BountyHunt_Shop",3)
-                 :WaitForChild("BountyHunt",3)
-        end)
-        if not f then
-            task.wait(2)
-            pcall(function()
-                f = RS:WaitForChild("Player_Data",5)
-                     :WaitForChild(LP.Name,5)
-                     :WaitForChild("BountyHunt_Shop",3)
-                     :WaitForChild("BountyHunt",3)
-            end)
-        end
-        -- Fallback: direkt BountyHunt_Shop ohne Sub-Ordner
+        return SafeGetFolder("Player_Data", LP.Name, "Calamity_Shop", "JJK")
+    end,
+    shopDef = {
+        remoteName = "Calamity_Shop",
+        currencyKey = "Cursed Essence",
+        extraArgs  = function(n,q) return {"JJK",n,q} end,
+    },
+})
+
+-- ────────────────────────────────────────────────────────────
+--  ZEILE 3: Raid – Esper (L) | Raid – JJK (R)
+-- ────────────────────────────────────────────────────────────
+local row3 = MkShopRow(shopGrid)
+
+BuildShop({
+    parent      = row3,
+    name        = "🔮  Raid – Esper",
+    currencyKey = "Esper Token",
+    accent      = D.Purple,
+    timerType   = "daily415",
+    folderGetter = function()
+        return SafeGetFolder("Player_Data", LP.Name, "JJK_Raid_Shop", "Esper")
+    end,
+    shopDef = {
+        remoteName = "JJK_RaidShop",
+        currencyKey = "Esper Token",
+        extraArgs  = function(n,q) return {"Esper",n,q} end,
+    },
+})
+
+BuildShop({
+    parent      = row3,
+    name        = "📜  Raid – JJK",
+    currencyKey = "Cursed Scrolls",
+    accent      = D.Lavender,
+    timerType   = "daily415",
+    folderGetter = function()
+        return SafeGetFolder("Player_Data", LP.Name, "JJK_Raid_Shop", "JJK")
+    end,
+    shopDef = {
+        remoteName = "JJK_RaidShop",
+        currencyKey = "Cursed Scrolls",
+        extraArgs  = function(n,q) return {"JJK",n,q} end,
+    },
+})
+
+-- ────────────────────────────────────────────────────────────
+--  ZEILE 4: Bounty Hunt (L) | [Platzhalter] (R)
+-- ────────────────────────────────────────────────────────────
+local row4 = MkShopRow(shopGrid)
+
+BuildShop({
+    parent      = row4,
+    name        = "🎯  Bounty Hunt",
+    currencyKey = "Bounty Hunt Coins",
+    accent      = Color3.fromRGB(255,140,0),
+    timerType   = "daily415",
+    folderGetter = function()
+        local f = SafeGetFolder("Player_Data", LP.Name, "BountyHunt_Shop", "BountyHunt")
+        -- Fallback: BountyHunt_Shop direkt (kein Sub-Ordner)
         if not f then
             pcall(function()
                 f = RS:WaitForChild("Player_Data",5)
@@ -1156,10 +1076,18 @@ BuildShop({
     shopDef = {
         remoteName = "BountyHunt_Shop",
         currencyKey = "Bounty Hunt Coins",
-        -- ★ Remote-Signatur: BountyHunt_Shop:FireServer("BountyHunt", ItemName, Menge)
-        extraArgs  = function(name,qty) return {"BountyHunt", name, qty} end,
+        -- ★ Remote-Signatur: FireServer("BountyHunt", ItemName, Menge)
+        extraArgs  = function(n,q) return {"BountyHunt",n,q} end,
     },
 })
+
+-- Platzhalter rechte Spalte (hält Layout stabil)
+do
+    local ph = Instance.new("Frame", row4)
+    ph.Name               = "ShopPlaceholder"
+    ph.Size               = UDim2.new(0.5,-3,0,0)
+    ph.BackgroundTransparency = 1
+end
 
 -- ============================================================
 print(string.format("[HazeHub-Shops] v%s geladen | %s", VERSION, LP.Name))
