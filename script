@@ -3101,6 +3101,557 @@ _G.HazeHUB.NetTester = {
     end,
 }
 
+-- ════════════════════════════════════════════════════════════
+--  ★ NETWORK TRAFFIC SHAPER  (Experimental)
+--  Misc-Tab — HazeHUB v21.0 Extension
+--  ⚠  Nur für Stabilitäts-Tests bei hoher Objekt-Dichte!
+-- ════════════════════════════════════════════════════════════
+
+-- ── Throttle-State (komplett unabhängig von _netState) ──────
+local _tsState = {
+    active        = false,   -- Master-Toggle
+    throttleTask  = nil,     -- Burst-Loop Handle
+    hookInstalled = false,   -- Schutz gegen Doppel-Install
+    origNamecall  = nil,     -- Backup des originalen __namecall
+
+    -- Queues (zwei Ebenen: hoch/niedrig Priorität)
+    qHigh  = {},             -- RemoteFunction:InvokeServer (spielkritisch)
+    qLow   = {},             -- RemoteEvent:FireServer (bulk-Daten)
+
+    -- Konfiguration (alle Werte in Sekunden)
+    BURST_SEND_INTERVAL = 0.22,  -- Wie oft wird ein Burst abgefeuert
+    BURST_HOLD_MIN      = 0.08,  -- Mindest-Pause zwischen zwei Bursts
+    BURST_HOLD_MAX      = 0.40,  -- Max-Pause (erzeugt Unregelmäßigkeit)
+    BURST_SIZE_HIGH     = 4,     -- Max. Pakete/Burst aus High-Queue
+    BURST_SIZE_LOW      = 8,     -- Max. Pakete/Burst aus Low-Queue
+    HOLD_JITTER         = true,  -- Zufällige Schwankung im Hold-Intervall
+
+    -- Live-Metriken (für UI-Feedback)
+    totalQueued = 0,
+    totalSent   = 0,
+    lastBurstSz = 0,
+    lastHoldMs  = 0,
+}
+
+-- ── Prioritäts-Klassifizierung ───────────────────────────────
+-- Remotes mit diesen Namen werden als HIGH-Priorität eingestuft
+-- (kürzere Hold-Zeit, werden immer zuerst geleert)
+local TS_HIGH_PRIO_NAMES = {
+    ["OnGame"]    = true, ["Vote"]      = true,
+    ["Gameplay"]  = true, ["Combat"]    = true,
+    ["Damage"]    = true, ["Attack"]    = true,
+    ["Skill"]     = true, ["UseSkill"]  = true,
+    ["Action"]    = true,
+}
+local function _tsIsHighPrio(remote)
+    if not remote or not remote.Parent then return false end
+    return TS_HIGH_PRIO_NAMES[remote.Name] == true
+        or TS_HIGH_PRIO_NAMES[remote.Parent.Name] == true
+end
+
+-- ── Hook installieren ────────────────────────────────────────
+local function TS_InstallHook()
+    if _tsState.hookInstalled then return true end
+
+    local mt = getrawmetatable and getrawmetatable(game)
+    if not mt then
+        warn("[HazeHUB][TrafficShaper] getrawmetatable nicht verfügbar.")
+        return false
+    end
+
+    -- Wenn NetTester-Hook aktiv ist, dessen origNamecall als Basis nutzen
+    -- (Ketten-Hook: TrafficShaper → NetTester → Original)
+    local baseNamecall = (_netState and _netState.origNamecall)
+        or mt.__namecall
+
+    _tsState.origNamecall = baseNamecall
+
+    local ok = pcall(function()
+        setreadonly(mt, false)
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+
+            -- Nur abfangen wenn Throttle aktiv
+            if _tsState.active then
+                if method == "FireServer" and self:IsA("RemoteEvent") then
+                    local args = table.pack(...)
+                    local entry = { remote = self, args = args }
+                    if _tsIsHighPrio(self) then
+                        table.insert(_tsState.qHigh, entry)
+                    else
+                        table.insert(_tsState.qLow, entry)
+                    end
+                    _tsState.totalQueued = _tsState.totalQueued + 1
+                    return  -- gepuffert → NICHT sofort senden
+                end
+                -- InvokeServer NICHT throttlen (blockierend → würde Deadlock erzeugen)
+            end
+
+            return baseNamecall(self, ...)
+        end)
+        setreadonly(mt, true)
+    end)
+
+    if not ok then
+        warn("[HazeHUB][TrafficShaper] Hook fehlgeschlagen (Executor-Einschränkung).")
+        return false
+    end
+
+    _tsState.hookInstalled = true
+    return true
+end
+
+local function TS_UninstallHook()
+    if not _tsState.hookInstalled then return end
+    local mt = getrawmetatable and getrawmetatable(game)
+    if mt and _tsState.origNamecall then
+        pcall(function()
+            setreadonly(mt, false)
+            mt.__namecall = _tsState.origNamecall
+            setreadonly(mt, true)
+        end)
+    end
+    _tsState.hookInstalled = false
+end
+
+-- ── Hilfsfunktion: N Einträge aus Queue senden ───────────────
+local function _tsFlushQueue(queue, maxN)
+    local sent = 0
+    while #queue > 0 and sent < maxN do
+        local entry = table.remove(queue, 1)
+        pcall(function()
+            local base = _tsState.origNamecall
+            if base then
+                base(entry.remote, table.unpack(entry.args, 1, entry.args.n))
+            else
+                entry.remote:FireServer(table.unpack(entry.args, 1, entry.args.n))
+            end
+        end)
+        sent = sent + 1
+        _tsState.totalSent = _tsState.totalSent + 1
+    end
+    return sent
+end
+
+-- ── Burst-Loop ───────────────────────────────────────────────
+local function TS_StartBurstLoop(metricsLbl, queueLbl, holdLbl)
+    if _tsState.throttleTask then return end
+
+    _tsState.throttleTask = task.spawn(function()
+        while _tsState.active and S.Running and ScreenGui.Parent do
+
+            -- 1. Warte-Phase: hold (mit Jitter für Unregelmäßigkeit)
+            local hold = _tsState.BURST_HOLD_MIN
+            if _tsState.HOLD_JITTER then
+                hold = hold + math.random()
+                    * (_tsState.BURST_HOLD_MAX - _tsState.BURST_HOLD_MIN)
+            end
+            task.wait(hold)
+            _tsState.lastHoldMs = math.floor(hold * 1000)
+
+            if not _tsState.active then break end
+
+            -- 2. Burst-Phase: High-Prio zuerst, dann Low-Prio
+            local sentH = _tsFlushQueue(_tsState.qHigh, _tsState.BURST_SIZE_HIGH)
+            local sentL = _tsFlushQueue(_tsState.qLow,  _tsState.BURST_SIZE_LOW)
+            local burstTotal = sentH + sentL
+            _tsState.lastBurstSz = burstTotal
+
+            -- 3. Kurze Pause nach dem Burst (verhindert sofortigen nächsten Burst)
+            task.wait(_tsState.BURST_SEND_INTERVAL)
+
+            -- 4. UI-Metriken aktualisieren (non-blocking)
+            if metricsLbl and metricsLbl.Parent then
+                pcall(function()
+                    metricsLbl.Text = string.format(
+                        "Gesendet: %d  |  Gepuffert: %d  |  Letzter Burst: %d",
+                        _tsState.totalSent,
+                        #_tsState.qHigh + #_tsState.qLow,
+                        burstTotal
+                    )
+                    metricsLbl.TextColor3 = burstTotal > 0 and D.Cyan or D.TextLow
+                end)
+            end
+            if queueLbl and queueLbl.Parent then
+                pcall(function()
+                    local qH, qL = #_tsState.qHigh, #_tsState.qLow
+                    queueLbl.Text = string.format(
+                        "Queue  ▲ High: %d   ▼ Low: %d", qH, qL)
+                    queueLbl.TextColor3 = (qH + qL) > 0
+                        and D.Yellow or D.TextMid
+                end)
+            end
+            if holdLbl and holdLbl.Parent then
+                pcall(function()
+                    holdLbl.Text = string.format(
+                        "Hold: %dms  ·  Intervall: %.0fms",
+                        _tsState.lastHoldMs,
+                        _tsState.BURST_SEND_INTERVAL * 1000
+                    )
+                end)
+            end
+        end
+
+        _tsState.throttleTask = nil
+    end)
+end
+
+local function TS_StopBurstLoop()
+    _tsState.active = false
+    if _tsState.throttleTask then
+        pcall(function() task.cancel(_tsState.throttleTask) end)
+        _tsState.throttleTask = nil
+    end
+    -- Beide Queues sofort leeren (kein Datenverlust)
+    local drainedH = _tsFlushQueue(_tsState.qHigh, 999)
+    local drainedL = _tsFlushQueue(_tsState.qLow,  999)
+    local total = drainedH + drainedL
+    if total > 0 then
+        print(string.format(
+            "[HazeHUB][TrafficShaper] Stop-Drain: %d Pakete geflusht (%dH + %dL).",
+            total, drainedH, drainedL))
+    end
+end
+
+-- ════════════════════════════════════════════════════════════
+--  UI-Aufbau: Network Traffic Shaper
+-- ════════════════════════════════════════════════════════════
+local tsCard = Card(MiscPage)
+Pad(tsCard, 10, 12, 12, 12)
+VList(tsCard, 7)
+
+-- Section Header
+SecLbl(tsCard, "🔀  NETWORK TRAFFIC SHAPER")
+
+-- ⚠ Warnungs-Banner (roter Unterton – schärfere Warnung als NetTester)
+local tsWarnBanner = Instance.new("Frame", tsCard)
+tsWarnBanner.Size = UDim2.new(1, 0, 0, 0)
+tsWarnBanner.AutomaticSize = Enum.AutomaticSize.Y
+tsWarnBanner.BackgroundColor3 = Color3.fromRGB(48, 12, 12)
+tsWarnBanner.BackgroundTransparency = 0.1
+tsWarnBanner.BorderSizePixel = 0
+Corner(tsWarnBanner, 6)
+Stroke(tsWarnBanner, D.Red, 1, 0.25)
+Pad(tsWarnBanner, 6, 8, 6, 8)
+
+local tsWarnTxt = MkLbl(tsWarnBanner,
+    "⚠  Experimental: May cause desync in high-speed combat.",
+    11, D.Red, true)
+tsWarnTxt.Size = UDim2.new(1, 0, 0, 0)
+tsWarnTxt.AutomaticSize = Enum.AutomaticSize.Y
+tsWarnTxt.TextWrapped = true
+
+-- ── Haupt-Toggle Row ─────────────────────────────────────────
+local tsToggleCard = Instance.new("Frame", tsCard)
+tsToggleCard.Size = UDim2.new(1, 0, 0, 0)
+tsToggleCard.AutomaticSize = Enum.AutomaticSize.Y
+tsToggleCard.BackgroundColor3 = D.CardHover
+tsToggleCard.BackgroundTransparency = 0.5
+tsToggleCard.BorderSizePixel = 0
+Corner(tsToggleCard, 6)
+Stroke(tsToggleCard, D.Border, 1, 0.45)
+Pad(tsToggleCard, 8, 8, 8, 8)
+VList(tsToggleCard, 5)
+
+local tsHeaderRow = Instance.new("Frame", tsToggleCard)
+tsHeaderRow.Size = UDim2.new(1, 0, 0, 30)
+tsHeaderRow.BackgroundTransparency = 1
+HList(tsHeaderRow, 8)
+
+local tsDot = Instance.new("Frame", tsHeaderRow)
+tsDot.Size = UDim2.new(0, 9, 0, 9)
+tsDot.AnchorPoint = Vector2.new(0, 0.5)
+tsDot.BackgroundColor3 = D.TextLow
+tsDot.BorderSizePixel = 0
+Corner(tsDot, 99)
+
+local tsTitleLbl = MkLbl(tsHeaderRow, "Smart Packet Throttling", 12, D.TextHi, true)
+tsTitleLbl.Size = UDim2.new(1, -110, 1, 0)
+
+local tsToggleBtn = Instance.new("TextButton", tsHeaderRow)
+tsToggleBtn.Size = UDim2.new(0, 90, 0, 26)
+tsToggleBtn.BackgroundColor3 = D.CardHover
+tsToggleBtn.BackgroundTransparency = D.GlassPane
+tsToggleBtn.Text = "⬜ INAKTIV"
+tsToggleBtn.TextColor3 = D.TextLow
+tsToggleBtn.TextSize = 11
+tsToggleBtn.Font = Enum.Font.GothamBold
+tsToggleBtn.AutoButtonColor = false
+tsToggleBtn.BorderSizePixel = 0
+Corner(tsToggleBtn, 7)
+Stroke(tsToggleBtn, D.TextLow, 1, 0.4)
+
+local tsDescLbl = MkLbl(tsToggleCard,
+    "Puffert FireServer-Calls und sendet sie in unregelmäßigen Bursts. " ..
+    "High-Prio Remotes (Combat/Skill) werden bevorzugt behandelt.",
+    10, D.TextLow)
+tsDescLbl.Size = UDim2.new(1, 0, 0, 0)
+tsDescLbl.AutomaticSize = Enum.AutomaticSize.Y
+tsDescLbl.TextWrapped = true
+
+-- ── Metriken-Panel ───────────────────────────────────────────
+local tsMetCard = Instance.new("Frame", tsCard)
+tsMetCard.Size = UDim2.new(1, 0, 0, 0)
+tsMetCard.AutomaticSize = Enum.AutomaticSize.Y
+tsMetCard.BackgroundColor3 = Color3.fromRGB(14, 14, 17)
+tsMetCard.BackgroundTransparency = 0.1
+tsMetCard.BorderSizePixel = 0
+Corner(tsMetCard, 6)
+Stroke(tsMetCard, D.Border, 1, 0.5)
+Pad(tsMetCard, 7, 8, 7, 8)
+VList(tsMetCard, 4)
+
+local tsMetHeaderLbl = MkLbl(tsMetCard, "LIVE METRIKEN", 10, D.TextLow, false)
+tsMetHeaderLbl.Size = UDim2.new(1, 0, 0, 14)
+
+local tsMetricsLbl = MkLbl(tsMetCard,
+    "Gesendet: –  |  Gepuffert: –  |  Letzter Burst: –",
+    10, D.TextLow)
+tsMetricsLbl.Size = UDim2.new(1, 0, 0, 16)
+
+local tsQueueLbl = MkLbl(tsMetCard,
+    "Queue  ▲ High: 0   ▼ Low: 0",
+    10, D.TextMid)
+tsQueueLbl.Size = UDim2.new(1, 0, 0, 16)
+
+local tsHoldLbl = MkLbl(tsMetCard,
+    "Hold: –  ·  Intervall: –",
+    10, D.TextMid)
+tsHoldLbl.Size = UDim2.new(1, 0, 0, 16)
+
+-- ── Konfigurations-Slider-Row (Hold-Min/Max als Text-Inputs) ─
+local tsCfgCard = Instance.new("Frame", tsCard)
+tsCfgCard.Size = UDim2.new(1, 0, 0, 0)
+tsCfgCard.AutomaticSize = Enum.AutomaticSize.Y
+tsCfgCard.BackgroundColor3 = D.CardHover
+tsCfgCard.BackgroundTransparency = 0.55
+tsCfgCard.BorderSizePixel = 0
+Corner(tsCfgCard, 6)
+Stroke(tsCfgCard, D.Border, 1, 0.5)
+Pad(tsCfgCard, 7, 8, 7, 8)
+VList(tsCfgCard, 5)
+
+SecLbl(tsCfgCard, "BURST-KONFIGURATION")
+
+-- Preset-Row: drei schnelle Preset-Buttons
+local tsPresetRow = Instance.new("Frame", tsCfgCard)
+tsPresetRow.Size = UDim2.new(1, 0, 0, 30)
+tsPresetRow.BackgroundTransparency = 1
+HList(tsPresetRow, 6)
+
+local PRESETS = {
+    { label = "Leicht",  holdMin=0.05, holdMax=0.15, bSize=6,  desc="~50–150ms Hold" },
+    { label = "Mittel",  holdMin=0.08, holdMax=0.40, bSize=8,  desc="~80–400ms Hold" },
+    { label = "Stark",   holdMin=0.15, holdMax=0.80, bSize=12, desc="~150–800ms Hold" },
+}
+local tsActivePre = 2  -- Standard: "Mittel"
+
+local tsPreBtns = {}
+local function ApplyPreset(idx)
+    tsActivePre = idx
+    local p = PRESETS[idx]
+    _tsState.BURST_HOLD_MIN = p.holdMin
+    _tsState.BURST_HOLD_MAX = p.holdMax
+    _tsState.BURST_SIZE_LOW = p.bSize
+    for i, btn in ipairs(tsPreBtns) do
+        if i == idx then
+            btn.BackgroundColor3     = D.Cyan
+            btn.BackgroundTransparency = 0.2
+            btn.TextColor3           = D.BG
+            local st = btn:FindFirstChildOfClass("UIStroke")
+            if st then st.Color = D.Cyan end
+        else
+            btn.BackgroundColor3     = D.CardHover
+            btn.BackgroundTransparency = D.GlassPane
+            btn.TextColor3           = D.TextMid
+            local st = btn:FindFirstChildOfClass("UIStroke")
+            if st then st.Color = D.Border end
+        end
+    end
+    tsHoldLbl.Text = string.format(
+        "Preset '%s': Hold %dms–%dms  ·  BurstMax %d",
+        p.label,
+        math.floor(p.holdMin*1000),
+        math.floor(p.holdMax*1000),
+        p.bSize
+    )
+    tsHoldLbl.TextColor3 = D.TextMid
+end
+
+for i, preset in ipairs(PRESETS) do
+    local pb = Instance.new("TextButton", tsPresetRow)
+    pb.Size = UDim2.new(0.31, 0, 1, 0)
+    pb.BackgroundColor3 = D.CardHover
+    pb.BackgroundTransparency = D.GlassPane
+    pb.Text = preset.label
+    pb.TextColor3 = D.TextMid
+    pb.TextSize = 11
+    pb.Font = Enum.Font.GothamBold
+    pb.AutoButtonColor = false
+    pb.BorderSizePixel = 0
+    Corner(pb, 6)
+    Stroke(pb, D.Border, 1, 0.4)
+
+    local capturedI = i
+    pb.MouseButton1Click:Connect(function() ApplyPreset(capturedI) end)
+    pb.MouseEnter:Connect(function()
+        if tsActivePre ~= capturedI then
+            Tw(pb, { BackgroundColor3 = D.TabActive, BackgroundTransparency = 0.3 })
+        end
+    end)
+    pb.MouseLeave:Connect(function()
+        if tsActivePre ~= capturedI then
+            Tw(pb, { BackgroundColor3 = D.CardHover, BackgroundTransparency = D.GlassPane })
+        end
+    end)
+    table.insert(tsPreBtns, pb)
+end
+
+-- Preset 2 (Mittel) als Standard aktivieren
+ApplyPreset(2)
+
+-- ── Jitter-Checkbox für Hold-Variation ──────────────────────
+local tsJitRow = Instance.new("Frame", tsCfgCard)
+tsJitRow.Size = UDim2.new(1, 0, 0, 24)
+tsJitRow.BackgroundTransparency = 1
+HList(tsJitRow, 8)
+
+local tsJitDot = Instance.new("Frame", tsJitRow)
+tsJitDot.Size = UDim2.new(0, 8, 0, 8)
+tsJitDot.AnchorPoint = Vector2.new(0, 0.5)
+tsJitDot.BackgroundColor3 = D.Green
+tsJitDot.BorderSizePixel = 0
+Corner(tsJitDot, 99)
+
+local tsJitLbl = MkLbl(tsJitRow, "Hold-Jitter aktiv  (zufällige Hold-Variation)", 10, D.TextMid)
+tsJitLbl.Size = UDim2.new(1, -50, 1, 0)
+
+local tsJitBtn = Instance.new("TextButton", tsJitRow)
+tsJitBtn.Size = UDim2.new(0, 40, 0, 20)
+tsJitBtn.BackgroundColor3 = D.GreenDark
+tsJitBtn.BackgroundTransparency = 0.2
+tsJitBtn.Text = "AN"
+tsJitBtn.TextColor3 = D.Green
+tsJitBtn.TextSize = 10
+tsJitBtn.Font = Enum.Font.GothamBold
+tsJitBtn.AutoButtonColor = false
+tsJitBtn.BorderSizePixel = 0
+Corner(tsJitBtn, 5)
+Stroke(tsJitBtn, D.Green, 1, 0.3)
+
+tsJitBtn.MouseButton1Click:Connect(function()
+    _tsState.HOLD_JITTER = not _tsState.HOLD_JITTER
+    local on = _tsState.HOLD_JITTER
+    tsJitBtn.Text = on and "AN" or "AUS"
+    tsJitBtn.TextColor3 = on and D.Green or D.TextLow
+    tsJitDot.BackgroundColor3 = on and D.Green or D.TextLow
+    Tw(tsJitBtn, {
+        BackgroundColor3 = on and D.GreenDark or D.CardHover,
+        BackgroundTransparency = on and 0.2 or D.GlassPane,
+    })
+    local st = tsJitBtn:FindFirstChildOfClass("UIStroke")
+    if st then st.Color = on and D.Green or D.Border end
+end)
+
+-- ── Puls-Animation für den Status-Dot ───────────────────────
+task.spawn(function()
+    while S.Running and ScreenGui.Parent do
+        if _tsState.active then
+            Tw(tsDot, { BackgroundTransparency = 0.7 }, TM)
+            task.wait(0.5)
+            Tw(tsDot, { BackgroundTransparency = 0 }, TM)
+            task.wait(0.5)
+        else
+            task.wait(0.3)
+        end
+    end
+end)
+
+-- ── Toggle-Logik (Haupt-Button) ──────────────────────────────
+local function TS_SyncBtn()
+    local on = _tsState.active
+    tsToggleBtn.Text       = on and "✅ AKTIV" or "⬜ INAKTIV"
+    tsToggleBtn.TextColor3 = on and D.Cyan     or D.TextLow
+    tsDot.BackgroundColor3 = on and D.Cyan     or D.TextLow
+    Tw(tsToggleBtn, {
+        BackgroundColor3       = on and Color3.fromRGB(10,30,42) or D.CardHover,
+        BackgroundTransparency = on and 0.1 or D.GlassPane,
+    })
+    local st = tsToggleBtn:FindFirstChildOfClass("UIStroke")
+    if st then st.Color = on and D.Cyan or D.TextLow end
+
+    -- Card-Rahmen leuchtet bei Aktivierung auf
+    Stroke(tsToggleCard, on and D.Cyan or D.Border,
+           on and 1.5 or 1, on and 0.15 or 0.45)
+    Stroke(tsMetCard,    on and D.Cyan or D.Border,
+           on and 1   or 1, on and 0.35 or 0.5)
+
+    if not on then
+        tsMetricsLbl.Text       = "Gesendet: –  |  Gepuffert: –  |  Letzter Burst: –"
+        tsMetricsLbl.TextColor3 = D.TextLow
+        tsQueueLbl.Text         = "Queue  ▲ High: 0   ▼ Low: 0"
+        tsQueueLbl.TextColor3   = D.TextMid
+    end
+end
+
+tsToggleBtn.MouseButton1Click:Connect(function()
+    _tsState.active = not _tsState.active
+    TS_SyncBtn()
+
+    if _tsState.active then
+        -- Metriken zurücksetzen
+        _tsState.totalQueued = 0
+        _tsState.totalSent   = 0
+        _tsState.lastBurstSz = 0
+
+        local hookOk = TS_InstallHook()
+        if hookOk then
+            TS_StartBurstLoop(tsMetricsLbl, tsQueueLbl, tsHoldLbl)
+            print(string.format(
+                "[HazeHUB][TrafficShaper] AKTIV — Hold %dms–%dms, BurstMax %d+%d",
+                math.floor(_tsState.BURST_HOLD_MIN * 1000),
+                math.floor(_tsState.BURST_HOLD_MAX * 1000),
+                _tsState.BURST_SIZE_HIGH, _tsState.BURST_SIZE_LOW
+            ))
+        else
+            -- Hook schlug fehl: State zurückrollen
+            _tsState.active = false
+            TS_SyncBtn()
+            warn("[HazeHUB][TrafficShaper] Konnte nicht aktiviert werden.")
+        end
+    else
+        TS_StopBurstLoop()
+        print("[HazeHUB][TrafficShaper] DEAKTIVIERT — Queues geleert.")
+    end
+end)
+tsToggleBtn.MouseEnter:Connect(function()
+    if not _tsState.active then
+        Tw(tsToggleBtn, { BackgroundColor3 = D.TabActive, BackgroundTransparency = 0.3 })
+    end
+end)
+tsToggleBtn.MouseLeave:Connect(function() TS_SyncBtn() end)
+
+-- ── Auto-Cleanup beim Script-Ende ───────────────────────────
+task.spawn(function()
+    while S.Running and ScreenGui.Parent do task.wait(5) end
+    if _tsState.active then TS_StopBurstLoop() end
+    TS_UninstallHook()
+    print("[HazeHUB][TrafficShaper] Cleanup abgeschlossen.")
+end)
+
+-- ── Globaler Zugriff ─────────────────────────────────────────
+_G.HazeHUB.TrafficShaper = {
+    GetState = function() return _tsState end,
+    StopAll  = function()
+        if _tsState.active then TS_StopBurstLoop() end
+        TS_UninstallHook()
+        TS_SyncBtn()
+    end,
+    SetPreset = function(idx)
+        if PRESETS[idx] then ApplyPreset(idx) end
+    end,
+}
+
 end) -- end pcall Misc Tab
 
 -- ╔══════════════════════════════════════════════════════════╗
