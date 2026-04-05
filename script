@@ -2679,6 +2679,428 @@ task.spawn(function()
     end
 end)
 
+
+-- ════════════════════════════════════════════════════════════
+--  ★ NETWORK STABILITY TESTER  (Experimental)
+--  Misc-Tab — HazeHUB v21.0 Extension
+--  ⚠  Nur für Netzwerk-Stabilitätstests verwenden!
+-- ════════════════════════════════════════════════════════════
+
+-- ── Shared State ────────────────────────────────────────────
+local _netState = {
+    bufferActive  = false,   -- Feature A: Packet Buffering Toggle
+    jitterActive  = false,   -- Feature B: IncomingReplicationLag Jitter
+    buffer        = {},      -- { remote, args } Queue
+    flushTask     = nil,     -- Aktiver Flush-Loop Handle
+    jitterTask    = nil,     -- Aktiver Jitter-Loop Handle
+    origFireServer = nil,    -- Original FireServer Backup
+    hookInstalled = false,   -- Verhindert Doppel-Hook
+    -- Jitter-Konfiguration
+    JITTER_LOW    = 0,       -- Sekunden (kein Lag)
+    JITTER_HIGH   = 0.35,    -- Sekunden (starker Lag, entspricht ~350ms Jitter)
+    JITTER_CYCLE  = 1.5,     -- Sekunden zwischen Umschaltungen
+    -- Flush-Konfiguration
+    FLUSH_MIN     = 0.1,     -- Sekunden (schnellstes Flush-Intervall)
+    FLUSH_MAX     = 0.5,     -- Sekunden (langsamtstes Flush-Intervall)
+}
+
+-- ── Feature A: FireServer Hook (Packet Buffering) ───────────
+local function InstallFireServerHook()
+    if _netState.hookInstalled then return end
+    _netState.hookInstalled = true
+
+    local mt = getrawmetatable and getrawmetatable(game)
+    if not mt then
+        -- Fallback: kein Executor-Zugang → Warnung im Log
+        warn("[HazeHUB][NetTester] getrawmetatable nicht verfügbar – Packet Buffering nicht möglich.")
+        return
+    end
+
+    local oldNamecall = mt.__namecall
+    _netState.origNamecall = oldNamecall
+
+    local success = pcall(function()
+        setreadonly(mt, false)
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if method == "FireServer" and self:IsA("RemoteEvent") then
+                if _netState.bufferActive then
+                    -- Argumente (variadic) in Tabelle packen und puffern
+                    local args = table.pack(...)
+                    table.insert(_netState.buffer, { remote = self, args = args })
+                    return  -- NICHT sofort senden
+                end
+            end
+            return oldNamecall(self, ...)
+        end)
+        setreadonly(mt, true)
+    end)
+
+    if not success then
+        warn("[HazeHUB][NetTester] Hook konnte nicht gesetzt werden (Executor-Einschränkung).")
+        _netState.hookInstalled = false
+    end
+end
+
+local function UninstallFireServerHook()
+    if not _netState.hookInstalled then return end
+    local mt = getrawmetatable and getrawmetatable(game)
+    if not mt or not _netState.origNamecall then return end
+    pcall(function()
+        setreadonly(mt, false)
+        mt.__namecall = _netState.origNamecall
+        setreadonly(mt, true)
+    end)
+    _netState.hookInstalled = false
+end
+
+-- Flush-Loop: sendet gepufferte Pakete gebündelt alle FLUSH_MIN..FLUSH_MAX Sekunden
+local function StartFlushLoop(statusLbl, counterLbl)
+    if _netState.flushTask then return end
+    _netState.flushTask = task.spawn(function()
+        while _netState.bufferActive and S.Running and ScreenGui.Parent do
+            -- Zufälliges Intervall → simuliert ungleichmäßige Paketübertragung
+            local interval = _netState.FLUSH_MIN
+                + math.random() * (_netState.FLUSH_MAX - _netState.FLUSH_MIN)
+            task.wait(interval)
+
+            if #_netState.buffer > 0 then
+                local batch = _netState.buffer
+                _netState.buffer = {}  -- Buffer leeren (atomisch genug für LuaU single-thread)
+
+                local sent = 0
+                for _, entry in ipairs(batch) do
+                    pcall(function()
+                        -- Originalaufruf über Metatable-Bypass (Hook ist aktiv → direkt rawfire)
+                        if _netState.origNamecall then
+                            _netState.origNamecall(entry.remote, table.unpack(entry.args, 1, entry.args.n))
+                        else
+                            entry.remote:FireServer(table.unpack(entry.args, 1, entry.args.n))
+                        end
+                    end)
+                    sent = sent + 1
+                end
+
+                if counterLbl and counterLbl.Parent then
+                    pcall(function()
+                        counterLbl.Text = string.format("Letztes Batch: %d Pakete  |  Intervall: %.2fs", sent, interval)
+                    end)
+                end
+                print(string.format("[HazeHUB][NetTester] Flush: %d Pakete nach %.2fs gesendet.", sent, interval))
+            end
+        end
+        _netState.flushTask = nil
+    end)
+end
+
+local function StopFlushLoop()
+    if _netState.flushTask then
+        pcall(function() task.cancel(_netState.flushTask) end)
+        _netState.flushTask = nil
+    end
+    -- Verbleibende gepufferte Pakete sofort abschicken
+    local remaining = _netState.buffer
+    _netState.buffer = {}
+    for _, entry in ipairs(remaining) do
+        pcall(function()
+            if _netState.origNamecall then
+                _netState.origNamecall(entry.remote, table.unpack(entry.args, 1, entry.args.n))
+            else
+                entry.remote:FireServer(table.unpack(entry.args, 1, entry.args.n))
+            end
+        end)
+    end
+    if #remaining > 0 then
+        print(string.format("[HazeHUB][NetTester] Flush bei Stop: %d verbleibende Pakete gesendet.", #remaining))
+    end
+end
+
+-- ── Feature B: IncomingReplicationLag Jitter ────────────────
+local function StartJitterLoop(lagLbl)
+    if _netState.jitterTask then return end
+    _netState.jitterTask = task.spawn(function()
+        local ns = pcall(function() return game:GetService("NetworkSettings") end)
+        local NetSettings
+        pcall(function() NetSettings = game:GetService("NetworkSettings") end)
+
+        if not NetSettings then
+            warn("[HazeHUB][NetTester] NetworkSettings Service nicht verfügbar.")
+            _netState.jitterTask = nil
+            return
+        end
+
+        local toggle = false
+        while _netState.jitterActive and S.Running and ScreenGui.Parent do
+            toggle = not toggle
+            local lagValue = toggle and _netState.JITTER_HIGH or _netState.JITTER_LOW
+            pcall(function()
+                NetSettings.IncomingReplicationLag = lagValue
+            end)
+            if lagLbl and lagLbl.Parent then
+                pcall(function()
+                    lagLbl.Text = string.format(
+                        "IncomingLag: %s  |  Zyklus: alle %.1fs",
+                        toggle and (string.format("%.0fms ▲", _netState.JITTER_HIGH * 1000)) or "0ms ▼",
+                        _netState.JITTER_CYCLE
+                    )
+                    lagLbl.TextColor3 = toggle and D.Orange or D.Green
+                end)
+            end
+            task.wait(_netState.JITTER_CYCLE)
+        end
+
+        -- Jitter zurücksetzen
+        pcall(function()
+            if NetSettings then NetSettings.IncomingReplicationLag = 0 end
+        end)
+        if lagLbl and lagLbl.Parent then
+            pcall(function()
+                lagLbl.Text = "IncomingLag: 0ms (Reset)"
+                lagLbl.TextColor3 = D.TextMid
+            end)
+        end
+        _netState.jitterTask = nil
+    end)
+end
+
+local function StopJitterLoop()
+    _netState.jitterActive = false
+    if _netState.jitterTask then
+        pcall(function() task.cancel(_netState.jitterTask) end)
+        _netState.jitterTask = nil
+    end
+    pcall(function()
+        game:GetService("NetworkSettings").IncomingReplicationLag = 0
+    end)
+end
+
+-- ── UI-Aufbau ────────────────────────────────────────────────
+local netCard = Card(MiscPage)
+Pad(netCard, 10, 12, 12, 12)
+VList(netCard, 8)
+
+-- Section Header
+SecLbl(netCard, "📡  NETWORK STABILITY TESTER")
+
+-- ⚠ Warnungs-Banner
+local warnBanner = Instance.new("Frame", netCard)
+warnBanner.Size = UDim2.new(1, 0, 0, 0)
+warnBanner.AutomaticSize = Enum.AutomaticSize.Y
+warnBanner.BackgroundColor3 = Color3.fromRGB(50, 28, 8)
+warnBanner.BackgroundTransparency = 0.15
+warnBanner.BorderSizePixel = 0
+Corner(warnBanner, 6)
+Stroke(warnBanner, D.Orange, 1, 0.2)
+Pad(warnBanner, 6, 8, 6, 8)
+
+local warnTxt = MkLbl(warnBanner,
+    "⚠  Experimental: Use for network stability tests only.",
+    11, D.Orange, true)
+warnTxt.Size = UDim2.new(1, 0, 0, 0)
+warnTxt.AutomaticSize = Enum.AutomaticSize.Y
+warnTxt.TextWrapped = true
+
+-- ── Feature A: Packet Buffering ─────────────────────────────
+local bufCard = Instance.new("Frame", netCard)
+bufCard.Size = UDim2.new(1, 0, 0, 0)
+bufCard.AutomaticSize = Enum.AutomaticSize.Y
+bufCard.BackgroundColor3 = D.CardHover
+bufCard.BackgroundTransparency = 0.5
+bufCard.BorderSizePixel = 0
+Corner(bufCard, 6)
+Stroke(bufCard, D.Border, 1, 0.45)
+Pad(bufCard, 8, 8, 8, 8)
+VList(bufCard, 5)
+
+local bufTitleRow = Instance.new("Frame", bufCard)
+bufTitleRow.Size = UDim2.new(1, 0, 0, 28)
+bufTitleRow.BackgroundTransparency = 1
+HList(bufTitleRow, 8)
+
+local bufDot = Instance.new("Frame", bufTitleRow)
+bufDot.Size = UDim2.new(0, 9, 0, 9)
+bufDot.AnchorPoint = Vector2.new(0, 0.5)
+bufDot.BackgroundColor3 = D.TextLow
+bufDot.BorderSizePixel = 0
+Corner(bufDot, 99)
+
+local bufTitle = MkLbl(bufTitleRow, "Buffer Outgoing Packets", 12, D.TextHi, true)
+bufTitle.Size = UDim2.new(1, -100, 1, 0)
+
+local bufToggleBtn = Instance.new("TextButton", bufTitleRow)
+bufToggleBtn.Size = UDim2.new(0, 80, 0, 26)
+bufToggleBtn.BackgroundColor3 = D.CardHover
+bufToggleBtn.BackgroundTransparency = D.GlassPane
+bufToggleBtn.Text = "⬜ AUS"
+bufToggleBtn.TextColor3 = D.TextLow
+bufToggleBtn.TextSize = 11
+bufToggleBtn.Font = Enum.Font.GothamBold
+bufToggleBtn.AutoButtonColor = false
+bufToggleBtn.BorderSizePixel = 0
+Corner(bufToggleBtn, 7)
+Stroke(bufToggleBtn, D.TextLow, 1, 0.4)
+
+local bufInfoLbl = MkLbl(bufCard,
+    "FireServer-Aufrufe werden gepuffert und alle 0.1–0.5s gebündelt gesendet (Jitter-Simulation).",
+    10, D.TextLow)
+bufInfoLbl.Size = UDim2.new(1, 0, 0, 0)
+bufInfoLbl.AutomaticSize = Enum.AutomaticSize.Y
+bufInfoLbl.TextWrapped = true
+
+local bufCounterLbl = MkLbl(bufCard, "Letztes Batch: –", 10, D.Teal)
+bufCounterLbl.Size = UDim2.new(1, 0, 0, 16)
+
+-- ── Feature B: Jitter Simulation ────────────────────────────
+local jitCard = Instance.new("Frame", netCard)
+jitCard.Size = UDim2.new(1, 0, 0, 0)
+jitCard.AutomaticSize = Enum.AutomaticSize.Y
+jitCard.BackgroundColor3 = D.CardHover
+jitCard.BackgroundTransparency = 0.5
+jitCard.BorderSizePixel = 0
+Corner(jitCard, 6)
+Stroke(jitCard, D.Border, 1, 0.45)
+Pad(jitCard, 8, 8, 8, 8)
+VList(jitCard, 5)
+
+local jitTitleRow = Instance.new("Frame", jitCard)
+jitTitleRow.Size = UDim2.new(1, 0, 0, 28)
+jitTitleRow.BackgroundTransparency = 1
+HList(jitTitleRow, 8)
+
+local jitDot = Instance.new("Frame", jitTitleRow)
+jitDot.Size = UDim2.new(0, 9, 0, 9)
+jitDot.AnchorPoint = Vector2.new(0, 0.5)
+jitDot.BackgroundColor3 = D.TextLow
+jitDot.BorderSizePixel = 0
+Corner(jitDot, 99)
+
+local jitTitle = MkLbl(jitTitleRow, "Network Jitter (ReplicationLag)", 12, D.TextHi, true)
+jitTitle.Size = UDim2.new(1, -100, 1, 0)
+
+local jitToggleBtn = Instance.new("TextButton", jitTitleRow)
+jitToggleBtn.Size = UDim2.new(0, 80, 0, 26)
+jitToggleBtn.BackgroundColor3 = D.CardHover
+jitToggleBtn.BackgroundTransparency = D.GlassPane
+jitToggleBtn.Text = "⬜ AUS"
+jitToggleBtn.TextColor3 = D.TextLow
+jitToggleBtn.TextSize = 11
+jitToggleBtn.Font = Enum.Font.GothamBold
+jitToggleBtn.AutoButtonColor = false
+jitToggleBtn.BorderSizePixel = 0
+Corner(jitToggleBtn, 7)
+Stroke(jitToggleBtn, D.TextLow, 1, 0.4)
+
+local jitInfoLbl = MkLbl(jitCard,
+    "Schaltet IncomingReplicationLag alle 1.5s zwischen 0ms und 350ms um (Netzwerk-Jitter).",
+    10, D.TextLow)
+jitInfoLbl.Size = UDim2.new(1, 0, 0, 0)
+jitInfoLbl.AutomaticSize = Enum.AutomaticSize.Y
+jitInfoLbl.TextWrapped = true
+
+local jitLagLbl = MkLbl(jitCard, "IncomingLag: inaktiv", 10, D.TextMid)
+jitLagLbl.Size = UDim2.new(1, 0, 0, 16)
+
+-- ── Toggle-Logik: Packet Buffering ──────────────────────────
+local function SyncBufBtn()
+    local on = _netState.bufferActive
+    bufToggleBtn.Text       = on and "✅ AN"   or "⬜ AUS"
+    bufToggleBtn.TextColor3 = on and D.Green   or D.TextLow
+    bufDot.BackgroundColor3 = on and D.Green   or D.TextLow
+    Tw(bufToggleBtn, {
+        BackgroundColor3      = on and D.GreenDark or D.CardHover,
+        BackgroundTransparency = on and 0.12      or D.GlassPane,
+    })
+    local st = bufToggleBtn:FindFirstChildOfClass("UIStroke")
+    if st then st.Color = on and D.Green or D.TextLow end
+    Stroke(bufCard, on and D.Green or D.Border, on and 1.5 or 1, on and 0.2 or 0.45)
+end
+
+bufToggleBtn.MouseButton1Click:Connect(function()
+    _netState.bufferActive = not _netState.bufferActive
+    SyncBufBtn()
+
+    if _netState.bufferActive then
+        InstallFireServerHook()
+        StartFlushLoop(nil, bufCounterLbl)
+        print("[HazeHUB][NetTester] Packet Buffering AKTIV")
+    else
+        StopFlushLoop()
+        -- Hook bleibt installiert aber bufferActive=false → Pakete fließen direkt durch
+        bufCounterLbl.Text = "Buffer geleert – direkte Übertragung aktiv"
+        bufCounterLbl.TextColor3 = D.TextMid
+        print("[HazeHUB][NetTester] Packet Buffering DEAKTIVIERT")
+    end
+end)
+bufToggleBtn.MouseEnter:Connect(function()
+    Tw(bufToggleBtn, { BackgroundColor3 = _netState.bufferActive
+        and Color3.fromRGB(16,52,30) or D.CardHover })
+end)
+bufToggleBtn.MouseLeave:Connect(function() SyncBufBtn() end)
+
+-- ── Toggle-Logik: Jitter Simulation ─────────────────────────
+local function SyncJitBtn()
+    local on = _netState.jitterActive
+    jitToggleBtn.Text       = on and "✅ AN"   or "⬜ AUS"
+    jitToggleBtn.TextColor3 = on and D.Orange  or D.TextLow
+    jitDot.BackgroundColor3 = on and D.Orange  or D.TextLow
+    Tw(jitToggleBtn, {
+        BackgroundColor3       = on and Color3.fromRGB(48,28,8) or D.CardHover,
+        BackgroundTransparency = on and 0.12 or D.GlassPane,
+    })
+    local st = jitToggleBtn:FindFirstChildOfClass("UIStroke")
+    if st then st.Color = on and D.Orange or D.TextLow end
+    Stroke(jitCard, on and D.Orange or D.Border, on and 1.5 or 1, on and 0.2 or 0.45)
+end
+
+jitToggleBtn.MouseButton1Click:Connect(function()
+    _netState.jitterActive = not _netState.jitterActive
+    SyncJitBtn()
+
+    if _netState.jitterActive then
+        StartJitterLoop(jitLagLbl)
+        print("[HazeHUB][NetTester] Network Jitter AKTIV (0 ↔ 350ms, Zyklus 1.5s)")
+    else
+        StopJitterLoop()
+        jitLagLbl.Text       = "IncomingLag: 0ms (zurückgesetzt)"
+        jitLagLbl.TextColor3 = D.TextMid
+        print("[HazeHUB][NetTester] Network Jitter DEAKTIVIERT")
+    end
+end)
+jitToggleBtn.MouseEnter:Connect(function()
+    Tw(jitToggleBtn, { BackgroundColor3 = _netState.jitterActive
+        and Color3.fromRGB(55,32,8) or D.CardHover })
+end)
+jitToggleBtn.MouseLeave:Connect(function() SyncJitBtn() end)
+
+-- ── Auto-Cleanup beim Script-Ende ───────────────────────────
+-- Stellt sicher, dass Lag und Hook beim Verlassen/Neustart sauber resettet werden
+task.spawn(function()
+    while S.Running and ScreenGui.Parent do task.wait(5) end
+    -- Aufräumen
+    if _netState.bufferActive then
+        _netState.bufferActive = false
+        StopFlushLoop()
+    end
+    if _netState.jitterActive then
+        StopJitterLoop()
+    end
+    UninstallFireServerHook()
+    print("[HazeHUB][NetTester] Cleanup abgeschlossen.")
+end)
+
+-- Globaler Zugriff (z. B. für externe Module)
+_G.HazeHUB.NetTester = {
+    GetState      = function() return _netState end,
+    StopAll       = function()
+        if _netState.bufferActive then
+            _netState.bufferActive = false; StopFlushLoop()
+        end
+        if _netState.jitterActive then StopJitterLoop() end
+        UninstallFireServerHook()
+        SyncBufBtn(); SyncJitBtn()
+    end,
+}
+
 end) -- end pcall Misc Tab
 
 -- ╔══════════════════════════════════════════════════════════╗
