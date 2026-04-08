@@ -1,15 +1,18 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – teams.lua  v2.0.0
---  CHANGES v2.0.0:
---    ✓ Save: Equipment-Scan (HeadGear/BodyGear/ArmsGear/LegsGear/Soul)
---    ✓ Save: Unit-Identifikation per Tag (nicht nur Name)
---    ✓ Load: 5-Stufen-Workflow (Strip→Unequip→Swap→GearEquip→AutoUp)
---    ✓ Neue Remotes: Units.Gears + Units.Soul (Equip + Unequip)
---    ✓ Backward-Compat: Alte Saves (slots[i]=string) weiterhin ladbar
---    ✓ Detail-Ansicht: Tag + Equipment-Info pro Slot
+--  HazeHUB – teams.lua  v1.2.0
+--  FIXES v1.2.0:
+--    ✓ KRITISCH: Snapshot-Zuerst Workflow (kein verlorener State)
+--    ✓ KRITISCH: findUnitByTag (Tag.Value statt Name-Suche)
+--    ✓ KRITISCH: Gear-Snapshot vor erstem Remote (LegsGear, HeadGear, etc.)
+--    ✓ KRITISCH: Gear-Strip pro Unit vor UnEquipAll
+--    ✓ KRITISCH: Gear-Restore nach Re-Equip (Tag-basiert, stale-safe)
+--    ✓ Dreiphasiger Load: [Snapshot] → [Strip+UnEquip] → [Equip+Gear]
+--    ✓ Live-Phasen-Anzeige im UI während LoadTeam
+--    ✓ Snapshot wird im SaveTeam mitgespeichert (Tag als primary Key)
+--    ✓ Collection-Pfad: RS.Player_Data[LP.Name].Collection
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "2.0.0"
+local VERSION = "1.2.0"
 
 local waited = 0
 while not (_G.HazeShared and _G.HazeShared.TeamsPage and _G.HazeShared.SetModuleLoaded) do
@@ -33,251 +36,203 @@ local TeamsPage = HS.TeamsPage
 local LP = game.Players.LocalPlayer
 local RS = game:GetService("ReplicatedStorage")
 
--- ── Konstanten ────────────────────────────────────────────────
+-- ── Dateipfad ────────────────────────────────────────────────
 local FOLDER     = "HazeHUB"
 local TEAMS_FILE = FOLDER .. "/" .. LP.Name .. "_teams.json"
 if makefolder then pcall(function() makefolder(FOLDER) end) end
 
--- Gear-Slot-Namen (Reihenfolge für sequenzielles Un-/Equip)
-local GEAR_SLOTS = { "HeadGear", "BodyGear", "ArmsGear", "LegsGear" }
+-- ── Gear-Felder die pro Unit gesichert werden ─────────────────
+-- Reihenfolge ist wichtig: Strip + Restore laufen in dieser Reihenfolge
+local GEAR_SLOTS = {
+    "LegsGear",
+    "HeadGear",
+    "BodyGear",
+    "WeaponGear",
+    "AccessoryGear",
+    "ExtraGear",
+}
 
--- Wartezeiten (Sekunden) zwischen Remote-Calls
-local WAIT_BETWEEN_GEAR  = 0.18   -- zwischen einzelnen Gear-Calls
-local WAIT_AFTER_UNIT    = 0.45   -- nach Einheit equip/unequip
-local WAIT_STRIP_DONE    = 0.55   -- nach Full-Strip vor UnEquipAll
-local WAIT_EQUIP_DONE    = 0.40   -- nach Unit-Equip vor Gear-Phase
+-- ════════════════════════════════════════════════════════════
+--  ★ COLLECTION HELPER (Tag-basiert, stale-safe)
+-- ════════════════════════════════════════════════════════════
 
--- ── Remote-Helfer ─────────────────────────────────────────────
--- Cached Remote-Instanzen für den Load-Prozess
-local function GetRemote(...)
-    local node = RS
-    for _, name in ipairs({...}) do
-        node = node:WaitForChild(name, 10)
-        if not node then
-            warn("[HazeHub/Teams] Remote-Pfad nicht gefunden: " .. name)
-            return nil
-        end
-    end
-    return node
-end
-
--- ★ Unit Equip: Instance aus Collection übergeben
-local function FireEquip(unitInstance)
-    local ok, err = pcall(function()
-        GetRemote("Remote","Server","Units","Equip"):FireServer(unitInstance)
-    end)
-    if not ok then warn("[HazeHub/Teams] Units.Equip Fehler: " .. tostring(err)) end
-    return ok
-end
-
--- ★ UnEquipAll: leert alle 6 Slots serverseitig
-local function FireUnEquipAll()
-    local ok, err = pcall(function()
-        GetRemote("Remote","Server","Units","UnEquipAll"):FireServer()
-    end)
-    if not ok then warn("[HazeHub/Teams] UnEquipAll Fehler: " .. tostring(err)) end
-    task.wait(WAIT_AFTER_UNIT)
-end
-
--- ★ Gear Unequip: leert einen Gear-Slot der Einheit
---   GearName = "HeadGear" | "BodyGear" | "ArmsGear" | "LegsGear"
-local function FireGearUnequip(unitFolder, gearName)
-    if not unitFolder then return end
-    local ok, err = pcall(function()
-        GetRemote("Remote","Server","Units","Gears"):FireServer("Unequip", {
-            ["UnitFolder"] = unitFolder,
-            ["GearName"]   = gearName,
-        })
-    end)
-    if not ok then
-        warn("[HazeHub/Teams] Gears.Unequip Fehler (" .. tostring(gearName) .. "): " .. tostring(err))
-    end
-    task.wait(WAIT_BETWEEN_GEAR)
-end
-
--- ★ Gear Equip: rüstet ein Item in den passenden Gear-Slot
---   ItemName  = tatsächlicher Item-Name (z. B. "HelmetOfDarkness")
-local function FireGearEquip(unitFolder, itemName)
-    if not unitFolder or not itemName or itemName == "" then return end
-    local ok, err = pcall(function()
-        GetRemote("Remote","Server","Units","Gears"):FireServer("Equip", {
-            ["UnitFolder"] = unitFolder,
-            ["GearName"]   = itemName,
-        })
-    end)
-    if not ok then
-        warn("[HazeHub/Teams] Gears.Equip Fehler (" .. tostring(itemName) .. "): " .. tostring(err))
-    end
-    task.wait(WAIT_BETWEEN_GEAR)
-end
-
--- ★ Soul Unequip: entfernt die Soul der Einheit
-local function FireSoulUnequip(unitFolder)
-    if not unitFolder then return end
-    local ok, err = pcall(function()
-        GetRemote("Remote","Server","Units","Soul"):FireServer("Unequip", {
-            ["UnitFolder"] = unitFolder,
-            ["SoulName"]   = "Soul",
-        })
-    end)
-    if not ok then
-        warn("[HazeHub/Teams] Soul.Unequip Fehler: " .. tostring(err))
-    end
-    task.wait(WAIT_BETWEEN_GEAR)
-end
-
--- ★ Soul Equip: rüstet eine Soul aus
---   soulItemName = tatsächlicher Soul-Name
-local function FireSoulEquip(unitFolder, soulItemName)
-    if not unitFolder or not soulItemName or soulItemName == "" then return end
-    local ok, err = pcall(function()
-        GetRemote("Remote","Server","Units","Soul"):FireServer("Equip", {
-            ["UnitFolder"] = unitFolder,
-            ["SoulName"]   = soulItemName,
-        })
-    end)
-    if not ok then
-        warn("[HazeHub/Teams] Soul.Equip Fehler (" .. tostring(soulItemName) .. "): " .. tostring(err))
-    end
-    task.wait(WAIT_BETWEEN_GEAR)
-end
-
--- ★ AutoUpgrade: FireServer(Slot, Value)
-local function FireAutoUpgrade(slot, value)
-    pcall(function()
-        GetRemote("Remote","Server","Units","AutoUpgradeConfig"):FireServer(slot, value)
-    end)
-end
-
--- ── Strip-Helper: entfernt das gesamte Equipment einer Einheit ─
--- Feuert Unequip für alle 4 Gear-Slots + Soul
-local function StripAllGearFromUnit(unitFolder)
-    if not unitFolder then return end
-    for _, slot in ipairs(GEAR_SLOTS) do
-        FireGearUnequip(unitFolder, slot)
-    end
-    FireSoulUnequip(unitFolder)
-end
-
--- ── Collection-Mapper ──────────────────────────────────────────
--- Gibt ALLE Einheiten aus Player_Data.[LP.Name].Collection zurück
--- Ergebnis: { {name, tag, instance, gear={...}} }
-local function GetAllUnitsFromCollection()
-    local result = {}
+-- Gibt die Collection-Instanz zurück (frischer Lookup, kein Cache)
+local function GetCollection()
     local col = nil
     pcall(function()
-        col = RS:WaitForChild("Player_Data", 5)
-                :WaitForChild(LP.Name, 5)
-                :WaitForChild("Collection", 5)
+        col = RS
+            :WaitForChild("Player_Data", 5)
+            :WaitForChild(LP.Name,       5)
+            :WaitForChild("Collection",  5)
     end)
-    if not col then return result end
-
-    for _, unitFolder in ipairs(col:GetChildren()) do
-        if unitFolder:IsA("Folder") then
-            local tagObj = unitFolder:FindFirstChild("Tag")
-            local tagVal = tagObj and tostring(tagObj.Value) or ""
-
-            -- Equipment aus Collection lesen
-            local gear = {}
-            for _, slotName in ipairs(GEAR_SLOTS) do
-                local gObj = unitFolder:FindFirstChild(slotName)
-                gear[slotName] = gObj and tostring(gObj.Value) or ""
-            end
-            local soulObj = unitFolder:FindFirstChild("Soul")
-            gear.Soul = soulObj and tostring(soulObj.Value) or ""
-
-            table.insert(result, {
-                name     = unitFolder.Name,
-                tag      = tagVal,
-                instance = unitFolder,
-                gear     = gear,
-            })
-        end
-    end
-    return result
+    return col
 end
 
--- Sucht eine Einheit in der Collection per Tag (primär) oder Name (Fallback)
--- Gibt { name, tag, instance, gear } zurück oder nil
-local function FindUnitInCollection(tagOrName)
-    if not tagOrName or tagOrName == "" then return nil end
-    local units = GetAllUnitsFromCollection()
-    -- 1. Exakter Tag
-    for _, u in ipairs(units) do
-        if u.tag == tagOrName then return u end
-    end
-    -- 2. Exakter Name
-    for _, u in ipairs(units) do
-        if u.name == tagOrName then return u end
-    end
-    -- 3. Name case-insensitiv
-    local low = tagOrName:lower()
-    for _, u in ipairs(units) do
-        if u.name:lower() == low then return u end
+-- ★ PRÄZISE TAG-SUCHE (exakt wie vom User spezifiziert, erweitert)
+-- Sucht ausschließlich über Tag.Value — kein Name-Fallback, kein staler Ref
+local function findUnitByTag(tag)
+    local col = GetCollection()
+    if not col then return nil end
+    for _, unit in pairs(col:GetChildren()) do
+        if unit:FindFirstChild("Tag") and tostring(unit.Tag.Value) == tostring(tag) then
+            return unit
+        end
     end
     return nil
 end
 
--- ── State ─────────────────────────────────────────────────────
-local TM_State = {
-    Teams  = {},
-    SelIdx = nil,
-}
+-- Liest einen Gear-Value aus einem Unit-Folder (nil wenn nicht vorhanden)
+local function ReadGearValue(unitFolder, gearSlotName)
+    local gearObj = unitFolder:FindFirstChild(gearSlotName)
+    if not gearObj then return nil end
+    local v = tostring(gearObj.Value)
+    return (v ~= "" and v ~= "nil" and v ~= "0") and v or nil
+end
 
--- ── Aktuelles Loadout + Equipment scannen ─────────────────────
--- Gibt zurück:
---   slots[i]     = { name=string, tag=string } oder nil
---   autoUpgrade  = { [i] = value }
---   equipment    = { [tag] = {HeadGear, BodyGear, ArmsGear, LegsGear, Soul} }
+-- ════════════════════════════════════════════════════════════
+--  ★ SNAPSHOT ENGINE
+--  Muss VOR jedem Remote-Call ausgeführt werden.
+--  Gibt eine Tabelle zurück:  snapshot[tag] = { name, gears={} }
+-- ════════════════════════════════════════════════════════════
+local function BuildGearSnapshot()
+    local snapshot = {}   -- key = Tag.Value (string)
+    local col = GetCollection()
+    if not col then
+        warn("[HazeHub/Teams] Snapshot: Collection nicht gefunden!")
+        return snapshot
+    end
+
+    for _, unitFolder in pairs(col:GetChildren()) do
+        if unitFolder:IsA("Folder") then
+            local tagObj = unitFolder:FindFirstChild("Tag")
+            local tag    = tagObj and tostring(tagObj.Value) or ""
+
+            if tag ~= "" then
+                local gears = {}
+                for _, gearSlot in ipairs(GEAR_SLOTS) do
+                    gears[gearSlot] = ReadGearValue(unitFolder, gearSlot)
+                end
+
+                snapshot[tag] = {
+                    name     = unitFolder.Name,
+                    tag      = tag,
+                    gears    = gears,
+                    instance = unitFolder, -- Ref für sofortigen Zugriff (pre-unequip)
+                }
+            end
+        end
+    end
+
+    local count = 0
+    for _ in pairs(snapshot) do count = count + 1 end
+    print(string.format("[HazeHub/Teams] Snapshot: %d Units gesichert.", count))
+    return snapshot
+end
+
+-- ════════════════════════════════════════════════════════════
+--  ★ REMOTE-HELPER
+-- ════════════════════════════════════════════════════════════
+
+-- Holt einen Remote-Pfad (gecacht per Session, nil-safe)
+local _remoteCache = {}
+local function GetRemote(...)
+    local path = table.concat({...}, "/")
+    if _remoteCache[path] then return _remoteCache[path] end
+    local cur = RS
+    for _, seg in ipairs({...}) do
+        local ok, r = pcall(function()
+            return cur:WaitForChild(seg, 8)
+        end)
+        if not ok or not r then
+            warn("[HazeHub/Teams] Remote-Pfad nicht gefunden: " .. path)
+            return nil
+        end
+        cur = r
+    end
+    _remoteCache[path] = cur
+    return cur
+end
+
+-- UnEquipAll: leert alle Loadout-Slots serverseitig
+local function FireUnEquipAll()
+    local r = GetRemote("Remote","Server","Units","UnEquipAll")
+    if not r then return false end
+    local ok, err = pcall(function() r:FireServer() end)
+    if not ok then warn("[HazeHub/Teams] UnEquipAll Fehler: " .. tostring(err)); return false end
+    print("[HazeHub/Teams] UnEquipAll gefeuert.")
+    task.wait(0.5)
+    return true
+end
+
+-- Equip: nutzt frische Instance aus Collection (KEIN staler Ref)
+-- Sucht zwingend per Tag — wenn tag="" dann Fallback auf name
+local function FireEquip(tag, nameHint)
+    local inst = findUnitByTag(tag)
+    if not inst and nameHint and nameHint ~= "" then
+        -- Letzter Fallback: Name-Suche (nur wenn kein Tag verfügbar)
+        local col = GetCollection()
+        if col then inst = col:FindFirstChild(nameHint) end
+    end
+    if not inst then
+        warn(string.format("[HazeHub/Teams] Equip: Unit mit Tag='%s' nicht gefunden.", tostring(tag)))
+        return false
+    end
+    local r = GetRemote("Remote","Server","Units","Equip")
+    if not r then return false end
+    local ok, err = pcall(function() r:FireServer(inst) end)
+    if not ok then
+        warn("[HazeHub/Teams] Equip Fehler: " .. tostring(err))
+        return false
+    end
+    return true
+end
+
+-- UnequipGear: entfernt ein einzelnes Gear-Item von einer Unit
+-- Remote-Pfad: Remote.Server.Units.UnequipGear (FireServer(unitInstance, gearSlotName))
+local function FireUnequipGear(unitInstance, gearSlotName)
+    if not unitInstance or not gearSlotName then return end
+    local r = GetRemote("Remote","Server","Units","UnequipGear")
+    if not r then return end  -- Remote optional – kein warn (nicht alle Spiele haben diesen Remote)
+    pcall(function() r:FireServer(unitInstance, gearSlotName) end)
+end
+
+-- EquipGear: stattet eine Unit (per Tag-Lookup) mit einem Gear-Item aus
+-- Remote-Pfad: Remote.Server.Units.EquipGear (FireServer(unitInstance, gearSlotName, gearValue))
+local function FireEquipGear(tag, gearSlotName, gearValue)
+    if not gearValue then return end
+    local inst = findUnitByTag(tag)
+    if not inst then
+        warn(string.format("[HazeHub/Teams] EquipGear: Unit Tag='%s' nicht gefunden.", tostring(tag)))
+        return
+    end
+    local r = GetRemote("Remote","Server","Units","EquipGear")
+    if not r then return end
+    pcall(function() r:FireServer(inst, gearSlotName, gearValue) end)
+end
+
+-- AutoUpgrade
+local function FireAutoUpgrade(slot, value)
+    local r = GetRemote("Remote","Server","Units","AutoUpgradeConfig")
+    if not r then return end
+    pcall(function() r:FireServer(slot, value) end)
+end
+
+-- ════════════════════════════════════════════════════════════
+--  ★ LOADOUT SCANNER (für Save-Funktion)
+-- ════════════════════════════════════════════════════════════
 local function ScanCurrentLoadout()
-    local slots     = {}
-    local autoUp    = {}
-    local equipment = {}
-
+    local slots  = {}
+    local autoUp = {}
     pcall(function()
         local pd   = RS:WaitForChild("Player_Data", 5):WaitForChild(LP.Name, 5)
         local data = pd:WaitForChild("Data", 5)
-
-        -- Hole Collection einmalig für Gear-Scan
-        local col = nil
-        pcall(function()
-            col = pd:WaitForChild("Collection", 5)
-        end)
-
         for i = 1, 6 do
             local lv = data:FindFirstChild("UnitLoadout" .. i)
             if lv then
                 local v = tostring(lv.Value)
-                if v ~= "" and v ~= "nil" then
-                    -- Unit-Name aus Loadout → Tag + Gear aus Collection
-                    local unitFolder = col and col:FindFirstChild(v)
-                    local tag = ""
-                    local gear = { HeadGear="", BodyGear="", ArmsGear="", LegsGear="", Soul="" }
-
-                    if unitFolder then
-                        local tagObj = unitFolder:FindFirstChild("Tag")
-                        tag = tagObj and tostring(tagObj.Value) or ""
-
-                        -- Equipment-Scan: jede Value im Folder
-                        for _, slotName in ipairs(GEAR_SLOTS) do
-                            local gObj = unitFolder:FindFirstChild(slotName)
-                            gear[slotName] = gObj and tostring(gObj.Value) or ""
-                        end
-                        local soulObj = unitFolder:FindFirstChild("Soul")
-                        gear.Soul = soulObj and tostring(soulObj.Value) or ""
-                    end
-
-                    slots[i] = { name = v, tag = tag }
-
-                    -- Equipment pro Tag ablegen (nur wenn Tag vorhanden)
-                    if tag ~= "" then
-                        equipment[tag] = gear
-                    end
-                end
+                slots[i] = (v ~= "" and v ~= "nil") and v or nil
             end
         end
-
-        -- AutoUpgradeConfig
         local auConf = pd:FindFirstChild("AutoUpgradeConfig")
         if auConf then
             for i = 1, 6 do
@@ -286,11 +241,253 @@ local function ScanCurrentLoadout()
             end
         end
     end)
-
-    return slots, autoUp, equipment
+    return slots, autoUp
 end
 
--- ── Datei laden ───────────────────────────────────────────────
+-- Scan + Gear-Snapshot kombiniert (für Save)
+-- Gibt { slots, autoUpgrade, unitSnapshots } zurück
+-- unitSnapshots: { [slotIndex] = { name, tag, gears } }
+local function ScanCurrentLoadoutWithGear()
+    local slots, autoUp = ScanCurrentLoadout()
+    local snapshot = BuildGearSnapshot()  -- Snapshot direkt beim Scan
+
+    local unitSnapshots = {}
+    for i = 1, 6 do
+        local unitName = slots[i]
+        if unitName then
+            -- Finde den Tag für diesen Unit-Namen im Snapshot
+            local foundEntry = nil
+            for tag, entry in pairs(snapshot) do
+                if entry.name == unitName then
+                    foundEntry = entry
+                    break
+                end
+            end
+            if foundEntry then
+                unitSnapshots[i] = {
+                    name  = foundEntry.name,
+                    tag   = foundEntry.tag,
+                    gears = foundEntry.gears,
+                }
+            else
+                -- Fallback: Name ohne Tag (kann bei späterem Load zu Problemen führen)
+                unitSnapshots[i] = {
+                    name  = unitName,
+                    tag   = "",
+                    gears = {},
+                }
+            end
+        end
+    end
+
+    return slots, autoUp, unitSnapshots
+end
+
+-- ════════════════════════════════════════════════════════════
+--  ★ LOAD TEAM — STRIKTE DREIPHASEN-SEQUENZ
+--
+--  PHASE 1: Snapshot (KEIN Remote darf vorher feuern)
+--  PHASE 2: Gear-Strip + UnEquipAll
+--  PHASE 3: Re-Equip (Units) + Gear-Restore + AutoUpgrade
+-- ════════════════════════════════════════════════════════════
+local function LoadTeam(team, onPhase, onDone, onError)
+    onPhase = onPhase or function() end
+    onDone  = onDone  or function() end
+    onError = onError or function() end
+
+    -- Validierung
+    if not team or not team.slots then
+        onError("Ungültiges Team-Objekt (kein slots-Feld).")
+        return
+    end
+
+    -- ──────────────────────────────────────────────────────
+    --  PHASE 1: SNAPSHOT
+    --  Alle Daten sichern BEVOR ein einziger Remote gefeuert wird.
+    --  Nach UnEquipAll sind Instance-Referenzen potenziell stale.
+    -- ──────────────────────────────────────────────────────
+    onPhase(1, "🔍 Phase 1/3: Snapshot der Collection...")
+    print("[HazeHub/Teams] ═══ PHASE 1: SNAPSHOT ═══")
+
+    local snapshot = BuildGearSnapshot()
+
+    -- Baue die Equip-Queue auf Basis des gespeicherten Teams
+    -- Jeder Eintrag: { slotIdx, tag, name, gears }
+    local equipQueue = {}
+    for i = 1, 6 do
+        local savedUnit = team.slots and team.slots[i]
+        if savedUnit and savedUnit ~= "" then
+            -- Bevorzuge gespeicherten Tag aus unitSnapshots (v1.2.0+ saves)
+            local savedTag  = team.unitSnapshots
+                and team.unitSnapshots[tostring(i)]
+                and team.unitSnapshots[tostring(i)].tag
+                or ""
+            local savedGear = team.unitSnapshots
+                and team.unitSnapshots[tostring(i)]
+                and team.unitSnapshots[tostring(i)].gears
+                or {}
+
+            -- Suche Tag im aktuellen Snapshot als Validierung
+            -- (prüft ob Unit noch in Collection existiert)
+            local liveEntry = nil
+            if savedTag ~= "" then
+                liveEntry = snapshot[savedTag]
+            end
+            -- Fallback: Name-Match über Snapshot
+            if not liveEntry then
+                for tag, entry in pairs(snapshot) do
+                    if entry.name == savedUnit then
+                        liveEntry = entry
+                        savedTag  = tag
+                        break
+                    end
+                end
+            end
+
+            if liveEntry then
+                table.insert(equipQueue, {
+                    slotIdx   = i,
+                    tag       = liveEntry.tag,   -- Live-Tag (canonical)
+                    name      = liveEntry.name,
+                    gears     = savedGear,        -- Gear aus dem Save (nicht Live)
+                    liveGears = liveEntry.gears,  -- Gear aus Live-Collection
+                })
+                print(string.format(
+                    "[HazeHub/Teams]   Slot %d → '%s' (Tag: %s) — %d Gear-Felder gesichert",
+                    i, liveEntry.name, liveEntry.tag,
+                    (function()
+                        local n = 0
+                        for _, v in pairs(savedGear) do if v then n=n+1 end end
+                        return n
+                    end)()
+                ))
+            else
+                warn(string.format(
+                    "[HazeHub/Teams]   Slot %d: Unit '%s' nicht in Collection! Wird übersprungen.",
+                    i, savedUnit
+                ))
+            end
+        end
+    end
+
+    if #equipQueue == 0 then
+        onError("Keine Units aus diesem Team in der Collection gefunden.")
+        return
+    end
+
+    -- Snapshot der aktuell ausgerüsteten Units für Gear-Strip
+    -- (muss vor UnEquipAll passieren, da danach Loadout-Slots leer sind)
+    local currentSlots, _ = ScanCurrentLoadout()
+    local stripTargets = {}  -- { tag, instance } — Units deren Gear zu strippen ist
+    for i = 1, 6 do
+        local unitName = currentSlots[i]
+        if unitName and unitName ~= "" then
+            -- Suche im Live-Snapshot
+            for tag, entry in pairs(snapshot) do
+                if entry.name == unitName then
+                    table.insert(stripTargets, { tag = tag, instance = entry.instance })
+                    break
+                end
+            end
+        end
+    end
+
+    -- ──────────────────────────────────────────────────────
+    --  PHASE 2: GEAR-STRIP + UNEQUIP-ALL
+    --  Erst Gear entfernen, DANN Units aus Slots entfernen.
+    --  Reihenfolge kritisch: kein UnEquipAll vor Gear-Strip.
+    -- ──────────────────────────────────────────────────────
+    onPhase(2, string.format("⚡ Phase 2/3: Strip %d Units + UnEquip...", #stripTargets))
+    print("[HazeHub/Teams] ═══ PHASE 2: GEAR-STRIP + UNEQUIP ═══")
+
+    -- 2a. Gear von aktuell ausgerüsteten Units entfernen
+    for _, target in ipairs(stripTargets) do
+        for _, gearSlot in ipairs(GEAR_SLOTS) do
+            local gearVal = ReadGearValue(target.instance, gearSlot)
+            if gearVal then
+                FireUnequipGear(target.instance, gearSlot)
+                task.wait(0.05)  -- Minimale Pause zwischen Gear-Remotes
+            end
+        end
+    end
+
+    if #stripTargets > 0 then
+        task.wait(0.3)  -- Server-Bestätigung abwarten
+    end
+
+    -- 2b. Alle Units aus Loadout-Slots entfernen
+    FireUnEquipAll()
+    task.wait(0.6)  -- Wichtig: Server braucht Zeit, Collection zu aktualisieren
+
+    -- ──────────────────────────────────────────────────────
+    --  PHASE 3: RE-EQUIP UNITS + GEAR-RESTORE
+    --  findUnitByTag liefert jetzt frische Instances (post-UnEquip).
+    --  Gear wird aus dem gespeicherten Team-Snapshot wiederhergestellt.
+    -- ──────────────────────────────────────────────────────
+    onPhase(3, string.format("🎯 Phase 3/3: Equip %d Units + Gear...", #equipQueue))
+    print("[HazeHub/Teams] ═══ PHASE 3: RE-EQUIP + GEAR-RESTORE ═══")
+
+    local successCount = 0
+    for _, entry in ipairs(equipQueue) do
+        -- 3a. Unit equippen (Tag-basiert, frische Instance)
+        local equipped = FireEquip(entry.tag, entry.name)
+        if equipped then
+            successCount = successCount + 1
+            print(string.format(
+                "[HazeHub/Teams]   ✅ Slot %d: '%s' (Tag: %s)",
+                entry.slotIdx, entry.name, entry.tag
+            ))
+            task.wait(0.25)
+
+            -- 3b. Gear wiederherstellen (aus gespeichertem Save)
+            local anyGear = false
+            for _, gearSlot in ipairs(GEAR_SLOTS) do
+                local gearVal = entry.gears and entry.gears[gearSlot]
+                if gearVal then
+                    FireEquipGear(entry.tag, gearSlot, gearVal)
+                    anyGear = true
+                    task.wait(0.08)
+                end
+            end
+            if anyGear then
+                task.wait(0.1)  -- Gear-Batch abwarten
+            end
+        else
+            warn(string.format(
+                "[HazeHub/Teams]   ❌ Slot %d: '%s' konnte nicht equipped werden.",
+                entry.slotIdx, entry.name
+            ))
+            task.wait(0.1)
+        end
+    end
+
+    -- 3c. AutoUpgrade-Konfiguration wiederherstellen
+    if team.autoUpgrade then
+        for i = 1, 6 do
+            local auVal = team.autoUpgrade[i]
+            if auVal ~= nil then
+                FireAutoUpgrade(i, auVal)
+                task.wait(0.12)
+            end
+        end
+    end
+
+    print(string.format(
+        "[HazeHub/Teams] ═══ FERTIG: %d/%d Units geladen (%s) ═══",
+        successCount, #equipQueue, team.name or "?"
+    ))
+
+    onDone(successCount, #equipQueue)
+end
+
+-- ════════════════════════════════════════════════════════════
+--  STATE + PERSISTENZ
+-- ════════════════════════════════════════════════════════════
+local TM_State = {
+    Teams  = {},
+    SelIdx = nil,
+}
+
 local function LoadTeamsFile()
     if not (isfile and isfile(TEAMS_FILE)) then return end
     local ok, data = pcall(function()
@@ -302,7 +499,6 @@ local function LoadTeamsFile()
     end
 end
 
--- ── Datei speichern ───────────────────────────────────────────
 local function SaveTeamsFile()
     if not writefile then return end
     pcall(function()
@@ -310,170 +506,10 @@ local function SaveTeamsFile()
     end)
 end
 
--- ── Hilfsfunktion: Gear-Table für Anzeige ─────────────────────
--- Gibt einen kompakten String zurück, z. B. "H✓ B— A✓ L— S✓"
-local function FormatGearPreview(gear)
-    if not gear then return "—" end
-    local slots = {
-        { key="HeadGear", short="H" },
-        { key="BodyGear",  short="B" },
-        { key="ArmsGear",  short="A" },
-        { key="LegsGear",  short="L" },
-        { key="Soul",      short="S" },
-    }
-    local parts = {}
-    local count = 0
-    for _, s in ipairs(slots) do
-        local v = gear[s.key]
-        if v and v ~= "" then
-            table.insert(parts, s.short .. "✓")
-            count = count + 1
-        else
-            table.insert(parts, s.short .. "—")
-        end
-    end
-    return table.concat(parts, " ") .. "  [" .. count .. "/5]"
-end
-
--- ── Backward-Compat: Slot-Eintrag normalisieren ───────────────
--- Alte Saves: slots[i] = "UnitName" (string)
--- Neue Saves: slots[i] = { name="...", tag="..." }
-local function NormalizeSlot(v)
-    if type(v) == "string" then
-        return { name = v, tag = "" }
-    elseif type(v) == "table" then
-        return v
-    end
-    return nil
-end
-
--- ══════════════════════════════════════════════════════════════
---  5-STUFEN LOAD-WORKFLOW
--- ══════════════════════════════════════════════════════════════
-local function LoadTeam(team, feedbackFn)
-    local function Status(txt, col)
-        print("[HazeHub/Teams] " .. txt)
-        if feedbackFn then pcall(feedbackFn, txt, col) end
-    end
-
-    -- ── SCHRITT 1: Full Equipment Strip ───────────────────────
-    -- Alle aktuell ausgerüsteten Einheiten identifizieren und
-    -- komplett von Equipment befreien BEVOR UnEquipAll gefeuert wird
-    Status("⏳ [1/5] Full Equipment Strip...", D.Yellow)
-
-    local currentSlots, _, _ = ScanCurrentLoadout()
-    for i = 1, 6 do
-        local slotData = currentSlots[i]
-        if slotData then
-            local unitName = type(slotData) == "table" and slotData.name or slotData
-            local u = FindUnitInCollection(unitName)
-            if u then
-                Status("  Strip Slot " .. i .. ": " .. u.name, D.TextMid)
-                StripAllGearFromUnit(u.instance)
-            end
-        end
-    end
-    task.wait(WAIT_STRIP_DONE)
-
-    -- ── SCHRITT 2: Unit Unequip (alle Slots leeren) ────────────
-    Status("⏳ [2/5] UnEquip alle Units...", D.Yellow)
-    FireUnEquipAll()
-    task.wait(WAIT_AFTER_UNIT)
-
-    -- ── SCHRITT 3 + 4: Pro Slot – Unit & Gear Swap ────────────
-    Status("⏳ [3/5] Unit & Gear Swap...", D.Yellow)
-
-    for i = 1, 6 do
-        local rawSlot = team.slots and team.slots[i]
-        if not rawSlot then
-            print("[HazeHub/Teams]   Slot " .. i .. " → leer, übersprungen.")
-        else
-            local slotData = NormalizeSlot(rawSlot)
-            -- Einheit per Tag finden (primär), Name als Fallback
-            local lookupKey = (slotData.tag and slotData.tag ~= "") and slotData.tag or slotData.name
-            local u = FindUnitInCollection(lookupKey)
-
-            if not u then
-                warn("[HazeHub/Teams]   Slot " .. i .. ": Unit '" .. tostring(lookupKey) .. "' nicht in Collection!")
-            else
-                Status("  [" .. i .. "/6] Equip: " .. u.name .. " [" .. u.tag .. "]", D.Cyan)
-
-                -- 3a) Unit in Slot equippen
-                local ok = FireEquip(u.instance)
-                if not ok then
-                    warn("[HazeHub/Teams]   Slot " .. i .. " Equip fehlgeschlagen!")
-                    task.wait(WAIT_EQUIP_DONE)
-                else
-                    task.wait(WAIT_EQUIP_DONE)
-
-                    -- 3b) Unit-Equipment entfernen (frischer Stand vor Equip)
-                    -- Frische Instanz aus Collection holen (nach Equip ggf. stale)
-                    local freshU = FindUnitInCollection(u.tag ~= "" and u.tag or u.name)
-                    local targetFolder = (freshU and freshU.instance) or u.instance
-                    StripAllGearFromUnit(targetFolder)
-                    task.wait(WAIT_AFTER_UNIT)
-
-                    -- 3c) Gespeichertes Equipment laden
-                    local gear = nil
-                    if team.equipment then
-                        -- Primär per Tag suchen
-                        if slotData.tag and slotData.tag ~= "" then
-                            gear = team.equipment[slotData.tag]
-                        end
-                        -- Fallback: per Name iterieren
-                        if not gear and slotData.name then
-                            for tag, g in pairs(team.equipment) do
-                                _ = tag -- suppress unused
-                                gear = g; break
-                            end
-                        end
-                    end
-
-                    if gear then
-                        Status("    Gear Equip für " .. u.name .. " → " .. FormatGearPreview(gear), D.Teal)
-
-                        -- Reihenfolge: HeadGear → BodyGear → ArmsGear → LegsGear → Soul
-                        for _, slotName in ipairs(GEAR_SLOTS) do
-                            local itemName = gear[slotName]
-                            if itemName and itemName ~= "" then
-                                FireGearEquip(targetFolder, itemName)
-                            end
-                        end
-                        -- Soul
-                        local soulName = gear.Soul
-                        if soulName and soulName ~= "" then
-                            FireSoulEquip(targetFolder, soulName)
-                        end
-                    else
-                        Status("    Keine gespeicherten Gears für " .. u.name, D.TextLow)
-                    end
-
-                    task.wait(0.2)
-                end
-            end
-        end
-    end
-
-    -- ── SCHRITT 5: AutoUpgrade aktivieren ─────────────────────
-    Status("⏳ [5/5] AutoUpgrade-Konfiguration...", D.Yellow)
-    if team.autoUpgrade then
-        for i = 1, 6 do
-            local v = team.autoUpgrade[i]
-            if v ~= nil then
-                FireAutoUpgrade(i, v)
-                task.wait(0.15)
-            end
-        end
-    end
-
-    Status("✅ Team '" .. (team.name or "?") .. "' vollständig geladen!", D.GreenBright)
-end
-
--- ══════════════════════════════════════════════════════════════
+-- ════════════════════════════════════════════════════════════
 --  GUI
--- ══════════════════════════════════════════════════════════════
+-- ════════════════════════════════════════════════════════════
 VList(TeamsPage, 8)
-
 MkLbl(TeamsPage, "⚔  Team Manager", 18, D.Cyan, true)
 MkLbl(TeamsPage, "Teams v" .. VERSION .. " | " .. LP.Name, 12, D.TextLow).Size = UDim2.new(1, 0, 0, 16)
 
@@ -498,28 +534,77 @@ local function SetTMStatus(txt, col)
     end)
 end
 
+-- ── Phase-Indicator (erscheint während LoadTeam) ─────────────
+local phaseCard = Card(TeamsPage, 38)
+Pad(phaseCard, 6, 10, 6, 10)
+phaseCard.BackgroundColor3 = Color3.fromRGB(14, 26, 14)
+phaseCard.BackgroundTransparency = 0.1
+Stroke(phaseCard, D.Green, 1, 0.35)
+phaseCard.Visible = false
+
+local phaseLbl = Instance.new("TextLabel", phaseCard)
+phaseLbl.Size                   = UDim2.new(1, 0, 0.5, 0)
+phaseLbl.BackgroundTransparency = 1
+phaseLbl.Text                   = ""
+phaseLbl.TextColor3             = D.Green
+phaseLbl.TextSize               = 12
+phaseLbl.Font                   = Enum.Font.GothamBold
+phaseLbl.TextXAlignment         = Enum.TextXAlignment.Left
+phaseLbl.RichText               = true
+phaseLbl.TextStrokeTransparency = 1
+
+local phaseBarBG = Instance.new("Frame", phaseCard)
+phaseBarBG.Size                   = UDim2.new(1, 0, 0, 4)
+phaseBarBG.Position               = UDim2.new(0, 0, 1, -4)
+phaseBarBG.BackgroundColor3       = D.CardHover
+phaseBarBG.BackgroundTransparency = 0.3
+phaseBarBG.BorderSizePixel        = 0
+Corner(phaseBarBG, 2)
+
+local phaseBarFill = Instance.new("Frame", phaseBarBG)
+phaseBarFill.Size             = UDim2.new(0, 0, 1, 0)
+phaseBarFill.BackgroundColor3 = D.Green
+phaseBarFill.BorderSizePixel  = 0
+Corner(phaseBarFill, 2)
+
+local function ShowPhase(phaseNum, text)
+    pcall(function()
+        phaseCard.Visible  = true
+        phaseLbl.Text      = text or ""
+        local progress = phaseNum / 3
+        Tw(phaseBarFill, { Size = UDim2.new(progress, 0, 1, 0) }, TM)
+    end)
+end
+
+local function HidePhase()
+    pcall(function()
+        Tw(phaseBarFill, { Size = UDim2.new(1, 0, 1, 0) }, TM)
+        task.wait(0.4)
+        phaseCard.Visible = false
+        phaseBarFill.Size = UDim2.new(0, 0, 1, 0)
+    end)
+end
+
 -- ── Sektion: Speichern ────────────────────────────────────────
 local saveCard = Card(TeamsPage)
 Pad(saveCard, 10, 12, 10, 12); VList(saveCard, 8)
-SecLbl(saveCard, "💾  TEAM SPEICHERN (mit Equipment)")
+SecLbl(saveCard, "💾  TEAM SPEICHERN")
 
--- Slot-Preview (6 Zeilen, 2-zeilig: Name + Gear-Summary)
 local slotPreviewFrame = Instance.new("Frame", saveCard)
 slotPreviewFrame.Size                   = UDim2.new(1, 0, 0, 0)
 slotPreviewFrame.AutomaticSize          = Enum.AutomaticSize.Y
 slotPreviewFrame.BackgroundTransparency = 1
 VList(slotPreviewFrame, 3)
 
-local slotPreviews = {}   -- { nameLbl, gearLbl }
+local slotPreviews = {}
 for i = 1, 6 do
     local row = Instance.new("Frame", slotPreviewFrame)
-    row.Size                   = UDim2.new(1, 0, 0, 42)
+    row.Size                   = UDim2.new(1, 0, 0, 24)
     row.BackgroundColor3       = D.CardHover
     row.BackgroundTransparency = 0.5
     row.BorderSizePixel        = 0
     Corner(row, 6); Stroke(row, D.Border, 1, 0.5)
 
-    -- Slot-Badge
     local badge = Instance.new("TextLabel", row)
     badge.Size                   = UDim2.new(0, 24, 1, 0)
     badge.BackgroundColor3       = D.TabActive
@@ -532,65 +617,45 @@ for i = 1, 6 do
     badge.BorderSizePixel        = 0
     Corner(badge, 6)
 
-    -- Name + Tag (Zeile 1)
-    local nameLbl = Instance.new("TextLabel", row)
-    nameLbl.Position       = UDim2.new(0, 30, 0, 3)
-    nameLbl.Size           = UDim2.new(1, -34, 0, 18)
-    nameLbl.BackgroundTransparency = 1
-    nameLbl.Text           = "—  (leer)"
-    nameLbl.TextColor3     = D.TextLow
-    nameLbl.TextSize       = 11
-    nameLbl.Font           = Enum.Font.GothamBold
-    nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-    nameLbl.TextTruncate   = Enum.TextTruncate.AtEnd
-
-    -- Gear-Summary (Zeile 2)
-    local gearLbl = Instance.new("TextLabel", row)
-    gearLbl.Position       = UDim2.new(0, 30, 0, 22)
-    gearLbl.Size           = UDim2.new(1, -34, 0, 16)
-    gearLbl.BackgroundTransparency = 1
-    gearLbl.Text           = ""
-    gearLbl.TextColor3     = D.TextLow
-    gearLbl.TextSize       = 10
-    gearLbl.Font           = Enum.Font.GothamMedium
-    gearLbl.TextXAlignment = Enum.TextXAlignment.Left
-    gearLbl.TextTruncate   = Enum.TextTruncate.AtEnd
-
-    slotPreviews[i] = { nameLbl = nameLbl, gearLbl = gearLbl }
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Position       = UDim2.new(0, 30, 0, 0)
+    lbl.Size           = UDim2.new(1, -34, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text           = "—  (leer)"
+    lbl.TextColor3     = D.TextLow
+    lbl.TextSize       = 11
+    lbl.Font           = Enum.Font.GothamMedium
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextTruncate   = Enum.TextTruncate.AtEnd
+    slotPreviews[i] = lbl
 end
 
-local scanSaveBtn = NeonBtn(saveCard, "🔍  Loadout + Equipment scannen", D.CyanDim, 30)
+local scanSaveBtn = NeonBtn(saveCard, "🔍  Loadout + Gear scannen", D.CyanDim, 30)
 
--- Scannt Loadout + Equipment und befüllt die Slot-Vorschau
-local _lastScannedSlots     = {}
-local _lastScannedAutoUp    = {}
-local _lastScannedEquipment = {}
+-- _lastScanData: hält den letzten kompletten Scan (slots + unitSnapshots)
+local _lastScanData = nil
 
 local function RefreshSlotPreview()
-    local slots, autoUp, equipment = ScanCurrentLoadout()
-    _lastScannedSlots     = slots
-    _lastScannedAutoUp    = autoUp
-    _lastScannedEquipment = equipment
+    local slots, autoUp, unitSnaps = ScanCurrentLoadoutWithGear()
+    _lastScanData = { slots = slots, autoUpgrade = autoUp, unitSnapshots = unitSnaps }
 
     for i = 1, 6 do
-        local p = slotPreviews[i]
-        local sd = slots[i]
-        if sd then
-            local auTxt = autoUp[i] ~= nil and (" [AU:" .. tostring(autoUp[i]) .. "]") or ""
-            local tagShort = (sd.tag ~= "" and ("#" .. sd.tag:sub(1,8))) or "(?)"
-            p.nameLbl.Text       = sd.name .. "  " .. tagShort .. auTxt
-            p.nameLbl.TextColor3 = D.TextHi
-
-            local gear = sd.tag ~= "" and equipment[sd.tag] or nil
-            p.gearLbl.Text       = FormatGearPreview(gear)
-            p.gearLbl.TextColor3 = D.Teal
+        local lbl  = slotPreviews[i]
+        local snap = unitSnaps[i]
+        if snap then
+            local gearCount = 0
+            for _, v in pairs(snap.gears or {}) do if v then gearCount = gearCount + 1 end end
+            local tagStr = snap.tag ~= "" and ("  [Tag: " .. snap.tag .. "]") or "  [kein Tag]"
+            local auTxt  = autoUp[i] ~= nil and ("  [AU:" .. tostring(autoUp[i]) .. "]") or ""
+            local gearTxt = gearCount > 0 and ("  🗡" .. gearCount .. "G") or ""
+            lbl.Text       = snap.name .. tagStr .. gearTxt .. auTxt
+            lbl.TextColor3 = snap.tag ~= "" and D.TextHi or D.Yellow
         else
-            p.nameLbl.Text       = "—  (leer)"
-            p.nameLbl.TextColor3 = D.TextLow
-            p.gearLbl.Text       = ""
+            lbl.Text       = "—  (leer)"
+            lbl.TextColor3 = D.TextLow
         end
     end
-    SetTMStatus("✅ Loadout + Equipment gescannt!", D.Green)
+    SetTMStatus("✅ Loadout + Gear gescannt!", D.Green)
 end
 
 scanSaveBtn.MouseButton1Click:Connect(function()
@@ -599,13 +664,12 @@ scanSaveBtn.MouseButton1Click:Connect(function()
     task.spawn(function()
         pcall(RefreshSlotPreview)
         pcall(function()
-            scanSaveBtn.Text       = "🔍  Loadout + Equipment scannen"
+            scanSaveBtn.Text       = "🔍  Loadout + Gear scannen"
             scanSaveBtn.TextColor3 = D.CyanDim
         end)
     end)
 end)
 
--- Name-Eingabe + Speichern-Button
 local nameRow = Instance.new("Frame", saveCard)
 nameRow.Size                   = UDim2.new(1, 0, 0, 32)
 nameRow.BackgroundTransparency = 1
@@ -624,7 +688,7 @@ confirmSaveBtn.Font                 = Enum.Font.GothamBold
 confirmSaveBtn.AutoButtonColor      = false
 confirmSaveBtn.BorderSizePixel      = 0
 Corner(confirmSaveBtn, 7); Stroke(confirmSaveBtn, D.Green, 1, 0.2)
-confirmSaveBtn.MouseEnter:Connect(function() Tw(confirmSaveBtn, { BackgroundColor3 = Color3.fromRGB(0,160,80) }) end)
+confirmSaveBtn.MouseEnter:Connect(function() Tw(confirmSaveBtn, { BackgroundColor3 = Color3.fromRGB(0, 160, 80) }) end)
 confirmSaveBtn.MouseLeave:Connect(function() Tw(confirmSaveBtn, { BackgroundColor3 = D.Green }) end)
 
 local saveFeedback = MkLbl(saveCard, "", 10, D.TextLow)
@@ -638,31 +702,21 @@ confirmSaveBtn.MouseButton1Click:Connect(function()
         return
     end
 
-    -- Neuester Scan verwenden (oder frisch scannen wenn leer)
-    local slots, autoUp, equipment = _lastScannedSlots, _lastScannedAutoUp, _lastScannedEquipment
-    local hasData = false
-    for i = 1, 6 do if slots[i] then hasData = true; break end end
-    if not hasData then
+    -- Immer frisch scannen beim Speichern
+    local slots, autoUp, unitSnaps = ScanCurrentLoadoutWithGear()
+    local unitCount = 0
+    for i = 1, 6 do if slots[i] then unitCount = unitCount + 1 end end
+
+    if unitCount == 0 then
         saveFeedback.Text       = "⚠ Kein Loadout gefunden. Bitte erst scannen."
         saveFeedback.TextColor3 = D.Orange
         return
     end
 
-    -- Equipment-Statistiken
-    local unitCount  = 0
-    local gearTotal  = 0
-    for i = 1, 6 do
-        if slots[i] then
-            unitCount = unitCount + 1
-            local tag  = slots[i].tag
-            local gear = tag ~= "" and equipment[tag] or nil
-            if gear then
-                for _, sn in ipairs(GEAR_SLOTS) do
-                    if gear[sn] and gear[sn] ~= "" then gearTotal = gearTotal + 1 end
-                end
-                if gear.Soul and gear.Soul ~= "" then gearTotal = gearTotal + 1 end
-            end
-        end
+    -- unitSnapshots mit String-Keys speichern (JSON-kompatibel)
+    local snapsForJson = {}
+    for i, snap in pairs(unitSnaps) do
+        snapsForJson[tostring(i)] = snap
     end
 
     local existIdx = nil
@@ -671,28 +725,28 @@ confirmSaveBtn.MouseButton1Click:Connect(function()
     end
 
     local entry = {
-        name        = teamName,
-        slots       = slots,        -- { [i] = {name, tag} }
-        autoUpgrade = autoUp,
-        equipment   = equipment,    -- { [tag] = {HeadGear, BodyGear, ...} }
-        savedAt     = os.time(),
-        unitCount   = unitCount,
-        gearCount   = gearTotal,
+        name          = teamName,
+        slots         = slots,
+        autoUpgrade   = autoUp,
+        unitSnapshots = snapsForJson,  -- ★ NEU: Tag + Gear pro Slot
+        savedAt       = os.time(),
+        unitCount     = unitCount,
+        version       = VERSION,
     }
 
     if existIdx then
         TM_State.Teams[existIdx] = entry
-        saveFeedback.Text = string.format(
-            "✅ '%s' überschrieben! (%d/6 Units · %d Gear-Slots)", teamName, unitCount, gearTotal)
+        saveFeedback.Text        = "✅ Team '" .. teamName .. "' überschrieben! (" .. unitCount .. "/6)"
     else
         table.insert(TM_State.Teams, entry)
-        saveFeedback.Text = string.format(
-            "✅ '%s' gespeichert! (%d/6 Units · %d Gear-Slots)", teamName, unitCount, gearTotal)
+        saveFeedback.Text        = "✅ Team '" .. teamName .. "' gespeichert! (" .. unitCount .. "/6)"
     end
     saveFeedback.TextColor3 = D.GreenBright
     nameBox.Text = ""
     SaveTeamsFile()
-    task.delay(6, function() pcall(function() if saveFeedback then saveFeedback.Text = "" end end) end)
+    task.delay(5, function()
+        pcall(function() if saveFeedback then saveFeedback.Text = "" end end)
+    end)
     pcall(_G._RebuildTeamsList)
 end)
 
@@ -718,21 +772,19 @@ teamListEmpty.Size = UDim2.new(1, 0, 0, 28)
 
 -- ── Detail-Karte ──────────────────────────────────────────────
 local detailCard = Card(TeamsPage)
-Pad(detailCard, 10, 12, 10, 12); VList(detailCard, 5)
+Pad(detailCard, 10, 12, 10, 12); VList(detailCard, 6)
 detailCard.Visible = false
-SecLbl(detailCard, "🔍  TEAM-DETAILS (Equipment)")
+SecLbl(detailCard, "🔍  TEAM-DETAILS")
 
--- 6 Slot-Rows, je 2-zeilig (Name/Tag + Gear-Summary)
-local detailSlots = {}   -- { nameLbl, gearLbl }
+local detailSlotLabels = {}
 for i = 1, 6 do
     local dRow = Instance.new("Frame", detailCard)
-    dRow.Size                   = UDim2.new(1, 0, 0, 46)
+    dRow.Size                   = UDim2.new(1, 0, 0, 24)
     dRow.BackgroundColor3       = D.CardHover
     dRow.BackgroundTransparency = 0.4
     dRow.BorderSizePixel        = 0
     Corner(dRow, 6); Stroke(dRow, D.Border, 1, 0.5)
 
-    -- Slot-Badge
     local db = Instance.new("TextLabel", dRow)
     db.Size                   = UDim2.new(0, 24, 1, 0)
     db.BackgroundColor3       = D.TabActive
@@ -745,35 +797,22 @@ for i = 1, 6 do
     db.BorderSizePixel        = 0
     Corner(db, 6)
 
-    -- Zeile 1: Name + Tag
     local dl = Instance.new("TextLabel", dRow)
-    dl.Position               = UDim2.new(0, 30, 0, 4)
-    dl.Size                   = UDim2.new(1, -34, 0, 18)
+    dl.Position               = UDim2.new(0, 30, 0, 0)
+    dl.Size                   = UDim2.new(1, -34, 1, 0)
     dl.BackgroundTransparency = 1
     dl.Text                   = "—"
     dl.TextColor3             = D.TextLow
     dl.TextSize               = 11
-    dl.Font                   = Enum.Font.GothamBold
+    dl.Font                   = Enum.Font.GothamMedium
     dl.TextXAlignment         = Enum.TextXAlignment.Left
     dl.TextTruncate           = Enum.TextTruncate.AtEnd
-
-    -- Zeile 2: Gear-Preview
-    local gl = Instance.new("TextLabel", dRow)
-    gl.Position               = UDim2.new(0, 30, 0, 24)
-    gl.Size                   = UDim2.new(1, -34, 0, 16)
-    gl.BackgroundTransparency = 1
-    gl.Text                   = ""
-    gl.TextColor3             = D.Teal
-    gl.TextSize               = 10
-    gl.Font                   = Enum.Font.GothamMedium
-    gl.TextXAlignment         = Enum.TextXAlignment.Left
-    gl.TextTruncate           = Enum.TextTruncate.AtEnd
-
-    detailSlots[i] = { nameLbl = dl, gearLbl = gl }
+    detailSlotLabels[i] = dl
 end
 
--- Load-Button + Feedback
-local loadTeamBtn  = NeonBtn(detailCard, "⚡  Team laden (5-Stufen-Equip)", D.Green, 36)
+VList(detailCard, 3)
+
+local loadTeamBtn  = NeonBtn(detailCard, "⚡  Team laden (Snapshot-Modus)", D.Green, 34)
 local loadFeedback = MkLbl(detailCard, "", 10, D.TextLow)
 loadFeedback.Size  = UDim2.new(1, 0, 0, 16)
 
@@ -788,16 +827,25 @@ local function RebuildTeamsList()
         local isSelected = (TM_State.SelIdx == idx)
 
         local row = Instance.new("Frame", teamListFrame)
-        row.Size                   = UDim2.new(1, 0, 0, 52)
+        row.Size                   = UDim2.new(1, 0, 0, 48)
         row.BackgroundColor3       = isSelected and D.TabActive or D.CardHover
         row.BackgroundTransparency = 0.3
         row.BorderSizePixel        = 0
         Corner(row, 8)
         Stroke(row, isSelected and D.Cyan or D.Border, 1.5, isSelected and 0 or 0.5)
 
+        -- Version-Badge (zeigt ob Team Tag-Daten enthält)
+        local hasSnapshot = team.unitSnapshots ~= nil
+        local verBadge = Instance.new("Frame", row)
+        verBadge.Size                   = UDim2.new(0, 6, 1, 0)
+        verBadge.BackgroundColor3       = hasSnapshot and D.Green or D.Orange
+        verBadge.BackgroundTransparency = 0.3
+        verBadge.BorderSizePixel        = 0
+        Corner(verBadge, 3)
+
         local nameLbl = Instance.new("TextLabel", row)
-        nameLbl.Position               = UDim2.new(0, 10, 0, 4)
-        nameLbl.Size                   = UDim2.new(1, -90, 0, 20)
+        nameLbl.Position               = UDim2.new(0, 14, 0, 4)
+        nameLbl.Size                   = UDim2.new(1, -100, 0, 20)
         nameLbl.BackgroundTransparency = 1
         nameLbl.Text                   = "⚔  " .. team.name
         nameLbl.TextColor3             = isSelected and D.Cyan or D.TextHi
@@ -806,20 +854,21 @@ local function RebuildTeamsList()
         nameLbl.TextXAlignment         = Enum.TextXAlignment.Left
         nameLbl.TextTruncate           = Enum.TextTruncate.AtEnd
 
-        local unitCount = team.unitCount or 0
-        local gearInfo  = team.gearCount and (" · " .. team.gearCount .. " Gear-Slots") or ""
+        local unitCount = 0
+        for i = 1, 6 do if team.slots and team.slots[i] then unitCount = unitCount + 1 end end
+        local snapStr = hasSnapshot and " · 🗡Gear" or " · ⚠ kein Gear-Save"
 
         local subLbl = Instance.new("TextLabel", row)
-        subLbl.Position               = UDim2.new(0, 10, 0, 28)
-        subLbl.Size                   = UDim2.new(1, -90, 0, 14)
+        subLbl.Position               = UDim2.new(0, 14, 0, 26)
+        subLbl.Size                   = UDim2.new(1, -100, 0, 14)
         subLbl.BackgroundTransparency = 1
-        subLbl.Text                   = unitCount .. "/6 Units" .. gearInfo .. " · " .. os.date("%d.%m.%Y", team.savedAt or 0)
-        subLbl.TextColor3             = D.TextMid
+        subLbl.Text                   = unitCount .. "/6 Einheiten" .. snapStr ..
+                                        " · " .. os.date("%d.%m.%Y", team.savedAt or 0)
+        subLbl.TextColor3             = hasSnapshot and D.TextMid or D.Orange
         subLbl.TextSize               = 10
         subLbl.Font                   = Enum.Font.GothamMedium
         subLbl.TextXAlignment         = Enum.TextXAlignment.Left
 
-        -- Löschen-Button
         local delBtn = Instance.new("TextButton", row)
         delBtn.Size             = UDim2.new(0, 32, 0, 32)
         delBtn.Position         = UDim2.new(1, -38, 0.5, -16)
@@ -831,10 +880,9 @@ local function RebuildTeamsList()
         delBtn.AutoButtonColor  = false
         delBtn.BorderSizePixel  = 0
         Corner(delBtn, 7); Stroke(delBtn, D.Red, 1, 0.4)
-        delBtn.MouseEnter:Connect(function() Tw(delBtn, { BackgroundColor3 = Color3.fromRGB(80,20,20) }) end)
-        delBtn.MouseLeave:Connect(function() Tw(delBtn, { BackgroundColor3 = Color3.fromRGB(50,12,12) }) end)
+        delBtn.MouseEnter:Connect(function() Tw(delBtn, { BackgroundColor3 = D.RedDark or Color3.fromRGB(80, 20, 20) }) end)
+        delBtn.MouseLeave:Connect(function() Tw(delBtn, { BackgroundColor3 = Color3.fromRGB(50, 12, 12) }) end)
 
-        -- Auswahl-Overlay
         local selBtn = Instance.new("TextButton", row)
         selBtn.Size                   = UDim2.new(1, -40, 1, 0)
         selBtn.BackgroundTransparency = 1
@@ -848,29 +896,23 @@ local function RebuildTeamsList()
             if t then
                 detailCard.Visible = true
                 for i = 1, 6 do
-                    local dp   = detailSlots[i]
-                    local rawS = t.slots and t.slots[i]
-                    local sd   = rawS and NormalizeSlot(rawS) or nil
-
-                    if sd then
-                        local auVal    = t.autoUpgrade and t.autoUpgrade[i]
-                        local auTxt    = auVal ~= nil and (" [AU:" .. tostring(auVal) .. "]") or ""
-                        local tagShort = (sd.tag ~= "" and ("#" .. sd.tag:sub(1,8))) or "(?Tag?)"
-
-                        dp.nameLbl.Text       = sd.name .. "  " .. tagShort .. auTxt
-                        dp.nameLbl.TextColor3 = D.TextHi
-
-                        -- Gear-Preview aus gespeichertem Equipment
-                        local gear = nil
-                        if t.equipment and sd.tag ~= "" then
-                            gear = t.equipment[sd.tag]
+                    local lbl  = detailSlotLabels[i]
+                    local snap = t.unitSnapshots and t.unitSnapshots[tostring(i)]
+                    local unit = t.slots and t.slots[i]
+                    if unit then
+                        local tagStr  = snap and snap.tag ~= "" and ("  [" .. snap.tag .. "]") or ""
+                        local auVal   = t.autoUpgrade and t.autoUpgrade[i]
+                        local auStr   = auVal ~= nil and ("  [AU:" .. tostring(auVal) .. "]") or ""
+                        local gearCnt = 0
+                        if snap and snap.gears then
+                            for _, v in pairs(snap.gears) do if v then gearCnt = gearCnt + 1 end end
                         end
-                        dp.gearLbl.Text       = FormatGearPreview(gear)
-                        dp.gearLbl.TextColor3 = (gear ~= nil) and D.Teal or D.TextLow
+                        local gearStr = gearCnt > 0 and ("  🗡" .. gearCnt) or ""
+                        lbl.Text       = unit .. tagStr .. gearStr .. auStr
+                        lbl.TextColor3 = snap and snap.tag ~= "" and D.TextHi or D.Yellow
                     else
-                        dp.nameLbl.Text       = "—  (leer)"
-                        dp.nameLbl.TextColor3 = D.TextLow
-                        dp.gearLbl.Text       = ""
+                        lbl.Text       = "—  (leer)"
+                        lbl.TextColor3 = D.TextLow
                     end
                 end
             end
@@ -891,7 +933,7 @@ local function RebuildTeamsList()
 end
 _G._RebuildTeamsList = RebuildTeamsList
 
--- ── Team laden (Load-Button) ──────────────────────────────────
+-- ── LOAD-BUTTON (Dreiphasen-Workflow) ────────────────────────
 loadTeamBtn.MouseButton1Click:Connect(function()
     local idx = TM_State.SelIdx
     if not idx or not TM_State.Teams[idx] then
@@ -901,37 +943,57 @@ loadTeamBtn.MouseButton1Click:Connect(function()
     end
     local team = TM_State.Teams[idx]
 
-    -- Sofortiges UI-Lock (verhindert Doppelklick)
+    -- UI sperren während LoadTeam läuft
     loadTeamBtn.Text       = "⏳ Lade..."
     loadTeamBtn.TextColor3 = D.Yellow
     loadTeamBtn.Active     = false
-
+    loadFeedback.Text      = ""
     SetTMStatus("⏳ Lade Team '" .. team.name .. "'...", D.Yellow)
-    loadFeedback.Text       = "⏳ Starte 5-Stufen-Equip..."
-    loadFeedback.TextColor3 = D.Yellow
 
     task.spawn(function()
-        -- Feedback-Funktion: aktualisiert das UI live
-        local function feedback(txt, col)
-            pcall(function()
-                loadFeedback.Text       = txt
-                loadFeedback.TextColor3 = col or D.TextMid
-            end)
-        end
+        LoadTeam(
+            team,
 
-        LoadTeam(team, feedback)
+            -- onPhase: UI-Update pro Phase
+            function(phaseNum, text)
+                pcall(function()
+                    ShowPhase(phaseNum, text)
+                    loadFeedback.Text       = text
+                    loadFeedback.TextColor3 = D.Yellow
+                end)
+            end,
 
-        -- UI entsperren
-        pcall(function()
-            loadTeamBtn.Text       = "⚡  Team laden (5-Stufen-Equip)"
-            loadTeamBtn.TextColor3 = Color3.new(1,1,1)
-            loadTeamBtn.Active     = true
-            SetTMStatus("✅ Team '" .. team.name .. "' aktiv.", D.Green)
-        end)
+            -- onDone
+            function(success, total)
+                pcall(function()
+                    HidePhase()
+                    local msg = string.format("✅ Team '%s': %d/%d Units geladen!",
+                        team.name, success, total)
+                    loadFeedback.Text       = msg
+                    loadFeedback.TextColor3 = D.GreenBright
+                    loadTeamBtn.Text        = "⚡  Team laden (Snapshot-Modus)"
+                    loadTeamBtn.TextColor3  = Color3.new(1, 1, 1)
+                    loadTeamBtn.Active      = true
+                    SetTMStatus("✅ Team '" .. team.name .. "' aktiv.", D.Green)
+                    task.delay(6, function()
+                        pcall(function() if loadFeedback then loadFeedback.Text = "" end end)
+                    end)
+                end)
+            end,
 
-        task.delay(6, function()
-            pcall(function() loadFeedback.Text = "" end)
-        end)
+            -- onError
+            function(errMsg)
+                pcall(function()
+                    HidePhase()
+                    loadFeedback.Text       = "❌ " .. tostring(errMsg)
+                    loadFeedback.TextColor3 = D.Red
+                    loadTeamBtn.Text        = "⚡  Team laden (Snapshot-Modus)"
+                    loadTeamBtn.TextColor3  = Color3.new(1, 1, 1)
+                    loadTeamBtn.Active      = true
+                    SetTMStatus("❌ Fehler beim Laden.", D.Red)
+                end)
+            end
+        )
     end)
 end)
 
@@ -945,10 +1007,7 @@ print(string.format("[HazeHub] teams.lua v%s geladen | %s | Teams: %d",
     VERSION, LP.Name, #TM_State.Teams))
 
 pcall(function()
-    if _G._TeamsWaitLbl then
-        _G._TeamsWaitLbl:Destroy()
-        _G._TeamsWaitLbl = nil
-    end
+    if _G._TeamsWaitLbl then _G._TeamsWaitLbl:Destroy(); _G._TeamsWaitLbl = nil end
 end)
 pcall(function()
     if _G.HazeShared and _G.HazeShared.SetModuleLoaded then
