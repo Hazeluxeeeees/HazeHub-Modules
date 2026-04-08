@@ -47,14 +47,18 @@ local FOLDER     = "HazeHUB"
 local TEAMS_FILE = FOLDER .. "/" .. Player.Name .. "_teams.json"
 if makefolder then pcall(function() makefolder(FOLDER) end) end
 
--- Gear-Felder die pro Unit gesichert & wiederhergestellt werden
+-- ════════════════════════════════════════════════════════════
+--  GEAR-SLOT DEFINITIONEN
+--  key         = Feldname im Collection-Ordner (.Value = Item-Name)
+--  remoteType  = "Gears" oder "Soul" (unterschiedliche Remotes)
+--  unequipKey  = Was als GearName/SoulName beim Unequip geschickt wird
+-- ════════════════════════════════════════════════════════════
 local GEAR_SLOTS = {
-    "HeadGear",
-    "BodyGear",
-    "LegsGear",
-    "WeaponGear",
-    "AccessoryGear",
-    "ExtraGear",
+    { key = "HeadGear", remoteType = "Gears", unequipKey = "HeadGear" },
+    { key = "BodyGear",  remoteType = "Gears", unequipKey = "BodyGear"  },
+    { key = "LegsGear",  remoteType = "Gears", unequipKey = "LegsGear"  },
+    { key = "ArmsGear",  remoteType = "Gears", unequipKey = "ArmsGear"  },
+    { key = "Soul",      remoteType = "Soul",  unequipKey = "Soul"       },
 }
 
 -- ════════════════════════════════════════════════════════════
@@ -76,10 +80,10 @@ local function getUnitByTag(targetTag)
     return nil
 end
 
--- Liest einen Gear-Value aus einem Unit-Folder
+-- Liest den Item-Namen aus dem Collection-Ordner (z. B. unitFolder.HeadGear.Value)
 -- Gibt nil zurück wenn leer / nicht vorhanden
-local function readGearValue(unitFolder, gearSlotName)
-    local obj = unitFolder:FindFirstChild(gearSlotName)
+local function readGearValue(unitFolder, gearKey)
+    local obj = unitFolder:FindFirstChild(gearKey)
     if not obj then return nil end
     local v = tostring(obj.Value)
     return (v ~= "" and v ~= "nil" and v ~= "0") and v or nil
@@ -131,25 +135,96 @@ local function fireEquip(tag)
     return true
 end
 
--- UnequipGear: entfernt ein Gear-Slot von einer Unit-Instance
-local function fireUnequipGear(unitInstance, gearSlotName)
-    if not unitInstance or not gearSlotName then return end
-    local r = getRemote("Remote","Server","Units","UnequipGear")
-    if not r then return end
-    pcall(function() r:FireServer(unitInstance, gearSlotName) end)
+-- ════════════════════════════════════════════════════════════
+--  GEAR / SOUL — UNEQUIP
+--
+--  Gears-Remote:
+--    FireServer("Unequip", { UnitFolder = folder, GearName = "HeadGear" })
+--  Soul-Remote:
+--    FireServer("Unequip", { UnitFolder = folder, SoulName = "Soul" })
+-- ════════════════════════════════════════════════════════════
+local function fireUnequipGear(unitFolder, slotDef)
+    -- slotDef = Eintrag aus GEAR_SLOTS: { key, remoteType, unequipKey }
+    if not unitFolder or not slotDef then return end
+
+    if slotDef.remoteType == "Soul" then
+        local r = getRemote("Remote","Server","Units","Soul")
+        if not r then return end
+        pcall(function()
+            r:FireServer(table.unpack({
+                [1] = "Unequip",
+                [2] = {
+                    ["UnitFolder"] = unitFolder,
+                    ["SoulName"]   = "Soul",   -- fester Wert beim Unequip
+                },
+            }))
+        end)
+        print("[HazeHub/Teams] Soul Unequip ✓  (" .. unitFolder.Name .. ")")
+    else
+        -- Gears-Remote (HeadGear / BodyGear / LegsGear / ArmsGear)
+        local r = getRemote("Remote","Server","Units","Gears")
+        if not r then return end
+        pcall(function()
+            r:FireServer(table.unpack({
+                [1] = "Unequip",
+                [2] = {
+                    ["UnitFolder"] = unitFolder,
+                    ["GearName"]   = slotDef.unequipKey,  -- z. B. "HeadGear"
+                },
+            }))
+        end)
+        print("[HazeHub/Teams] Gear Unequip ✓  " .. slotDef.unequipKey
+            .. "  (" .. unitFolder.Name .. ")")
+    end
 end
 
--- EquipGear: findet Unit per Tag, stattet Gear-Slot aus
-local function fireEquipGear(tag, gearSlotName, gearValue)
-    if not gearValue then return end
-    local unit = getUnitByTag(tag)
-    if not unit then
+-- ════════════════════════════════════════════════════════════
+--  GEAR / SOUL — EQUIP
+--
+--  Gears-Remote:
+--    FireServer("Equip", { UnitFolder = folder, GearName = "Crown of Eternity" })
+--  Soul-Remote:
+--    FireServer("Equip", { UnitFolder = folder, SoulName = "The Soul Of The Riches [I]" })
+-- ════════════════════════════════════════════════════════════
+local function fireEquipGear(tag, slotDef, itemName)
+    -- itemName = gespeicherter Item-/Seelen-Name aus dem Save
+    if not itemName or itemName == "" then return end
+    local unitFolder = getUnitByTag(tag)
+    if not unitFolder then
         warn("[HazeHub/Teams] fireEquipGear: kein Unit für Tag='" .. tostring(tag) .. "'")
         return
     end
-    local r = getRemote("Remote","Server","Units","EquipGear")
-    if not r then return end
-    pcall(function() r:FireServer(unit, gearSlotName, gearValue) end)
+
+    if slotDef.remoteType == "Soul" then
+        local r = getRemote("Remote","Server","Units","Soul")
+        if not r then return end
+        pcall(function()
+            r:FireServer(table.unpack({
+                [1] = "Equip",
+                [2] = {
+                    ["UnitFolder"] = unitFolder,
+                    ["SoulName"]   = itemName,   -- echter Seelen-Name
+                },
+            }))
+        end)
+        print("[HazeHub/Teams] Soul Equip ✓  '" .. itemName
+            .. "'  (" .. unitFolder.Name .. ")")
+    else
+        -- Gears-Remote
+        local r = getRemote("Remote","Server","Units","Gears")
+        if not r then return end
+        pcall(function()
+            r:FireServer(table.unpack({
+                [1] = "Equip",
+                [2] = {
+                    ["UnitFolder"] = unitFolder,
+                    ["GearName"]   = itemName,   -- echter Item-Name
+                },
+            }))
+        end)
+        print("[HazeHub/Teams] Gear Equip ✓  '" .. itemName
+            .. "'  [" .. slotDef.key .. "]  (" .. unitFolder.Name .. ")")
+    end
 end
 
 local function fireAutoUpgrade(slot, value)
@@ -171,7 +246,7 @@ local function buildSnapshot(tagList)
             if unitFolder then
                 local gears = {}
                 for _, slot in ipairs(GEAR_SLOTS) do
-                    gears[slot] = readGearValue(unitFolder, slot)
+                    gears[slot.key] = readGearValue(unitFolder, slot.key)
                 end
                 snap[tag] = {
                     name     = unitFolder.Name,
@@ -225,7 +300,7 @@ local function scanLoadout()
                         -- Gear-Values aus Collection-Ordner lesen
                         local unitGears = {}
                         for _, slot in ipairs(GEAR_SLOTS) do
-                            unitGears[slot] = readGearValue(unitFolder, slot)
+                            unitGears[slot.key] = readGearValue(unitFolder, slot.key)
                         end
                         gears[i] = unitGears
                     else
@@ -319,9 +394,9 @@ local function loadTeam(team, onPhase, onDone, onError)
     print(string.format("[HazeHub/Teams] ══ SCHRITT 2: CLEAN (%d aktuelle Units) ══", stripCount))
 
     for _, entry in pairs(currentSnap) do
-        for _, gearSlot in ipairs(GEAR_SLOTS) do
-            if entry.gears[gearSlot] then
-                fireUnequipGear(entry.instance, gearSlot)
+        for _, slotDef in ipairs(GEAR_SLOTS) do
+            if entry.gears[slotDef.key] then
+                fireUnequipGear(entry.instance, slotDef)
                 task.wait(0.04)
             end
         end
@@ -342,10 +417,10 @@ local function loadTeam(team, onPhase, onDone, onError)
             successCount = successCount + 1
             -- Schritt 4: 0.1s warten, dann Gear wiederherstellen
             task.wait(0.1)
-            for _, gearSlot in ipairs(GEAR_SLOTS) do
-                local gearVal = entry.savedGears[gearSlot]
+            for _, slotDef in ipairs(GEAR_SLOTS) do
+                local gearVal = entry.savedGears[slotDef.key]
                 if gearVal then
-                    fireEquipGear(entry.tag, gearSlot, gearVal)
+                    fireEquipGear(entry.tag, slotDef, gearVal)
                     task.wait(0.06)
                 end
             end
