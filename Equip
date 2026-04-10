@@ -44,9 +44,24 @@ local EQUIP_FILE = FOLDER .. "/" .. Player.Name .. "_Equip.json"
 
 if makefolder then pcall(function() makefolder(FOLDER) end) end
 
--- In-Memory-Tabelle — wird beim Start aus Datei gefüllt
+-- In-Memory-Tabelle — SOFORT beim Modul-Start aus Datei laden
 -- EquipSets[unitTag][setName] = { HeadGear=..., BodyGear=..., ..., UnitName=..., DisplayName=... }
 local EquipSets = {}
+
+-- ★ Datei direkt laden (vor GUI-Aufbau), damit Sets beim ersten Öffnen sofort da sind
+do
+    if makefolder then pcall(function() makefolder(FOLDER) end) end
+    if isfile and isfile(EQUIP_FILE) then
+        local ok, data = pcall(function()
+            return game:GetService("HttpService"):JSONDecode(readfile(EQUIP_FILE))
+        end)
+        if ok and type(data) == "table" then
+            EquipSets = data
+            local n = 0; for _ in pairs(EquipSets) do n = n + 1 end
+            print(string.format("[HazeHub/Equip] Früh-Load: %d Einheiten  (Datei: %s)", n, EQUIP_FILE))
+        end
+    end
+end
 
 local function saveFile()
     if not writefile then
@@ -261,6 +276,11 @@ SecLbl(unitSelectCard, "👤  EINHEIT WÄHLEN")
 
 local scanBtn = NeonBtn(unitSelectCard, "🔍  Einheiten scannen", D.CyanDim, 30)
 
+-- ── Suchfeld (Einheiten) ─────────────────────────────────────
+local unitSearchOuter, unitSearchBox = MkInput(unitSelectCard, "🔍  Einheit suchen...")
+unitSearchOuter.Size = UDim2.new(1,0,0,30)
+unitSearchBox.ClearTextOnFocus = false
+
 local unitListFrame = Instance.new("ScrollingFrame", unitSelectCard)
 unitListFrame.Size=UDim2.new(1,0,0,165); unitListFrame.CanvasSize=UDim2.new(0,0,0,0)
 unitListFrame.AutomaticCanvasSize=Enum.AutomaticSize.Y; unitListFrame.ScrollBarThickness=3
@@ -367,7 +387,11 @@ local saveFeedback = MkLbl(saveCard,"",10,D.TextLow); saveFeedback.Size=UDim2.ne
 local setsCard = Card(EquipPage); Pad(setsCard,10,12,10,12); VList(setsCard,6)
 SecLbl(setsCard, "📋  GESPEICHERTE SETS")
 
--- Feedback für Load
+-- ── Suchfeld (Sets) ──────────────────────────────────────────
+local setSearchOuter, setSearchBox = MkInput(setsCard, "🔍  Einheit suchen...")
+setSearchOuter.Size = UDim2.new(1,0,0,30)
+setSearchBox.ClearTextOnFocus = false
+
 local loadFeedback = MkLbl(setsCard,"",10,D.TextLow); loadFeedback.Size=UDim2.new(1,0,0,16)
 
 -- Scroll-Container
@@ -386,11 +410,14 @@ setsEmptyLbl.Size = UDim2.new(1,0,0,24)
 local _expanded = {}
 
 -- ── rebuildSetList ─────────────────────────────────────────
--- Baut die gesamte Set-Liste neu auf. Zeigt ALLE Einheiten mit
--- mindestens einem Set, gruppiert und einklappbar.
+-- filter (optional): wenn gesetzt, werden nur Einheiten angezeigt
+-- deren DisplayName den Begriff enthält (case-insensitive).
 local rebuildSetList  -- forward-declare
 
-rebuildSetList = function()
+rebuildSetList = function(filter)
+    filter = (filter or ""):lower():match("^%s*(.-)%s*$")  -- trimmen + lowercase
+    local useFilter = filter ~= ""
+
     -- Alte Einträge löschen
     for _, v in pairs(setListScroll:GetChildren()) do
         if v:IsA("Frame") then v:Destroy() end
@@ -413,8 +440,11 @@ rebuildSetList = function()
                 if folder then displayName = getDisplayName(folder.Name)
                 else displayName = "Tag:" .. tag end
             end
-            local setCount = 0; for _ in pairs(sets) do setCount = setCount + 1 end
-            table.insert(unitKeys, { tag=tag, displayName=displayName, setCount=setCount })
+            -- ★ Filter: nur Einheiten aufnehmen deren Name den Suchbegriff enthält
+            if not useFilter or displayName:lower():find(filter, 1, true) then
+                local setCount = 0; for _ in pairs(sets) do setCount = setCount + 1 end
+                table.insert(unitKeys, { tag=tag, displayName=displayName, setCount=setCount })
+            end
         end
     end
 
@@ -680,14 +710,26 @@ local function onUnitSelected(unitEntry)
     pcall(refreshGearView)
 end
 
-local function buildUnitList()
+local function buildUnitList(filter)
+    filter = (filter or ""):lower():match("^%s*(.-)%s*$")
+    local useFilter = filter ~= ""
+
     for _, v in pairs(unitListFrame:GetChildren()) do
         if v:IsA("Frame") then v:Destroy() end
     end
     local units = getAllUnits()
-    unitEmptyLbl.Visible = (#units == 0)
 
-    for _, unitEntry in ipairs(units) do
+    -- ★ Filtern: nur Einheiten anzeigen deren DisplayName den Begriff enthält
+    local filtered = {}
+    for _, u in ipairs(units) do
+        if not useFilter or u.displayName:lower():find(filter, 1, true) then
+            table.insert(filtered, u)
+        end
+    end
+
+    unitEmptyLbl.Visible = (#filtered == 0)
+
+    for _, unitEntry in ipairs(filtered) do
         local isSel  = (_selectedTag ~= nil and unitEntry.tag == _selectedTag)
         local hasTag = unitEntry.tag ~= ""
 
@@ -744,22 +786,32 @@ end
 scanBtn.MouseButton1Click:Connect(function()
     scanBtn.Text="⏳ Scanne..."; scanBtn.TextColor3=D.Yellow
     task.spawn(function()
-        pcall(buildUnitList)
+        pcall(function() buildUnitList(unitSearchBox.Text) end)
         local n = #getAllUnits()
         setStatus(string.format("✅ %d Einheiten gefunden.", n), D.Green)
         scanBtn.Text="🔍  Einheiten scannen"; scanBtn.TextColor3=D.CyanDim
     end)
 end)
 
+-- ★ Echtzeit-Suche: Einheiten-Liste beim Tippen filtern
+unitSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    pcall(function() buildUnitList(unitSearchBox.Text) end)
+end)
+
+-- ★ Echtzeit-Suche: Set-Liste beim Tippen filtern
+setSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    pcall(function() rebuildSetList(setSearchBox.Text) end)
+end)
+
 -- ════════════════════════════════════════════════════════════
 --  STARTUP
 -- ════════════════════════════════════════════════════════════
-loadFile()   -- Account-spezifische Datei laden
+-- (Datei wurde bereits oben via Früh-Load eingelesen)
 
 task.spawn(function()
     task.wait(0.5)
     pcall(buildUnitList)
-    pcall(rebuildSetList)  -- ★ Sets sofort anzeigen nach Datei-Load
+    pcall(rebuildSetList)  -- Sets sofort aus geladenem EquipSets anzeigen
     local n = #getAllUnits()
     local s = 0; for _ in pairs(EquipSets) do s = s + 1 end
     setStatus(string.format("✅ %d Einheiten | %d Einheiten mit Sets  |  Equip v%s", n, s, VERSION), D.Green)
