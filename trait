@@ -17,7 +17,7 @@
 --      (kein separates Scrollen nötig)
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "4.0.0"
+local VERSION = "4.1.0"
 
 -- ── Warten bis HazeShared bereit ──────────────────────────────
 local _w = 0
@@ -438,6 +438,84 @@ local function LooksLikeUnitInstance(obj)
     return false
 end
 
+
+-- ════════════════════════════════════════════════════════════
+--  DISPLAY-NAME HELPER  (RS.Shared.Info.Units)
+--
+--  Sucht den sauberen DisplayName für einen Ordnernamen aus der
+--  Collection. Unterstützt :Shiny und :Evo Suffixe.
+--  Fallback → interner Ordnername.
+-- ════════════════════════════════════════════════════════════
+local _unitsIndex       = nil
+local _unitsIndexLoaded = false
+
+local function _loadUnitsIndex()
+    if _unitsIndexLoaded then return end
+    _unitsIndexLoaded = true
+    pcall(function()
+        local shared = RS:WaitForChild("Shared", 5)
+        local info   = shared:WaitForChild("Info", 5)
+        local uMod   = info:WaitForChild("Units", 5)
+        _unitsIndex  = require(uMod)
+    end)
+    if not _unitsIndex then
+        warn("[HazeHub-Trait] UnitsIndex nicht geladen – Fallback auf Ordnernamen.")
+    end
+end
+
+-- Gibt den DisplayName für einen Ordnernamen zurück.
+-- Erkennt :Shiny und :Evo Suffixe und hängt sie lesbar an.
+local function getTraitDisplayName(folderName)
+    if not folderName or folderName == "" then return folderName or "?" end
+    if not _unitsIndexLoaded then _loadUnitsIndex() end
+
+    -- Suffix erkennen
+    local baseName  = folderName
+    local suffix    = ""
+    local lf        = folderName:lower()
+    if lf:sub(-6) == ":shiny" then
+        baseName = folderName:sub(1, -7)
+        suffix   = " ✨"
+    elseif lf:sub(-4) == ":evo" then
+        baseName = folderName:sub(1, -5)
+        -- Evo-Eintrag könnte direkt im Index stehen
+        if _unitsIndex then
+            local evoKey = folderName  -- z.B. "Kirito:Evo"
+            local evoEntry = _unitsIndex[evoKey]
+            if evoEntry and type(evoEntry) == "table" and evoEntry.DisplayName then
+                return tostring(evoEntry.DisplayName)
+            end
+        end
+        suffix = " (Evo)"
+    end
+
+    -- DisplayName aus UnitsIndex holen
+    if _unitsIndex then
+        local entry = _unitsIndex[baseName]
+        if entry then
+            if type(entry) == "table" and entry.DisplayName then
+                return tostring(entry.DisplayName) .. suffix
+            elseif type(entry) == "string" then
+                return entry .. suffix
+            end
+        end
+        -- Fallback: case-insensitiv suchen
+        local lower = baseName:lower()
+        for k, v in pairs(_unitsIndex) do
+            if tostring(k):lower() == lower then
+                if type(v) == "table" and v.DisplayName then
+                    return tostring(v.DisplayName) .. suffix
+                elseif type(v) == "string" then
+                    return v .. suffix
+                end
+            end
+        end
+    end
+
+    -- Absoluter Fallback: Ordnernamen direkt zurückgeben
+    return folderName
+end
+
 local function GetCollection()
     local collection=nil
     pcall(function()
@@ -450,6 +528,10 @@ local function ScanUnits()
     TR.Units={}
     local collection=GetCollection()
     if not collection then SetStatus("⚠ Collection nicht gefunden!",D.Orange); return false end
+
+    -- UnitsIndex vorab laden
+    if not _unitsIndexLoaded then _loadUnitsIndex() end
+
     local sourceList={}
     for _,unit in pairs(collection:GetChildren()) do
         if (unit:IsA("Folder") or unit:IsA("Model") or unit:IsA("Configuration"))
@@ -458,13 +540,20 @@ local function ScanUnits()
         end
     end
     SetStatus("✅ "..#sourceList.." Einheiten gefunden",D.Green)
-    local nameCount,nameSeen={},{}
-    for _,entry in ipairs(sourceList) do nameCount[entry.name]=(nameCount[entry.name] or 0)+1 end
+
+    -- DisplayName ermitteln + Duplikat-Zählung auf DisplayName-Basis
+    local displayCount,displaySeen={},{}
     for _,entry in ipairs(sourceList) do
-        local n=entry.name; nameSeen[n]=(nameSeen[n] or 0)+1
-        local displayName=n
-        if nameCount[n]>1 then displayName=n.." #"..nameSeen[n] end
-        table.insert(TR.Units,{instance=entry.instance,name=n,index=nameSeen[n],displayName=displayName})
+        local dn=getTraitDisplayName(entry.name)
+        displayCount[dn]=(displayCount[dn] or 0)+1
+    end
+    for _,entry in ipairs(sourceList) do
+        local n=entry.name
+        local dn=getTraitDisplayName(n)
+        displaySeen[dn]=(displaySeen[dn] or 0)+1
+        local finalDisplay=dn
+        if displayCount[dn]>1 then finalDisplay=dn.." #"..displaySeen[dn] end
+        table.insert(TR.Units,{instance=entry.instance,name=n,index=displaySeen[dn],displayName=finalDisplay})
     end
     table.sort(TR.Units,function(a,b) return a.displayName:lower()<b.displayName:lower() end)
     return #TR.Units>0
