@@ -1,5 +1,5 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – Equip.lua  v1.0.0
+--  HazeHUB – Equip.lua  v1.1.0
 --  Equipment-Sets pro Einheit (unabhängig vom Team-Modul)
 --
 --  Features:
@@ -10,7 +10,7 @@
 --    ✓ Pfade: dynamisch via LocalPlayer
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "1.0.0"
+local VERSION = "1.1.0"
 
 -- Auf HazeShared warten
 local waited = 0
@@ -34,6 +34,14 @@ local Pad      = HS.Pad;     local Corner  = HS.Corner
 local Stroke   = HS.Stroke
 local SaveConfig = HS.SaveConfig
 local Config   = HS.Config   -- direkte Referenz auf H.Config
+
+-- DisplayName-Helper (aus HazeShared, lazy geladen)
+local function getDisplayName(folderName)
+    if _G.HazeShared and type(_G.HazeShared.getDisplayName) == "function" then
+        return _G.HazeShared.getDisplayName(folderName)
+    end
+    return folderName or "?"
+end
 
 local EquipPage = HS.EquipPage
 local Player    = game:GetService("Players").LocalPlayer
@@ -86,7 +94,7 @@ local function readGearValue(unitFolder, gearKey)
     return (v ~= "" and v ~= "nil" and v ~= "0") and v or nil
 end
 
--- Alle Units aus Collection holen: { name, tag, instance }
+-- Alle Units aus Collection holen: { name, displayName, tag, instance }
 local function getAllUnits()
     local result = {}
     local ok, col = pcall(getCollection)
@@ -96,14 +104,15 @@ local function getAllUnits()
             local tagObj = folder:FindFirstChild("Tag")
             local tag    = tagObj and tostring(tagObj.Value) or ""
             table.insert(result, {
-                name     = folder.Name,
-                tag      = tag,
-                instance = folder,
+                name        = folder.Name,
+                displayName = getDisplayName(folder.Name),  -- ★ DisplayName via UnitsIndex
+                tag         = tag,
+                instance    = folder,
             })
         end
     end
-    -- Alphabetisch sortieren
-    table.sort(result, function(a, b) return a.name < b.name end)
+    -- Alphabetisch nach DisplayName sortieren
+    table.sort(result, function(a, b) return a.displayName < b.displayName end)
     return result
 end
 
@@ -527,14 +536,16 @@ _G._RebuildEquipSetList = rebuildSetList
 -- ════════════════════════════════════════════════════════════
 local function onUnitSelected(unitEntry)
     _selectedTag  = unitEntry.tag
-    _selectedName = unitEntry.name
+    _selectedName = unitEntry.displayName   -- ★ DisplayName für Anzeige
 
     -- Sektionen einblenden
     gearViewCard.Visible  = true
     saveSetCard.Visible   = true
     setsCard.Visible      = true
 
-    setStatus(string.format("Ausgewählt: %s  [#%s]", unitEntry.name, unitEntry.tag ~= "" and unitEntry.tag or "?"),
+    setStatus(string.format("Ausgewählt: %s  [#%s]",
+        unitEntry.displayName,
+        unitEntry.tag ~= "" and unitEntry.tag or "?"),
         D.Cyan)
 
     pcall(refreshGearView)
@@ -568,11 +579,11 @@ local function buildUnitList()
         stripe.BackgroundColor3 = hasTag and D.Green or D.Orange
         stripe.BackgroundTransparency = 0.3; stripe.BorderSizePixel = 0; Corner(stripe,3)
 
-        -- Name + [#Tag]
+        -- Name (DisplayName) + [#Tag]
         local nameLbl = Instance.new("TextLabel", row)
         nameLbl.Position = UDim2.new(0,10,0,3); nameLbl.Size = UDim2.new(1,-14,0,16)
         nameLbl.BackgroundTransparency = 1
-        nameLbl.Text = unitEntry.name
+        nameLbl.Text = unitEntry.displayName   -- ★ DisplayName statt folder.Name
         nameLbl.TextColor3 = isSelected and D.Cyan or D.TextHi
         nameLbl.TextSize = 12; nameLbl.Font = Enum.Font.GothamBold
         nameLbl.TextXAlignment = Enum.TextXAlignment.Left; nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
