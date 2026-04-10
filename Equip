@@ -759,6 +759,7 @@ loadFile()   -- Account-spezifische Datei laden
 task.spawn(function()
     task.wait(0.5)
     pcall(buildUnitList)
+    pcall(rebuildSetList)  -- ★ Sets sofort anzeigen nach Datei-Load
     local n = #getAllUnits()
     local s = 0; for _ in pairs(EquipSets) do s = s + 1 end
     setStatus(string.format("✅ %d Einheiten | %d Einheiten mit Sets  |  Equip v%s", n, s, VERSION), D.Green)
