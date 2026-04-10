@@ -40,7 +40,7 @@ local Http      = game:GetService("HttpService")
 --  Struktur:  { [unitTag] = { [setName] = { Gear..., UnitName, DisplayName } } }
 -- ════════════════════════════════════════════════════════════
 local FOLDER     = "HazeHUB"
-local EQUIP_FILE = FOLDER .. "/Equipment_" .. tostring(Player.UserId) .. ".json"
+local EQUIP_FILE = FOLDER .. "/" .. Player.Name .. "_Equip.json"
 
 if makefolder then pcall(function() makefolder(FOLDER) end) end
 
