@@ -1,15 +1,14 @@
 -- ╔══════════════════════════════════════════════════════════╗
---  HazeHUB – Equip.lua  v3.0.0
+--  HazeHUB – Equip.lua  v4.0.0
 --
---  NEU v3.0.0:
---    ✓ Stage Auto-Config: optionales Tagging beim Speichern
---    ✓ Stage-Filter: nur getaggte Sets anzeigen
---    ✓ Export: Set als kopierbaren Code (JSON+Base64)
---    ✓ Import: Code einfügen → Set direkt laden & speichern
---    ✓ Copy-Button pro Set-Eintrag (setclipboard)
+--  NEU v4.0.0:
+--    ✓ Auto-Optimize: bestes Gear aus Inventar per Attribut
+--    ✓ Items-Index: RS.Shared.Info.Items (Damage/Range/Speed/...)
+--    ✓ Heuristischer Slot-Match als Fallback (kein Index nötig)
+--    ✓ Vorschau vor dem Ausrüsten (2-Button Workflow)
 -- ╚══════════════════════════════════════════════════════════╝
 
-local VERSION = "3.0.0"
+local VERSION = "4.0.0"
 
 -- ── HazeShared warten ────────────────────────────────────────
 local _waited = 0
@@ -226,7 +225,7 @@ local function getUnitByTag(targetTag)
     return nil
 end
 
-local function readGearValue(unitFolder, gearKey)
+readGearValue = function(unitFolder, gearKey)
     local obj = unitFolder:FindFirstChild(gearKey)
     if not obj then return nil end
     local v = tostring(obj.Value)
@@ -287,7 +286,7 @@ local function getRemote(...)
     _remoteCache[key] = node; return node
 end
 
-local function fireUnequipGear(unitFolder, slotDef)
+fireUnequipGear = function(unitFolder, slotDef)
     if not unitFolder or not slotDef then return end
     if slotDef.remoteType == "Soul" then
         local r = getRemote("Remote","Server","Units","Soul"); if not r then return end
@@ -302,7 +301,7 @@ local function fireUnequipGear(unitFolder, slotDef)
     end
 end
 
-local function fireEquipGear(unitFolder, slotDef, itemName)
+fireEquipGear = function(unitFolder, slotDef, itemName)
     if not itemName or itemName == "" or not unitFolder then return end
     if slotDef.remoteType == "Soul" then
         local r = getRemote("Remote","Server","Units","Soul"); if not r then return end
@@ -349,13 +348,469 @@ local function applyEquipSet(unitTag, setData, onStatus)
 end
 
 -- ════════════════════════════════════════════════════════════
---  GUI
+--  ITEMS-INDEX  (RS.Shared.Info.Items)
+--  Lazy-geladen, einmalig gecacht.
+--  Struktur (dekompiliert): ItemsIndex[ItemName] = {
+--    GearType = "HeadGear"|"BodyGear"|"LegsGear"|"ArmsGear",
+--    Rarity   = "Common"|"Rare"|...,
+--    Stats    = { Damage=n, Range=n, Speed=n, ... }
+--  }
 -- ════════════════════════════════════════════════════════════
+local _itemsIndex       = nil
+local _itemsIndexLoaded = false
+
+local function loadItemsIndex()
+    if _itemsIndexLoaded then return end
+    _itemsIndexLoaded = true
+    pcall(function()
+        local shared = RS:WaitForChild("Shared",5)
+        local info   = shared:WaitForChild("Info",5)
+        local mod    = info:WaitForChild("Items",5)
+        _itemsIndex  = require(mod)
+    end)
+    if _itemsIndex then
+        print("[HazeHub/Equip] Items-Index geladen.")
+    else
+        warn("[HazeHub/Equip] Items-Index nicht verfügbar – Fallback auf Inventar-Namen.")
+    end
+end
+
+-- Gibt alle Stats-Keys eines Items zurück (aus Index oder leer)
+local function getItemStats(itemName)
+    if not _itemsIndex then return {} end
+    -- Direkte Suche
+    local entry = _itemsIndex[itemName]
+    if not entry then
+        -- Case-insensitiv
+        local low = itemName:lower()
+        for k, v in pairs(_itemsIndex) do
+            if tostring(k):lower() == low then entry = v; break end
+        end
+    end
+    if not entry then return {} end
+    -- Stats können in entry.Stats oder direkt in entry stehen
+    if type(entry.Stats) == "table" then return entry.Stats end
+    -- Fallback: alle numerischen Keys als Stats behandeln
+    local stats = {}
+    for k, v in pairs(entry) do
+        if type(v) == "number" then stats[k] = v end
+    end
+    return stats
+end
+
+-- Gibt den GearType eines Items zurück (HeadGear, BodyGear, ...)
+-- Fallback: nil (Item hat keinen Gear-Typ)
+local function getItemGearType(itemName)
+    if not _itemsIndex then return nil end
+    local entry = _itemsIndex[itemName]
+    if not entry then
+        local low = itemName:lower()
+        for k, v in pairs(_itemsIndex) do
+            if tostring(k):lower() == low then entry = v; break end
+        end
+    end
+    if not entry then return nil end
+    return entry.GearType or entry.Type or entry.Slot or nil
+end
+
+-- ════════════════════════════════════════════════════════════
+--  INVENTAR-SCANNER
+--  Liest RS.Player_Data[Player.Name].Items
+--  Gibt zurück: { [itemName] = amount }  (nur Items mit amount > 0)
+-- ════════════════════════════════════════════════════════════
+local function scanInventory()
+    local inv = {}
+    pcall(function()
+        local itemFolder = RS
+            :WaitForChild("Player_Data",5)
+            :WaitForChild(Player.Name,5)
+            :WaitForChild("Items",5)
+        for _, item in pairs(itemFolder:GetChildren()) do
+            local amt = 0
+            local vc  = item:FindFirstChild("Amount") or item:FindFirstChild("Value")
+            if vc then
+                amt = tonumber(vc.Value) or 0
+            elseif item:IsA("IntValue") or item:IsA("NumberValue") then
+                amt = tonumber(item.Value) or 0
+            end
+            if amt > 0 then inv[item.Name] = amt end
+        end
+    end)
+    return inv
+end
+
+-- ════════════════════════════════════════════════════════════
+--  OPTIMIERUNGS-ATTRIBUTE
+--  { id, label, keys[], higherIsBetter }
+--  keys[]: alle Stat-Schlüssel die für dieses Attribut zählen
+-- ════════════════════════════════════════════════════════════
+local OPT_ATTRS = {
+    { id="Damage",   label="⚔ Damage",   keys={"Damage","AttackDamage","BaseDamage","DMG"},      better=true  },
+    { id="Range",    label="🎯 Range",    keys={"Range","AttackRange","AtkRange"},                better=true  },
+    { id="Speed",    label="💨 Speed",    keys={"Speed","MoveSpeed","MovementSpeed","WalkSpeed"}, better=true  },
+    { id="Cooldown", label="⏱ Cooldown", keys={"AttackCooldown","Cooldown","AtkCooldown"},        better=false }, -- niedriger = besser
+    { id="HP",       label="❤ HP",       keys={"HP","Health","MaxHP","MaxHealth"},                better=true  },
+    { id="Defense",  label="🛡 Defense",  keys={"Defense","Armor","DEF","PhysicalDefense"},       better=true  },
+    { id="Soul",     label="🌟 Soul Pow", keys={"SoulPower","SoulDamage","SoulBonus"},             better=true  },
+}
+local _selectedAttr = OPT_ATTRS[1]  -- Standard: Damage
+
+-- Berechnet den Score eines Items für ein Attribut
+-- Gibt nil zurück wenn das Item keine relevanten Stats hat
+local function scoreItem(itemName, attrDef)
+    local stats = getItemStats(itemName)
+    if not next(stats) then return nil end
+    local total = 0
+    local found = false
+    for _, key in ipairs(attrDef.keys) do
+        local val = stats[key]
+        if not val then
+            -- Case-insensitiv suchen
+            local lk = key:lower()
+            for sk, sv in pairs(stats) do
+                if tostring(sk):lower() == lk then val=sv; break end
+            end
+        end
+        if type(val) == "number" then
+            total = total + math.abs(val)
+            found = true
+        end
+    end
+    if not found then return nil end
+    -- Für "niedriger=besser" Attribute (Cooldown): Kehrwert damit sort gleich bleibt
+    return attrDef.better and total or (1/(total+0.001))
+end
+
+-- ════════════════════════════════════════════════════════════
+--  KERN-OPTIMIZER
+--  Für jeden GEAR_SLOT: bestes Item aus Inventar finden.
+--  Gibt zurück: { [gearSlotKey] = { itemName, score, gearType } }
+-- ════════════════════════════════════════════════════════════
+local function runOptimize(attrDef)
+    loadItemsIndex()
+    local inv = scanInventory()
+    if not next(inv) then
+        return nil, "Inventar leer oder nicht erreichbar."
+    end
+
+    -- Slot-Key → Liste von { itemName, score }
+    local candidates = {}
+    for _, slot in ipairs(GEAR_SLOTS) do
+        candidates[slot.key] = {}
+    end
+
+    -- Fallback-Slot-Zuordnung (wenn GearType nicht aus Index ermittelbar)
+    -- Annahme aus Spielstruktur: Item-Namen oft mit Slot-Begriff
+    local slotHints = {
+        HeadGear = {"helm","hat","hood","crown","head","mask","cap","tiara"},
+        BodyGear = {"coat","armor","robe","shirt","chest","body","jacket","cloak","vest"},
+        LegsGear = {"boots","shoes","pants","legs","greaves","sandals","leggings"},
+        ArmsGear = {"gloves","gauntlet","arm","bracelet","wrist","sleeve","sword","weapon","blade","gun","staff","bow"},
+        Soul     = {"soul","spirit","essence","orb"},
+    }
+
+    local function guessSlot(name)
+        local low = name:lower()
+        for slotKey, hints in pairs(slotHints) do
+            for _, h in ipairs(hints) do
+                if low:find(h, 1, true) then return slotKey end
+            end
+        end
+        return nil
+    end
+
+    for itemName, _ in pairs(inv) do
+        local score = scoreItem(itemName, attrDef)
+        if score then
+            -- Slot bestimmen: Index zuerst, dann Heuristik
+            local gearType = getItemGearType(itemName)
+            if not gearType then gearType = guessSlot(itemName) end
+            if gearType and candidates[gearType] then
+                table.insert(candidates[gearType], { name=itemName, score=score })
+            end
+        end
+    end
+
+    -- Bestes Item pro Slot ermitteln
+    local best = {}
+    for slotKey, list in pairs(candidates) do
+        if #list > 0 then
+            table.sort(list, function(a,b) return a.score > b.score end)
+            best[slotKey] = list[1]
+        end
+    end
+
+    return best, nil
+end
+
+-- ════════════════════════════════════════════════════════════
+--  GUI  — beginnt hier
+-- ════════════════════════════════════════════════════════════
+-- Forward-Deklarationen (werden später definiert, aber oben referenziert)
+local refreshGearView   -- wird in Sektion 2 definiert
+local fireUnequipGear   -- wird in Remote-Helper definiert
+local fireEquipGear     -- wird in Remote-Helper definiert
+local readGearValue     -- wird in Collection-Helper definiert
 VList(EquipPage, 8)
 MkLbl(EquipPage, "⚙  Equipment Manager", 18, D.Cyan, true)
 MkLbl(EquipPage,
     string.format("v%s | %s  [ID: %s]", VERSION, Player.Name, tostring(Player.UserId)),
     11, D.TextLow).Size = UDim2.new(1,0,0,16)
+
+-- ════════════════════════════════════════════════════════════
+--  ★ AUTO-OPTIMIZE KARTE (ganz oben)
+-- ════════════════════════════════════════════════════════════
+local optCard = Card(EquipPage); Pad(optCard,10,12,12,12); VList(optCard,7)
+do
+    -- Gelber Highlight-Rahmen
+    Stroke(optCard, D.Yellow, 1.5, 0.25)
+    optCard.BackgroundColor3 = Color3.fromRGB(22,20,12)
+    optCard.BackgroundTransparency = 0.05
+
+    SecLbl(optCard, "⚡  AUTO-OPTIMIZE (Bestes Gear wählen)")
+
+    local optInfoLbl = MkLbl(optCard,
+        "Wähle ein Attribut → klicke Optimieren → das Script wählt " ..
+        "automatisch das beste Gear aus deinem Inventar.",
+        10, D.TextLow)
+    optInfoLbl.Size=UDim2.new(1,0,0,0); optInfoLbl.AutomaticSize=Enum.AutomaticSize.Y
+    optInfoLbl.TextWrapped=true
+
+    -- ── Attribut-Auswahl Buttons ─────────────────────────────
+    local attrScroll = Instance.new("ScrollingFrame", optCard)
+    attrScroll.Size=UDim2.new(1,0,0,34); attrScroll.CanvasSize=UDim2.new(0,0,0,0)
+    attrScroll.AutomaticCanvasSize=Enum.AutomaticSize.X
+    attrScroll.ScrollBarThickness=0; attrScroll.BackgroundTransparency=1
+    attrScroll.BorderSizePixel=0; attrScroll.ScrollingDirection=Enum.ScrollingDirection.X
+    local attrList = Instance.new("UIListLayout", attrScroll)
+    attrList.FillDirection=Enum.FillDirection.Horizontal
+    attrList.VerticalAlignment=Enum.VerticalAlignment.Center
+    attrList.Padding=UDim.new(0,5); attrList.SortOrder=Enum.SortOrder.LayoutOrder
+
+    local _attrBtns = {}
+    local function syncAttrBtns()
+        for _, info in ipairs(_attrBtns) do
+            local on = info.attr.id == _selectedAttr.id
+            Tw(info.btn, {
+                BackgroundColor3       = on and D.Yellow or D.CardHover,
+                BackgroundTransparency = on and 0.1 or 0.55,
+            })
+            info.btn.TextColor3 = on and D.BG or D.TextMid
+            local st = info.btn:FindFirstChildOfClass("UIStroke")
+            if st then st.Color = on and D.Yellow or D.Border end
+        end
+    end
+
+    for _, attr in ipairs(OPT_ATTRS) do
+        local btn = Instance.new("TextButton", attrScroll)
+        btn.Size=UDim2.new(0,0,1,0); btn.AutomaticSize=Enum.AutomaticSize.X
+        btn.BackgroundColor3=D.CardHover; btn.BackgroundTransparency=0.55
+        btn.Text=" " .. attr.label .. " "
+        btn.TextColor3=D.TextMid; btn.TextSize=11; btn.Font=Enum.Font.GothamBold
+        btn.AutoButtonColor=false; btn.BorderSizePixel=0
+        Corner(btn,6); Stroke(btn,D.Border,1,0.4)
+        local capAttr = attr
+        btn.MouseButton1Click:Connect(function()
+            _selectedAttr = capAttr
+            syncAttrBtns()
+        end)
+        table.insert(_attrBtns, { attr=attr, btn=btn })
+    end
+    syncAttrBtns()
+
+    -- ── Optimize Button + Ergebnis-Vorschau ──────────────────
+    local optBtnRow = Instance.new("Frame", optCard)
+    optBtnRow.Size=UDim2.new(1,0,0,34); optBtnRow.BackgroundTransparency=1; HList(optBtnRow,8)
+
+    local optRunBtn = Instance.new("TextButton", optBtnRow)
+    optRunBtn.Size=UDim2.new(0.48,0,1,0)
+    optRunBtn.BackgroundColor3=D.Yellow; optRunBtn.BackgroundTransparency=0.1
+    optRunBtn.Text="⚡  Optimieren"; optRunBtn.TextColor3=D.BG
+    optRunBtn.TextSize=13; optRunBtn.Font=Enum.Font.GothamBold
+    optRunBtn.AutoButtonColor=false; optRunBtn.BorderSizePixel=0
+    Corner(optRunBtn,8); Stroke(optRunBtn,D.Yellow,1,0.15)
+    optRunBtn.MouseEnter:Connect(function() Tw(optRunBtn,{BackgroundTransparency=0.0}) end)
+    optRunBtn.MouseLeave:Connect(function() Tw(optRunBtn,{BackgroundTransparency=0.1}) end)
+
+    local optEquipBtn = Instance.new("TextButton", optBtnRow)
+    optEquipBtn.Size=UDim2.new(0.48,0,1,0)
+    optEquipBtn.BackgroundColor3=D.Green; optEquipBtn.BackgroundTransparency=0.2
+    optEquipBtn.Text="🎯  Ausrüsten"; optEquipBtn.TextColor3=Color3.new(1,1,1)
+    optEquipBtn.TextSize=13; optEquipBtn.Font=Enum.Font.GothamBold
+    optEquipBtn.AutoButtonColor=false; optEquipBtn.BorderSizePixel=0
+    optEquipBtn.Active=false  -- erst nach Optimierung aktivierbar
+    Corner(optEquipBtn,8); Stroke(optEquipBtn,D.Border,1,0.5)
+    optEquipBtn.MouseEnter:Connect(function()
+        if optEquipBtn.Active then Tw(optEquipBtn,{BackgroundTransparency=0.05}) end
+    end)
+    optEquipBtn.MouseLeave:Connect(function()
+        if optEquipBtn.Active then Tw(optEquipBtn,{BackgroundTransparency=0.2}) end
+    end)
+
+    -- Ergebnis-Label
+    local optResultLbl = MkLbl(optCard,"",10,D.TextLow)
+    optResultLbl.Size=UDim2.new(1,0,0,0); optResultLbl.AutomaticSize=Enum.AutomaticSize.Y
+    optResultLbl.TextWrapped=true
+
+    -- Slot-Ergebnis Labels (5 Zeilen für Head/Body/Legs/Arms/Soul)
+    local optSlotFrame = Instance.new("Frame", optCard)
+    optSlotFrame.Size=UDim2.new(1,0,0,0); optSlotFrame.AutomaticSize=Enum.AutomaticSize.Y
+    optSlotFrame.BackgroundTransparency=1; VList(optSlotFrame,2)
+
+    local optSlotLabels = {}
+    for _, s in ipairs(GEAR_SLOTS) do
+        local row = Instance.new("Frame", optSlotFrame)
+        row.Size=UDim2.new(1,0,0,20); row.BackgroundColor3=D.CardHover
+        row.BackgroundTransparency=0.6; row.BorderSizePixel=0
+        Corner(row,4); Stroke(row,D.Border,1,0.6)
+
+        local badge = Instance.new("TextLabel", row)
+        badge.Size=UDim2.new(0,44,1,0); badge.BackgroundColor3=D.TabActive
+        badge.BackgroundTransparency=0.35; badge.Text=s.label
+        badge.TextColor3=D.CyanDim; badge.TextSize=9; badge.Font=Enum.Font.GothamBold
+        badge.TextXAlignment=Enum.TextXAlignment.Center; badge.BorderSizePixel=0; Corner(badge,4)
+
+        local val = Instance.new("TextLabel", row)
+        val.Position=UDim2.new(0,48,0,0); val.Size=UDim2.new(1,-52,1,0)
+        val.BackgroundTransparency=1; val.Text="—"
+        val.TextColor3=D.TextLow; val.TextSize=10; val.Font=Enum.Font.GothamMedium
+        val.TextXAlignment=Enum.TextXAlignment.Left; val.TextTruncate=Enum.TextTruncate.AtEnd
+        val.TextScaled=false; val.RichText=true; val.TextStrokeTransparency=1
+        optSlotLabels[s.key] = val
+    end
+
+    -- Gecachtes Ergebnis der letzten Optimierung
+    local _lastOptResult = nil
+
+    -- ── Optimieren-Button Logik ───────────────────────────────
+    optRunBtn.MouseButton1Click:Connect(function()
+        if not _selectedTag then
+            optResultLbl.Text="⚠ Erst eine Einheit auswählen!"; optResultLbl.TextColor3=D.Orange; return
+        end
+
+        optRunBtn.Text="⏳ Analysiere..."; optRunBtn.TextColor3=D.BG
+        optRunBtn.Active=false; optEquipBtn.Active=false
+        optResultLbl.Text="⏳ Scanne Inventar & Items..."; optResultLbl.TextColor3=D.Yellow
+        for _, s in ipairs(GEAR_SLOTS) do
+            optSlotLabels[s.key].Text="—"; optSlotLabels[s.key].TextColor3=D.TextLow
+        end
+
+        task.spawn(function()
+            local best, err = runOptimize(_selectedAttr)
+
+            if not best then
+                optResultLbl.Text="❌ " .. tostring(err); optResultLbl.TextColor3=D.Red
+                optRunBtn.Text="⚡  Optimieren"; optRunBtn.TextColor3=D.BG; optRunBtn.Active=true
+                return
+            end
+
+            local foundCount = 0
+            for k, _ in pairs(best) do foundCount = foundCount + 1 end
+
+            if foundCount == 0 then
+                -- Items-Index nicht geladen → Namen-Heuristik griff auch nicht
+                -- Zeige Inventar-Namen direkt an (ohne Stats-Filterung)
+                optResultLbl.Text="⚠ Keine Gear-Items mit '" .. _selectedAttr.label ..
+                    "'-Stats gefunden.\nItems-Modul evtl. nicht geladen.\n" ..
+                    "Inventar wird trotzdem angezeigt:"
+                optResultLbl.TextColor3=D.Orange
+
+                -- Inventar-Fallback: zeige alle Inventar-Items ohne Bewertung
+                local inv = scanInventory()
+                local allItems = {}
+                for name, _ in pairs(inv) do table.insert(allItems, name) end
+                table.sort(allItems)
+
+                -- Zeige die ersten 5 als Fallback
+                for i, s in ipairs(GEAR_SLOTS) do
+                    local item = allItems[i]
+                    if item then
+                        optSlotLabels[s.key].Text = item .. " (kein Score)"
+                        optSlotLabels[s.key].TextColor3 = D.TextMid
+                    end
+                end
+            else
+                _lastOptResult = best
+                optResultLbl.Text = string.format(
+                    "✅ %d/%d Slots optimiert für '%s'  (Attribut: %s)",
+                    foundCount, #GEAR_SLOTS, _selectedName or "?", _selectedAttr.label)
+                optResultLbl.TextColor3 = D.GreenBright
+
+                for _, s in ipairs(GEAR_SLOTS) do
+                    local info = best[s.key]
+                    if info then
+                        optSlotLabels[s.key].Text = info.name ..
+                            string.format("  [Score: %.1f]", info.score)
+                        optSlotLabels[s.key].TextColor3 = D.GreenBright
+                    else
+                        optSlotLabels[s.key].Text = "— kein Item gefunden"
+                        optSlotLabels[s.key].TextColor3 = D.TextLow
+                    end
+                end
+
+                -- Ausrüsten-Button aktivieren
+                Stroke(optEquipBtn,D.Green,1,0.2)
+                optEquipBtn.Active=true
+                optEquipBtn.TextColor3=Color3.new(1,1,1)
+            end
+
+            optRunBtn.Text="⚡  Optimieren"; optRunBtn.TextColor3=D.BG; optRunBtn.Active=true
+        end)
+    end)
+
+    -- ── Ausrüsten-Button Logik ────────────────────────────────
+    optEquipBtn.MouseButton1Click:Connect(function()
+        if not _lastOptResult or not _selectedTag then
+            return
+        end
+
+        optEquipBtn.Active=false
+        optResultLbl.Text="⚡ Rüste optimiertes Gear aus..."; optResultLbl.TextColor3=D.Yellow
+
+        task.spawn(function()
+            -- Aktuelles Gear zuerst entfernen
+            local unitFolder = getUnitByTag(_selectedTag)
+            if not unitFolder then
+                optResultLbl.Text="❌ Einheit nicht in Collection!"; optResultLbl.TextColor3=D.Red
+                optEquipBtn.Active=true; return
+            end
+
+            -- Unequip bestehende Slots
+            for _, s in ipairs(GEAR_SLOTS) do
+                if _lastOptResult[s.key] then  -- nur Slots die wir überschreiben
+                    if readGearValue(unitFolder, s.key) then
+                        fireUnequipGear(unitFolder, s); task.wait(0.05)
+                    end
+                end
+            end
+            task.wait(0.2)
+
+            -- Equip neue Items
+            local equipped = 0
+            for _, s in ipairs(GEAR_SLOTS) do
+                local info = _lastOptResult[s.key]
+                if info then
+                    local fresh = getUnitByTag(_selectedTag)
+                    if fresh then
+                        fireEquipGear(fresh, s, info.name)
+                        equipped = equipped + 1
+                        task.wait(0.08)
+                    end
+                end
+            end
+
+            optResultLbl.Text = string.format(
+                "✅ %d Slots ausgerüstet! (Attribut: %s)", equipped, _selectedAttr.label)
+            optResultLbl.TextColor3 = D.GreenBright
+
+            -- Live-Gear aktualisieren
+            task.wait(0.3)
+            pcall(refreshGearView)
+
+            optEquipBtn.Active=true
+        end)
+    end)
+end  -- Ende Auto-Optimize Block
 
 -- Status
 local eqStatusCard = Card(EquipPage, 26); Pad(eqStatusCard,4,10,4,10)
@@ -428,7 +883,7 @@ end
 
 local refreshGearBtn = NeonBtn(gearCard, "🔄  Gear aktualisieren", D.CyanDim, 28)
 
-local function refreshGearView()
+refreshGearView = function()
     if not _selectedTag then return end
     local folder = getUnitByTag(_selectedTag)
     if not folder then
